@@ -1,0 +1,10 @@
+(node:29744) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[sched] handleSessionEvent structured task=3e4a8942 session=b161a7da
+[sched] handleSessionEvent structured task=b52224a6 session=ec19b576
+[Error: EBUSY: resource busy or locked, unlink 'C:\Users\LGSM228\AppData\Local\Temp\chef-golden-project-mGYIld\chef.sqlite'] {
+  errno: -4082,
+  code: 'EBUSY',
+  syscall: 'unlink',
+  path: 'C:\\Users\\LGSM228\\AppData\\Local\\Temp\\chef-golden-project-mGYIld\\chef.sqlite'
+}
