@@ -3,7 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=24.0.0" },
+  "engines": {
+    "node": ">=24.0.0"
+  },
   "scripts": {
     "server": "node --experimental-strip-types src/server/index.ts",
     "test": "node --experimental-strip-types tests/golden-path.ts && node --experimental-strip-types tests/timeout-cancellation.ts && node --experimental-strip-types tests/seq-concurrency.ts && node --experimental-strip-types tests/cancel-facade.ts && node --experimental-strip-types tests/dispatch-concurrency.ts && node --experimental-strip-types tests/plan-persistence.ts && node --experimental-strip-types tests/pty-replay.ts && node --experimental-strip-types tests/live-events.ts && node --experimental-strip-types tests/live-events-failure.ts && node --experimental-strip-types tests/direct-worker-interaction.ts && node --experimental-strip-types tests/approvals.ts && node --experimental-strip-types tests/canvas-graph.ts && node --experimental-strip-types tests/http-server.ts",
