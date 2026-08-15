@@ -171,3 +171,14 @@ CREATE TABLE IF NOT EXISTS plans (
   updated_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_plans_workspace ON plans(workspace_id);
+CREATE TABLE IF NOT EXISTS templates (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  nodes_json TEXT NOT NULL DEFAULT '[]',
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_templates_workspace ON templates(workspace_id);
