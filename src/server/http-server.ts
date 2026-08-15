@@ -93,6 +93,16 @@ export function createHttpServer(runtime: ChefRuntime): Server {
         sendJson(res, 200, { ok: true });
         return;
       }
+      const approvalMatch = path.match(/^\/api\/approvals\/([^/]+)\/(accept|reject)$/);
+      if (req.method === "POST" && approvalMatch) {
+        const [, approvalId, decision] = approvalMatch;
+        const body = (await readBody(req)) as { approver?: string };
+        const approver = typeof body.approver === "string" && body.approver.length > 0 ? body.approver : "ui";
+        await runtime.resolveApproval(approvalId, decision, approver);
+        sendJson(res, 200, { ok: true });
+        return;
+      }
+
 
       sendJson(res, 404, { error: `not found: ${req.method} ${path}` });
     } catch (error) {

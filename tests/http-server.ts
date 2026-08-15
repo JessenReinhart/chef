@@ -41,6 +41,22 @@ try {
   });
   assert.equal(badSend.status, 400, "invalid send body must 400");
 
+  const approval = (snapshot as { approvals?: unknown[] }).approvals?.[0];
+  if (approval) {
+    const approveRes = await fetch(`${base}/api/approvals/${(approval as { id: string }).id}/accept`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ approver: "tester" }),
+    });
+    assert.equal(approveRes.status, 200, "approval accept must return 200");
+  }
+  const missingApproval = await fetch(`${base}/api/approvals/nope/reject`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  assert.equal(missingApproval.status, 500, "unknown approval must 500");
+
   await new Promise<void>((resolve) => server.close(() => resolve()));
   await chef.close();
   console.log("http-server: ok — state and SSE projection endpoints live");

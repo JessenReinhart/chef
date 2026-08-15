@@ -300,6 +300,15 @@ export class Orchestrator {
           await this.#materializeContexts(workspaceId, [...created.values()]);
           await this.#consumeSessions(workspaceId, [...created.keys()], signal);
         }
+        // A batch task still pending/assigned/blocked after dispatch is held
+        // behind a human approval gate (spec §11.3): wait for resolution.
+        const held = batchTaskIds.filter((id) => {
+          const task = this.#repository.getTask(id);
+          return task && task.approvalId !== undefined;
+        });
+        for (const id of held) {
+          await this.#awaitApproval(workspaceId, id, signal);
+        }
         for (const id of batchTaskIds) {
           if (signal.aborted) return;
           const task = this.#repository.getTask(id)!;
@@ -360,19 +369,34 @@ export class Orchestrator {
 
   #createPlanTask(workspaceId: WorkspaceId, _plan: Plan, pt: PlanTask, refs: ContextReference[]): Task {
     if (pt.assignedTo) this.#ensureWorker(pt.assignedTo, workspaceId);
-    const task = this.#repository.createTask({
-      id: pt.id,
-      workspaceId,
-      title: pt.title,
-      description: pt.description,
-      status: "pending",
-      assignedTo: pt.assignedTo,
-      dependencies: pt.dependencies,
-      contextRefs: refs,
-      priority: pt.priority,
+    return this.#repository.transaction(() => {
+      if (pt.approvalId) {
+        // The approval row must exist before the task references it
+        // (tasks.approval_id FK is immediate; approvals.task_id is deferred).
+        this.#repository.insertApproval({
+          id: pt.approvalId,
+          workspaceId,
+          taskId: pt.id,
+          status: "pending",
+          requester: pt.assignedTo ?? "orchestrator",
+          reason: `Task ${pt.title} requires human approval`,
+        });
+      }
+      const task = this.#repository.createTask({
+        id: pt.id,
+        workspaceId,
+        title: pt.title,
+        description: pt.description,
+        status: "pending",
+        assignedTo: pt.assignedTo,
+        dependencies: pt.dependencies,
+        contextRefs: refs,
+        priority: pt.priority,
+        approvalId: pt.approvalId,
+      });
+      this.#appendEvent(workspaceId, { type: "orchestrator.task.created", payload: { taskId: task.id, assignedTo: task.assignedTo }, taskId: task.id });
+      return task;
     });
-    this.#appendEvent(workspaceId, { type: "orchestrator.task.created", payload: { taskId: task.id, assignedTo: task.assignedTo }, taskId: task.id });
-    return task;
   }
 
   #ensureWorker(agentId: AgentId, workspaceId: WorkspaceId): void {
@@ -397,6 +421,29 @@ export class Orchestrator {
       if (task.contextRefs.length === 0) continue;
       const session = snapshot.sessions.find((s) => s.taskId === task.id && (s.status === "spawning" || s.status === "running"));
       if (session) await this.#context.materialize(session.id, task.contextRefs, workspaceId);
+    }
+  }
+
+  /**
+   * Wait for a human to resolve the approval gate guarding `taskId`
+   * (spec §11.3), then re-dispatch. Rejection leaves the task cancelled;
+   * acceptance resumes execution. Abort propagates on timeout/cancel.
+   */
+  async #awaitApproval(workspaceId: WorkspaceId, taskId: TaskId, signal: AbortSignal): Promise<void> {
+    let task = this.#repository.getTask(taskId)!;
+    while (task.status !== "completed" && task.status !== "failed" && task.status !== "cancelled") {
+      if (signal.aborted) return;
+      if (task.status === "running") {
+        await this.#consumeSessions(workspaceId, [taskId], signal);
+      } else {
+        await this.#sleep(SLEEP_STEP_MS);
+        const snapshot = this.#repository.getWorkspaceSnapshot(workspaceId);
+        const approval = snapshot.approvals.find((a) => a.id === task.approvalId);
+        if (approval && approval.status !== "pending") {
+          await this.#runtime.dispatchPending(workspaceId);
+        }
+      }
+      task = this.#repository.getTask(taskId)!;
     }
   }
   async #consumeSessions(workspaceId: WorkspaceId, taskIds: TaskId[], signal: AbortSignal): Promise<void> {

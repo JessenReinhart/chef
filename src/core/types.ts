@@ -21,12 +21,15 @@ export type AgentId = string;
 
 export type WorkspaceId = string;
 export type TaskId = string;
+export type ApprovalId = string;
 export type SessionId = string;
 export type ArtifactId = string;
 export type MessageId = string;
 export type EventId = string;
 export type PlanId = string;
 export type ChannelId = string;
+export type { Approval, ApprovalDecision, ApprovalStatus } from "./approvals.ts";
+
 export type HarnessId = string;
 
 /** Epoch milliseconds. */
@@ -129,6 +132,7 @@ export interface Task {
   contextRefs: ContextReference[];
   priority: number;
   workflowNodeId?: string;
+  approvalId?: ApprovalId;
   retryCount: number;
   error?: string;
   resultSummary?: string;
@@ -294,6 +298,8 @@ export interface PlanTask {
   dependencies: string[];
   priority: number;
   assignedTo?: AgentId;
+  /** Durable approval request id: the task holds until the human resolves it. */
+  approvalId?: ApprovalId;
 }
 
 export interface Plan {
@@ -326,5 +332,6 @@ export interface WorkspaceSnapshot {
   decisions: Decision[];
   events: RuntimeEvent[];
   plans: Plan[];
+  approvals: Approval[];
   generatedAt: Timestamp;
 }

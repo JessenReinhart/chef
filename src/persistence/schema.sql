@@ -69,6 +69,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   status TEXT NOT NULL,
   assigned_to TEXT,
   parent_task_id TEXT,
+  approval_id TEXT REFERENCES approvals(id) ON DELETE SET NULL,
   context_refs_json TEXT NOT NULL DEFAULT '[]',
   priority INTEGER NOT NULL DEFAULT 0,
   workflow_node_id TEXT,
@@ -79,6 +80,22 @@ CREATE TABLE IF NOT EXISTS tasks (
   updated_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_tasks_workspace ON tasks(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_approval ON tasks(approval_id);
+
+CREATE TABLE IF NOT EXISTS approvals (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED,
+  status TEXT NOT NULL CHECK (status IN ('pending', 'accepted', 'rejected')),
+  requester TEXT NOT NULL,
+  approver TEXT,
+  reason TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  resolved_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_approvals_workspace ON approvals(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_approvals_task ON approvals(task_id);
+CREATE INDEX IF NOT EXISTS idx_approvals_status ON approvals(status);
 
 CREATE TABLE IF NOT EXISTS task_dependencies (
   task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,

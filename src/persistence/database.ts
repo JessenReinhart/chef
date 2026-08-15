@@ -21,6 +21,9 @@ import { randomUUID } from "node:crypto";
 import type {
   AgentMessage,
   AgentMessageType,
+  Approval,
+  ApprovalDecision,
+  ApprovalStatus,
   Artifact,
   ArtifactType,
   ContextReference,
@@ -132,6 +135,7 @@ export interface TaskInput {
   status: TaskStatus;
   assignedTo?: EntityId;
   parentTaskId?: TaskId;
+  approvalId?: string;
   dependencies?: TaskId[];
   contextRefs?: ContextReference[];
   priority?: number;
@@ -141,6 +145,18 @@ export interface TaskInput {
   resultSummary?: string;
   createdAt?: Timestamp;
   updatedAt?: Timestamp;
+}
+
+export interface ApprovalInput {
+  id?: string;
+  workspaceId: WorkspaceId;
+  taskId: TaskId;
+  status: ApprovalStatus;
+  requester: string;
+  approver?: string;
+  reason: string;
+  createdAt?: Timestamp;
+  resolvedAt?: Timestamp;
 }
 
 export interface SessionInput {
@@ -292,6 +308,7 @@ function mapTask(row: Row): Task {
     status: row.status as TaskStatus,
     assignedTo: (row.assigned_to as string | null) ?? undefined,
     parentTaskId: (row.parent_task_id as string | null) ?? undefined,
+    approvalId: (row.approval_id as string | null) ?? undefined,
     dependencies: [], // resolved relationally by callers (getTask, snapshot)
     contextRefs: readJson(row.context_refs_json as string, [] as ContextReference[]),
     priority: row.priority as number,
@@ -301,6 +318,20 @@ function mapTask(row: Row): Task {
     resultSummary: (row.result_summary as string | null) ?? undefined,
     createdAt: row.created_at as number,
     updatedAt: row.updated_at as number,
+  };
+}
+
+function mapApproval(row: Row): Approval {
+  return {
+    id: row.id as string,
+    workspaceId: row.workspace_id as string,
+    taskId: row.task_id as string,
+    status: row.status as ApprovalStatus,
+    requester: row.requester as string,
+    approver: (row.approver as string | null) ?? undefined,
+    reason: row.reason as string,
+    createdAt: row.created_at as number,
+    resolvedAt: (row.resolved_at as number | null) ?? undefined,
   };
 }
 
@@ -618,6 +649,10 @@ export class Repository {
       const plans = (
         this.db.prepare(`SELECT * FROM plans WHERE workspace_id = ? ORDER BY created_at, id`).all(workspaceId) as Row[]
       ).map(mapPlan);
+      const approvals = (
+        this.db.prepare(`SELECT * FROM approvals WHERE workspace_id = ? ORDER BY created_at, id`).all(workspaceId) as Row[]
+      ).map(mapApproval);
+
 
       const snapshot = {
         workspaceId,
@@ -627,6 +662,7 @@ export class Repository {
         decisions,
         events,
         plans,
+        approvals,
         generatedAt: now(),
       };
       this.db.exec("COMMIT");
@@ -650,9 +686,9 @@ export class Repository {
       .prepare(
         `INSERT INTO tasks (
            id, workspace_id, title, description, status, assigned_to, parent_task_id,
-           context_refs_json, priority, workflow_node_id, retry_count, error,
+           approval_id, context_refs_json, priority, workflow_node_id, retry_count, error,
            result_summary, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         id,
@@ -662,6 +698,7 @@ export class Repository {
         input.status,
         input.assignedTo ?? null,
         input.parentTaskId ?? null,
+        input.approvalId ?? null,
         toJson(input.contextRefs ?? []),
         input.priority ?? 0,
         input.workflowNodeId ?? null,
@@ -699,6 +736,7 @@ export class Repository {
       parentTaskId: patch.parentTaskId !== undefined ? patch.parentTaskId : current.parentTaskId,
       priority: patch.priority ?? current.priority,
       workflowNodeId: patch.workflowNodeId !== undefined ? patch.workflowNodeId : current.workflowNodeId,
+      approvalId: patch.approvalId !== undefined ? patch.approvalId : current.approvalId,
       retryCount: patch.retryCount ?? current.retryCount,
       error: patch.error !== undefined ? patch.error : current.error,
       resultSummary: patch.resultSummary !== undefined ? patch.resultSummary : current.resultSummary,
@@ -708,7 +746,7 @@ export class Repository {
     this.db
       .prepare(
         `UPDATE tasks SET
-           title = ?, description = ?, status = ?, assigned_to = ?, parent_task_id = ?,
+           title = ?, description = ?, status = ?, assigned_to = ?, parent_task_id = ?, approval_id = ?,
            priority = ?, workflow_node_id = ?, retry_count = ?, error = ?,
            result_summary = ?, updated_at = ?
          WHERE id = ?`,
@@ -719,6 +757,7 @@ export class Repository {
         next.status,
         next.assignedTo ?? null,
         next.parentTaskId ?? null,
+        next.approvalId ?? null,
         next.priority,
         next.workflowNodeId ?? null,
         next.retryCount,
@@ -783,6 +822,63 @@ export class Repository {
       .prepare(`UPDATE tasks SET status = ?, updated_at = ? WHERE id = ? AND status = ?`)
       .run(status, now(), id, expectedStatus);
     return result.changes > 0;
+  }
+
+  // -------------------------------------------------------------------------
+  // Approvals
+  // -------------------------------------------------------------------------
+
+  insertApproval(input: ApprovalInput): Approval {
+    const id = input.id ?? randomUUID();
+    const createdAt = input.createdAt ?? now();
+    this.db
+      .prepare(
+        `INSERT INTO approvals (
+           id, workspace_id, task_id, status, requester, approver, reason,
+           created_at, resolved_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        id,
+        input.workspaceId,
+        input.taskId,
+        input.status,
+        input.requester,
+        input.approver ?? null,
+        input.reason,
+        createdAt,
+        input.resolvedAt ?? null,
+      );
+    return this.getApproval(id)!;
+  }
+
+  getApproval(id: string): Approval | null {
+    const row = this.db.prepare(`SELECT * FROM approvals WHERE id = ?`).get(id) as Row | undefined;
+    return row ? mapApproval(row) : null;
+  }
+
+  listApprovals(workspaceId: WorkspaceId): Approval[] {
+    return (
+      this.db.prepare(`SELECT * FROM approvals WHERE workspace_id = ? ORDER BY created_at, id`).all(workspaceId) as Row[]
+    ).map(mapApproval);
+  }
+
+  /** Resolve a pending approval; re-resolving an already-resolved approval is a no-op. */
+  resolveApproval(id: string, decision: ApprovalDecision, approver: string): Approval {
+    const current = this.getApproval(id);
+    if (!current) {
+      throw new Error(`Approval not found: ${id}`);
+    }
+    if (current.status !== "pending") {
+      return current;
+    }
+    const resolvedAt = now();
+    this.db
+      .prepare(
+        `UPDATE approvals SET status = ?, approver = ?, resolved_at = ? WHERE id = ? AND status = 'pending'`,
+      )
+      .run(decision, approver, resolvedAt, id);
+    return this.getApproval(id)!;
   }
 
   // -------------------------------------------------------------------------
