@@ -87,6 +87,55 @@ export function createHttpServer(runtime: ChefRuntime): Server {
         return;
       }
 
+      // ============================================================
+      // Chat endpoints (Chat with Chef — SSE streaming)
+      // ============================================================
+      if (req.method === "GET" && path === "/api/chat/messages") {
+        const messages = runtime.repository.listMessages(runtime.workspaceId, "chat");
+        sendJson(res, 200, { ok: true, data: messages });
+        return;
+      }
+
+      if (req.method === "POST" && path === "/api/chat") {
+        const body = (await readBody(req)) as { message?: string };
+        if (typeof body.message !== "string" || body.message.length === 0) {
+          sendJson(res, 400, { error: "message is required" });
+          return;
+        }
+        const result = await runtime.sendChatMessage(body.message);
+        sendJson(res, 200, { ok: result.ok, data: result });
+        return;
+      }
+
+      if (req.method === "GET" && path === "/api/chat/stream") {
+        const afterSeqParam = url.searchParams.get("afterSeq");
+        const afterSeq = afterSeqParam ? Number(afterSeqParam) : undefined;
+
+        res.writeHead(200, SSE_HEADERS);
+        res.write("retry: 1000\n\n");
+
+        // Replay buffered chat events since afterSeq first (restart-safe catch-up).
+        if (afterSeq !== undefined && Number.isFinite(afterSeq)) {
+          for (const event of runtime.repository.listEvents(runtime.workspaceId, { afterSeq })) {
+            if (event.type.startsWith("chat.")) {
+              res.write(`data: ${JSON.stringify(event)}\n\n`);
+            }
+          }
+        }
+
+        const unsubscribe = runtime.subscribeEvents((event: RuntimeEvent) => {
+          if (!event.type.startsWith("chat.")) return;
+          res.write(`data: ${JSON.stringify(event)}\n\n`);
+        });
+        const heartbeat = setInterval(() => {
+          res.write(": ping\n\n");
+        }, 15_000);
+        req.on("close", () => {
+          clearInterval(heartbeat);
+          unsubscribe();
+        });
+        return;
+      }
       if (req.method === "POST" && path === "/api/sessions/send") {
         const body = (await readBody(req)) as { sessionId?: string; data?: string };
         if (typeof body.sessionId !== "string" || typeof body.data !== "string") {

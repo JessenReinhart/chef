@@ -245,6 +245,84 @@ export class Orchestrator {
     });
     return { workspaceId, taskIds: plan.taskIds, report, ok };
   }
+  /** Chat-specific entry: same plan pipeline as handleUserMessage, but with
+   *  chat.* SSE events for the Console chat tab. */
+  async handleChatMessage(workspaceId: WorkspaceId, message: string): Promise<OrchestratorResult> {
+    this.#repository.insertMessage({
+      workspaceId,
+      from: "user",
+      to: "assistant",
+      channel: "chat",
+      type: "message",
+      payload: { content: message },
+    });
+    this.#appendEvent(workspaceId, { type: "chat.user", payload: { content: message } });
+
+    let plan: Plan | null = null;
+    try {
+      plan = await this.#decisionProvider.proposePlan({ workspaceId, goal: message });
+    } catch (error) {
+      const err = error instanceof Error ? error.message : String(error);
+      this.#appendEvent(workspaceId, { type: "chat.plan.error", payload: { error: err, goal: message } });
+      return { workspaceId, taskIds: [], report: `Plan proposal failed: ${err}`, ok: false };
+    }
+    if (!plan) {
+      this.#appendEvent(workspaceId, { type: "chat.plan.none", payload: { goal: message } });
+      return { workspaceId, taskIds: [], report: `No plan proposed for: ${message}`, ok: false };
+    }
+
+    this.#repository.insertPlan({
+      id: plan.id,
+      workspaceId,
+      goal: plan.goal,
+      status: "proposed",
+      tasks: plan.tasks,
+      taskIds: plan.taskIds,
+      createdAt: plan.createdAt,
+    });
+    this.#appendEvent(workspaceId, {
+      type: "chat.plan.proposed",
+      payload: { planId: plan.id, goal: plan.goal, taskIds: plan.taskIds, taskCount: plan.tasks.length },
+    });
+
+    // Validate the graph patch proposal through the node execution engine
+    // before it can be applied (spec §12). Invalid proposals are reported
+    // back to the user rather than silently applied.
+    const controller = new AbortController();
+    let executionError: string | undefined;
+    try {
+      await this.#withTimeout(this.#executePlan(workspaceId, plan, controller.signal), `plan ${plan.id}`, controller);
+      this.#appendEvent(workspaceId, { type: "chat.plan.applied", payload: { planId: plan.id, status: "completed" } });
+    } catch (error) {
+      executionError = error instanceof Error ? error.message : String(error);
+      this.#appendEvent(workspaceId, { type: "chat.plan.applied", payload: { planId: plan.id, status: "failed", error: executionError } });
+    }
+    const finalStatus = executionError ? "failed" : "completed";
+    plan.status = finalStatus;
+    this.#repository.updatePlanStatus(plan.id, finalStatus);
+
+    const snapshot = this.#repository.getWorkspaceSnapshot(workspaceId);
+    const tasks = snapshot.tasks.filter((t) => plan.taskIds.includes(t.id));
+    const artifacts = snapshot.artifacts.filter((a) => a.taskId !== undefined && plan.taskIds.includes(a.taskId));
+    const failed = tasks.some((t) => t.status === "failed" || t.status === "cancelled");
+    const ok = !executionError && !failed;
+    const report = this.#buildReport(plan, tasks, artifacts, executionError);
+    const artifactIds = artifacts.map((a) => a.id);
+
+    this.#repository.insertMessage({
+      workspaceId,
+      from: "assistant",
+      to: "user",
+      channel: "chat",
+      type: "result",
+      payload: { content: report, planId: plan.id, taskIds: plan.taskIds, artifactIds },
+    });
+    this.#appendEvent(workspaceId, {
+      type: "chat.assistant",
+      payload: { content: report, planId: plan.id, ok, taskIds: plan.taskIds },
+    });
+    return { workspaceId, taskIds: plan.taskIds, report, ok };
+  }
 
   async inspectState(workspaceId: WorkspaceId): Promise<WorkspaceSnapshot> {
     return this.#repository.getWorkspaceSnapshot(workspaceId);
