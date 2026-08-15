@@ -322,29 +322,126 @@ export function createHttpServer(runtime: ChefRuntime): Server {
         return;
       }
 
+      const nodeRetryMatch = path.match(/^\/api\/nodes\/([^/]+)\/retry$/);
+      if (req.method === "POST" && nodeRetryMatch) {
+        const [, taskId] = nodeRetryMatch;
+        await runtime.retryTask(taskId);
+        sendJson(res, 200, { ok: true });
+        return;
+      }
+
       // ============================================================
       // Tool endpoints
       // ============================================================
       if (req.method === "GET" && path === "/api/tools") {
-        const tools = [
-          { type: "code_exec", description: "Execute code in a sandbox", params: { language: "string", code: "string" } },
-          { type: "file_read", description: "Read a file", params: { path: "string" } },
-          { type: "file_write", description: "Write a file", params: { path: "string", content: "string" } },
-          { type: "web_search", description: "Search the web", params: { query: "string", limit: "number" } },
-          { type: "fetch", description: "Fetch a URL", params: { url: "string" } },
-          { type: "bash", description: "Run a shell command", params: { command: "string", cwd: "string" } },
-        ];
+        const tools: Array<{ type: string; description: string; params: Record<string, string>; capability: string }> = [];
+        if (runtime.toolRunner) {
+          tools.push(...runtime.toolRunner.listTools().map((t) => ({ type: t.type, description: t.description, params: t.params, capability: t.capability })));
+        } else {
+          tools.push(
+            { type: "bash", description: "Run a shell command", params: { command: "string", cwd: "string", timeoutMs: "number" }, capability: "terminal" },
+            { type: "file_read", description: "Read a file", params: { path: "string" }, capability: "filesystem" },
+            { type: "file_write", description: "Write a file", params: { path: "string", content: "string" }, capability: "filesystem" },
+            { type: "file_list", description: "List a directory", params: { path: "string" }, capability: "filesystem" },
+            { type: "git", description: "Git operations (status/diff/commit/branch/log/push)", params: { operation: "string", message: "string", paths: "string[]" }, capability: "git" },
+          );
+        }
         sendJson(res, 200, { ok: true, data: tools });
         return;
       }
 
       if (req.method === "POST" && path === "/api/tools/execute") {
-        const body = (await readBody(req)) as { type?: string; params?: Record<string, unknown> };
-        if (typeof body.type !== "string" || body.type.length === 0) {
-          sendJson(res, 400, { error: "type is required" });
+        const body = (await readBody(req)) as {
+          tool?: string;
+          config?: Record<string, unknown>;
+          input?: Record<string, unknown>;
+          permissions?: Record<string, unknown>;
+        };
+        if (typeof body.tool !== "string" || body.tool.length === 0) {
+          sendJson(res, 400, { error: "tool is required" });
           return;
         }
-        sendJson(res, 501, { error: "tool execution not implemented — no tool runner registered" });
+        if (!runtime.toolRunner) {
+          sendJson(res, 501, { error: "tool execution not available — no tool runner registered" });
+          return;
+        }
+        const result = await runtime.toolRunner.execute({
+          tool: body.tool,
+          config: body.config,
+          input: body.input,
+          permissions: body.permissions as Record<string, "allow" | "deny" | "approval"> | undefined,
+        });
+        sendJson(res, result.ok ? 200 : 400, {
+          ok: result.ok,
+          output: result.output,
+          artifact: result.artifact,
+          status: result.status,
+          durationMs: result.durationMs,
+          approvalId: result.approvalId,
+        });
+        return;
+      }
+
+      const approvalResolveMatch = path.match(/^\/api\/tools\/approvals\/([^/]+)\/(accept|reject)$/);
+      if (req.method === "POST" && approvalResolveMatch) {
+        const [, approvalId, decision] = approvalResolveMatch;
+        if (!runtime.toolRunner) {
+          sendJson(res, 501, { error: "tool execution not available — no tool runner registered" });
+          return;
+        }
+        const resolved = runtime.toolRunner.resolveApproval(approvalId, decision === "accept" ? "accepted" : "rejected");
+        sendJson(res, resolved ? 200 : 404, { ok: resolved });
+        return;
+      }
+
+      const browserSessionMatch = path.match(/^\/api\/browser\/([^/]+)$/);
+      if (req.method === "GET" && browserSessionMatch) {
+        const [, sessionId] = browserSessionMatch;
+        if (!runtime.browserTool) {
+          sendJson(res, 501, { error: "browser tool not available — Playwright not installed" });
+          return;
+        }
+        const session = runtime.browserTool.getSession(sessionId);
+        if (!session) {
+          sendJson(res, 404, { error: `browser session not found: ${sessionId}` });
+          return;
+        }
+        sendJson(res, 200, { ok: true, data: { id: session.id, createdAt: session.createdAt } });
+        return;
+      }
+
+      const browserActionMatch = path.match(/^\/api\/browser\/([^/]+)\/action$/);
+      if (req.method === "POST" && browserActionMatch) {
+        const [, sessionId] = browserActionMatch;
+        const body = (await readBody(req)) as { action?: string; url?: string; selector?: string };
+        if (!runtime.browserTool) {
+          sendJson(res, 501, { error: "browser tool not available — Playwright not installed" });
+          return;
+        }
+        if (typeof body.action !== "string") {
+          sendJson(res, 400, { error: "action is required" });
+          return;
+        }
+        try {
+          const result = await runtime.browserTool.action(
+            {
+              workspaceId: runtime.workspaceId,
+              projectDir: runtime.projectDir,
+              harnessRegistry: { get: () => undefined, set: () => {}, values: () => [] },
+              capabilities: { agentId: "human", workspaceId: runtime.workspaceId, role: "human" },
+            },
+            {
+              sessionId,
+              action: body.action as "navigate" | "click" | "extract" | "screenshot",
+              url: body.url,
+              selector: body.selector,
+            },
+          );
+          sendJson(res, 200, { ok: true, data: result });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          sendJson(res, 501, { error: message });
+        }
         return;
       }
 

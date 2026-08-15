@@ -10,13 +10,13 @@
 - [x] CanvasSmith: workbench layout, mode toggle, node library, inspector shell ✅ 3336071
 
 ## Phase 4 — Simple Mode Templates + Wizard
-- [ ] SimpleFlow (after Phases 1–3 land)
+- [x] SimpleFlow: TemplateGallery + SetupWizard + simpleNodeConfig + seeding ✅ b8fcbb1 (files landed with e091653)
 
 ## Phase 5 — Power Mode Panels
-- [ ] PowerDeck (after Phases 1–3 land)
+- [x] PowerDeck: LogsPanel, TerminalPanes, ContextBusPanel, WideInspector ✅ e091653
 
 ## Phase 6 — Chat with Chef Streaming
-- [ ] ChatStream (after Phase 1 contract freezes)
+- [x] ChatStream: LLMDecisionProvider + chat SSE + ConsolePanel ✅ f8eceb5
 
 ## Phase 7 — Execution Console + Results
 - [ ] ConsoleAtlas (after Phases 1–3 land)

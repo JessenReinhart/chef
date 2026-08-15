@@ -16,6 +16,10 @@ import type {
 import { Repository, type TemplateInput } from "./persistence/database.ts";
 import { GenericTerminalHarness } from "./harness/generic.ts";
 import { Scheduler, type HarnessLike, type HarnessRegistry } from "./runtime/scheduler.ts";
+import { HarnessRegistry as SpecializedHarnessRegistry } from "./runtime/harness-registry.ts";
+import { ToolRunner } from "./runtime/tool-runner.ts";
+import { BrowserTool } from "./runtime/browser-tool.ts";
+import { McpRegistry } from "./runtime/mcp-client.ts";
 import {
   Orchestrator,
   ScriptedDecisionProvider,
@@ -80,19 +84,19 @@ function asSchedulerHarness(harness: GenericTerminalHarness): HarnessLike {
 export interface ChefRuntime {
   readonly workspaceId: WorkspaceId;
   readonly repository: Repository;
+  readonly projectDir: string;
   start(): Promise<void>;
   sendUserMessage(message: string): Promise<OrchestratorResult>;
-  inspectState(): Promise<WorkspaceSnapshot>;
-  cancelTask(taskId: TaskId): Promise<void>;
-  sendInput(sessionId: string, input: string): Promise<void>;
-  interruptSession(sessionId: string): Promise<void>;
-  resizeSession(sessionId: string, cols: number, rows: number): Promise<void>;
-  /** Resolve a pending human approval gate (spec §11.3). */
-  resolveApproval(approvalId: string, decision: ApprovalDecision, approver: string, reason?: string): Promise<Approval>;
-  subscribeEvents(listener: (event: RuntimeEvent) => void): () => void;
+  /** Retry a failed/blocked task through the scheduler's retry budget. */
+  retryTask(taskId: TaskId): Promise<void>;
   /** Send a chat message and stream assistant replies via SSE. */
   sendChatMessage(message: string): Promise<OrchestratorResult>;
-  close(): Promise<void>;
+  /** Phase 8: deterministic tool runner (terminal/filesystem/git + approval gates). */
+  readonly toolRunner: ToolRunner;
+  /** Phase 8: browser sessions (Playwright; honest error when absent). */
+  readonly browserTool: BrowserTool;
+  /** Phase 8: MCP capability client registry. */
+  readonly mcpRegistry: McpRegistry;
 }
 export function createChef(options: {
   dbPath: string;
@@ -176,6 +180,7 @@ export function createChef(options: {
 
   const runtimeRegistry = new RuntimeHarnessRegistry();
   const orchestratorRegistry = new OrchestratorHarnessRegistry();
+  const specializedHarnesses = new SpecializedHarnessRegistry();
 
   // Use LLM provider from env if configured, otherwise use provided or scripted
   const llmProvider = options.decisionProvider ?? createLLMDecisionProvider();
@@ -235,11 +240,50 @@ export function createChef(options: {
     },
   });
 
+  const toolRunner = new ToolRunner({
+    workspaceId,
+    projectDir: options.projectDir,
+    harnessRegistry: runtimeRegistry,
+    capabilities: { agentId: "human", workspaceId, role: "human" },
+    emitEvent: (event) => {
+      for (const listener of listeners) {
+        try {
+          listener(event);
+        } catch {
+          // Inspector failures must not abort authoritative runtime writes.
+        }
+      }
+    },
+    persistApproval: (approval) => {
+      repository.insertApproval({
+        workspaceId,
+        taskId: approval.taskId,
+        status: approval.status,
+        requester: approval.requester,
+        reason: approval.reason,
+        createdAt: approval.createdAt,
+      });
+    },
+  });
+  const browserTool = new BrowserTool();
+  const mcpRegistry = new McpRegistry();
   return {
     workspaceId,
     repository,
+    projectDir: options.projectDir,
+    toolRunner,
+    browserTool,
+    mcpRegistry,
     async start(): Promise<void> {
       await scheduler.recoverOnStartup(workspaceId);
+      // Detect and register specialized harnesses (Claude Code, Pi, OMP,
+      // Freebuff) — binary absence is reported, not fatal.
+      await specializedHarnesses.initialize();
+      try {
+        await mcpRegistry.connectAll();
+      } catch {
+        // MCP servers are optional — absence must not break startup.
+      }
     },
     sendUserMessage(message: string): Promise<OrchestratorResult> {
       return orchestrator.handleUserMessage(workspaceId, message);
@@ -259,6 +303,9 @@ export function createChef(options: {
     interruptSession(sessionId: string): Promise<void> {
       return scheduler.interrupt(workspaceId, sessionId);
     },
+    retryTask(taskId: TaskId): Promise<void> {
+      return scheduler.retryTask(workspaceId, taskId);
+    },
     resizeSession(sessionId: string, cols: number, rows: number): Promise<void> {
       return scheduler.resize(workspaceId, sessionId, cols, rows);
     },
@@ -274,7 +321,12 @@ export function createChef(options: {
     async close(): Promise<void> {
       // Every harness close is attempted; a rejected harness teardown must not
       // skip the repository close (durable state + DB lock release).
-      await Promise.allSettled([...runtimeRegistry.values()].map((harness) => harness.close()));
+      await Promise.allSettled([
+        ...runtimeRegistry.values().map((harness) => harness.close()),
+        specializedHarnesses.close(),
+        browserTool.close(),
+        mcpRegistry.close(),
+      ]);
       repository.close();
     },
   };

@@ -791,6 +791,507 @@ body {
   border-color: var(--accent-blue);
 }
 
+/* ── Execution Console (Phase 7) ────────────────────────────────────── */
+.wb-console__metrics {
+  display: flex;
+  gap: var(--space-4);
+  align-items: center;
+  padding: var(--space-2) var(--space-4);
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+  overflow-x: auto;
+}
+
+.wb-console__metric {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 64px;
+}
+
+.wb-console__metric-value {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-primary);
+}
+
+.wb-console__metric-label {
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--fg-muted);
+}
+
+.wb-console__tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  margin-left: 4px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--accent-gold);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.wb-console__action-error {
+  margin: var(--space-2) var(--space-4) 0;
+  padding: var(--space-2) var(--space-3);
+  background: color-mix(in srgb, var(--accent-red) 12%, var(--bg-surface));
+  border: 1px solid color-mix(in srgb, var(--accent-red) 40%, var(--border-subtle));
+  border-radius: var(--radius-sm);
+  color: var(--accent-red);
+  font-size: var(--text-sm);
+  font-family: inherit;
+}
+
+.wb-console__empty {
+  margin: 0;
+  padding: var(--space-4);
+  color: var(--fg-muted);
+  font-size: var(--text-sm);
+  font-family: inherit;
+}
+
+.wb-console__timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.wb-console__timeline-row {
+  display: flex;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-subtle) 50%, transparent);
+  align-items: flex-start;
+}
+
+.wb-console__timeline-row:last-child {
+  border-bottom: none;
+}
+
+.wb-console__dot {
+  flex-shrink: 0;
+  width: 10px;
+  height: 10px;
+  margin-top: 4px;
+  border-radius: 50%;
+  background: var(--fg-muted);
+}
+
+.wb-console__dot--running {
+  background: var(--accent-green);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-green) 25%, transparent);
+  animation: wb-console-pulse 1.6s ease-in-out infinite;
+}
+
+.wb-console__dot--completed {
+  background: var(--accent-blue);
+}
+
+.wb-console__dot--failed {
+  background: var(--accent-red);
+}
+
+.wb-console__dot--blocked {
+  background: var(--accent-gold);
+}
+
+.wb-console__dot--pending,
+.wb-console__dot--assigned {
+  background: var(--fg-muted);
+}
+
+.wb-console__dot--cancelled {
+  background: var(--fg-muted);
+  opacity: 0.5;
+}
+
+@keyframes wb-console-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.wb-console__timeline-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.wb-console__timeline-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.wb-console__timeline-name {
+  font-weight: 600;
+  color: var(--fg-primary);
+}
+
+.wb-console__timeline-status {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  color: var(--fg-secondary);
+}
+
+.wb-console__timeline-row--running .wb-console__timeline-status {
+  color: var(--accent-green);
+  background: color-mix(in srgb, var(--accent-green) 15%, transparent);
+}
+
+.wb-console__timeline-row--failed .wb-console__timeline-status {
+  color: var(--accent-red);
+  background: color-mix(in srgb, var(--accent-red) 15%, transparent);
+}
+
+.wb-console__timeline-row--blocked .wb-console__timeline-status {
+  color: var(--accent-gold);
+  background: color-mix(in srgb, var(--accent-gold) 15%, transparent);
+}
+
+.wb-console__timeline-duration {
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.wb-console__timeline-meta {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.wb-console__timeline-time {
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.wb-console__timeline-live {
+  color: var(--accent-green);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.wb-console__progress {
+  height: 4px;
+  background: var(--border-subtle);
+  border-radius: 2px;
+  overflow: hidden;
+  position: relative;
+}
+
+.wb-console__progress-indeterminate {
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  background: var(--accent-green);
+  border-radius: 2px;
+  animation: wb-console-indeterminate 1.2s ease-in-out infinite;
+}
+
+@keyframes wb-console-indeterminate {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(350%); }
+}
+
+.wb-console__error {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-2) var(--space-3);
+  background: color-mix(in srgb, var(--accent-red) 10%, var(--bg-surface));
+  border: 1px solid color-mix(in srgb, var(--accent-red) 35%, var(--border-subtle));
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+}
+
+.wb-console__error-message {
+  color: var(--accent-red);
+  font-size: var(--text-sm);
+  word-break: break-word;
+}
+
+.wb-console__replan-hint {
+  color: var(--fg-muted);
+  font-size: var(--text-xs);
+}
+
+.wb-console__error-actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+}
+
+.wb-console__blocked-note {
+  color: var(--accent-gold);
+  font-size: var(--text-xs);
+}
+
+.wb-console__output {
+  font-family: inherit;
+  font-size: var(--text-xs);
+  color: var(--fg-secondary);
+}
+
+.wb-console__output summary {
+  cursor: pointer;
+  color: var(--fg-muted);
+  user-select: none;
+}
+
+.wb-console__output summary:focus-visible {
+  outline: 2px solid var(--accent-blue);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.wb-console__output-line {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+}
+
+/* ── Artifact cards ─────────────────────────────────────────────────── */
+.wb-console__artifacts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.wb-console__artifact {
+  display: flex;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.wb-console__artifact-icon {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-elevated);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-base);
+}
+
+.wb-console__artifact-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.wb-console__artifact-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.wb-console__artifact-name {
+  font-weight: 600;
+  color: var(--fg-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-console__artifact-type,
+.wb-console__artifact-version {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  color: var(--fg-secondary);
+}
+
+.wb-console__artifact-version {
+  color: var(--accent-purple);
+  background: color-mix(in srgb, var(--accent-purple) 15%, transparent);
+}
+
+.wb-console__artifact-meta {
+  color: var(--fg-muted);
+  font-size: var(--text-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-console__artifact-actions {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.wb-console__artifact-actions a {
+  text-decoration: none;
+}
+
+.wb-console__artifact-preview {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-base);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--fg-secondary);
+  max-height: 180px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.wb-console__artifact-preview--empty {
+  color: var(--fg-muted);
+  font-family: inherit;
+}
+
+/* ── Blockers & approvals ───────────────────────────────────────────── */
+.wb-console__blockers {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.wb-console__blocker-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.wb-console__blocker-heading {
+  margin: 0;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--fg-secondary);
+}
+
+.wb-console__approval-list,
+.wb-console__blocked-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.wb-console__approval,
+.wb-console__blocked-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+}
+
+.wb-console__approval {
+  border-color: color-mix(in srgb, var(--accent-gold) 35%, var(--border-subtle));
+}
+
+.wb-console__approval-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.wb-console__approval-title,
+.wb-console__blocked-title {
+  font-weight: 600;
+  color: var(--fg-primary);
+}
+
+.wb-console__approval-reason,
+.wb-console__blocked-reason {
+  color: var(--fg-muted);
+  font-size: var(--text-xs);
+}
+
+.wb-console__approval-actions {
+  display: flex;
+  gap: var(--space-1);
+  flex-shrink: 0;
+}
+
+/* ── Chat empty state ───────────────────────────────────────────────── */
+.wb-console__chat-empty {
+  color: var(--fg-muted);
+  text-align: center;
+  padding: var(--space-6) 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.wb-console__chat-empty svg {
+  opacity: 0.3;
+  margin-bottom: var(--space-2);
+}
+
+.wb-console__chat-empty p {
+  margin: 0;
+}
+
+.wb-console__chat-hint {
+  font-size: var(--text-xs);
+}
+
+.wb-btn--sm {
+  padding: 2px 10px;
+  font-size: var(--text-xs);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wb-console__dot--running,
+  .wb-console__progress-indeterminate {
+    animation: none;
+  }
+}
+
 /* Responsive */
 @media (max-width: 1200px) {
   :root {
