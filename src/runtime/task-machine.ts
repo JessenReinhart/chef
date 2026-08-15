@@ -29,13 +29,12 @@ export interface TransitionResult {
  *   terminal states (completed, cancelled) have no outgoing edges.
  */
 const ALLOWED: Record<TaskStatus, readonly TaskStatus[]> = {
-  pending: ["assigned", "cancelled"],
+  pending: ["assigned", "blocked", "cancelled"],
   assigned: ["running", "cancelled"],
   running: ["completed", "failed", "blocked", "cancelled"],
   completed: [],
   failed: ["running", "cancelled"],
-  blocked: ["running", "cancelled"],
-  cancelled: [],
+  blocked: ["assigned", "running", "cancelled"],
 };
 
 /**

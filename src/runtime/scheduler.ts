@@ -10,6 +10,8 @@ import type {
   AgentId,
   EntityRef,
   ContextReference,
+  Approval,
+  ApprovalDecision,
 } from "../core/types.ts";
 import type { Repository, SessionInput } from "../persistence/database.ts";
 import type { HarnessEvent } from "../harness/generic.ts";
@@ -142,8 +144,19 @@ export class Scheduler {
       const completedIds = new Set(
         snapshot.tasks.filter(t => t.status === "completed").map(t => t.id),
       );
+      const approvalsById = new Map(snapshot.approvals.map((a) => [a.id, a]));
+      const gateHeld = (t: Task): boolean =>
+        t.approvalId !== undefined && approvalsById.get(t.approvalId)?.status !== "accepted";
+
+      // Request outstanding human gates first so pending-approval tasks hold
+      // at blocked and emit approval.requested (spec §11.3).
+      for (const held of snapshot.tasks.filter(t => gateHeld(t))) {
+        await this.#requestApproval(workspaceId, held);
+      }
+
       const runnable = snapshot.tasks
         .filter(t => (t.status === "pending" || t.status === "assigned") && t.assignedTo != null)
+        .filter(t => !gateHeld(t))
         .filter(t => t.dependencies.every(dep => completedIds.has(dep)))
         .sort((a, b) => b.priority - a.priority || a.createdAt - b.createdAt);
       if (runnable.length === 0) break;
@@ -483,6 +496,94 @@ export class Scheduler {
       this.#appendEvent(workspaceId, event);
     });
   }
+
+  // -------------------------------------------------------------------------
+  // Human approval gate (spec §11.3)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Hold a task behind a pending human approval. The first encounter
+   * persists the approval row (idempotently) and transitions the task
+   * pending → blocked with an approval.requested event.
+   */
+  async #requestApproval(workspaceId: WorkspaceId, task: Task): Promise<void> {
+    const approvalId = task.approvalId;
+    if (!approvalId) return;
+
+    this.#repo.transaction(() => {
+      const current = this.#repo.getTask(task.id);
+      if (!current) return;
+      const approval = this.#repo.getApproval(approvalId);
+      if (approval && approval.status !== "pending") return;
+
+      if (!approval) {
+        // Standalone path: the orchestrator normally pre-creates the row.
+        this.#repo.insertApproval({
+          id: approvalId,
+          workspaceId,
+          taskId: task.id,
+          status: "pending",
+          requester: current.assignedTo ?? "orchestrator",
+          reason: `Task ${task.id} (${task.title}) requires human approval`,
+        });
+      }
+
+      if (current.status === "pending") {
+        TaskMachine.validateTransition(current.status, "blocked");
+        const { event } = TaskMachine.transition(current, "blocked", {
+          error: "awaiting human approval",
+        });
+        this.#repo.updateTask(task.id, { status: "blocked", error: "awaiting human approval" });
+        this.#appendEvent(workspaceId, event);
+      }
+
+      this.#appendEvent(workspaceId, {
+        type: "approval.requested",
+        payload: { approvalId, requester: current.assignedTo ?? "orchestrator", reason: `Task ${task.id} (${task.title}) requires human approval` },
+        taskId: task.id,
+        source: { type: "runtime", id: "approval-manager" },
+      });
+    });
+  }
+
+  /**
+   * Resolve a pending approval. Accepted: blocked → assigned so the normal
+   * dispatch loop spawns the session. Rejected: blocked → cancelled. Always
+   * persists an approval.resolved event; re-resolution is a no-op.
+   */
+  async resolveApproval(
+    workspaceId: WorkspaceId,
+    approvalId: string,
+    decision: ApprovalDecision,
+    approver: string,
+  ): Promise<Approval> {
+    return this.#repo.transaction(() => {
+      const approval = this.#repo.getApproval(approvalId);
+      if (!approval) throw new Error(`Approval not found: ${approvalId}`);
+      if (approval.status !== "pending") return approval;
+
+      const resolved = this.#repo.resolveApproval(approvalId, decision, approver);
+      const task = this.#repo.getTask(approval.taskId);
+      if (task && task.status === "blocked") {
+        const to = decision === "accepted" ? "assigned" : "cancelled";
+        TaskMachine.validateTransition(task.status, to);
+        const { event } = TaskMachine.transition(task, to, {
+          error: decision === "rejected" ? "rejected by human approval" : undefined,
+        });
+        this.#repo.updateTask(task.id, { status: to, error: decision === "rejected" ? "rejected by human approval" : undefined });
+        this.#appendEvent(workspaceId, event);
+      }
+
+      this.#appendEvent(workspaceId, {
+        type: "approval.resolved",
+        payload: { approvalId, decision, approver, taskId: approval.taskId },
+        taskId: approval.taskId,
+        source: { type: "user", id: approver },
+      });
+      return resolved;
+    });
+  }
+
 
   /** Retry a failed/blocked task within the bounded retry budget. */
   async retryTask(workspaceId: WorkspaceId, taskId: TaskId): Promise<void> {

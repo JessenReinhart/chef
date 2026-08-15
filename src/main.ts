@@ -1,5 +1,7 @@
 import type {
   AgentId,
+  Approval,
+  ApprovalDecision,
   ContextReference,
   DecisionProvider,
   EntityRef,
@@ -84,6 +86,8 @@ export interface ChefRuntime {
   sendInput(sessionId: string, input: string): Promise<void>;
   interruptSession(sessionId: string): Promise<void>;
   resizeSession(sessionId: string, cols: number, rows: number): Promise<void>;
+  /** Resolve a pending human approval gate (spec §11.3). */
+  resolveApproval(approvalId: string, decision: ApprovalDecision, approver: string, reason?: string): Promise<Approval>;
   subscribeEvents(listener: (event: RuntimeEvent) => void): () => void;
   close(): Promise<void>;
 }
@@ -182,6 +186,9 @@ export function createChef(options: {
     },
     resizeSession(sessionId: string, cols: number, rows: number): Promise<void> {
       return scheduler.resize(workspaceId, sessionId, cols, rows);
+    },
+    resolveApproval(approvalId: string, decision: ApprovalDecision, approver: string): Promise<Approval> {
+      return scheduler.resolveApproval(workspaceId, approvalId, decision, approver);
     },
     subscribeEvents(listener: (event: RuntimeEvent) => void): () => void {
       listeners.add(listener);
