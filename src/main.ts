@@ -65,6 +65,9 @@ function asSchedulerHarness(harness: GenericTerminalHarness): HarnessLike {
     },
     writeContextRefs: (sessionId: string, refs: ContextReference[]) => harness.writeContextRefs(sessionId, refs),
     events: (sessionId: string) => harness.events(sessionId),
+    send: (sessionId: string, input: string) => harness.send(sessionId, input),
+    interrupt: (sessionId: string) => harness.interrupt(sessionId),
+    resize: (sessionId: string, cols: number, rows: number) => harness.resize(sessionId, cols, rows),
     terminate: (sessionId: string) => harness.terminate(sessionId),
     forget: (sessionId: string) => harness.forget(sessionId),
     close: () => harness.close(),
@@ -78,11 +81,12 @@ export interface ChefRuntime {
   sendUserMessage(message: string): Promise<OrchestratorResult>;
   inspectState(): Promise<WorkspaceSnapshot>;
   cancelTask(taskId: TaskId): Promise<void>;
+  sendInput(sessionId: string, input: string): Promise<void>;
+  interruptSession(sessionId: string): Promise<void>;
+  resizeSession(sessionId: string, cols: number, rows: number): Promise<void>;
   subscribeEvents(listener: (event: RuntimeEvent) => void): () => void;
   close(): Promise<void>;
 }
-
-/** Create a restart-safe Chef runtime backed by a local SQLite database. */
 export function createChef(options: {
   dbPath: string;
   projectDir: string;
@@ -169,6 +173,15 @@ export function createChef(options: {
     },
     cancelTask(taskId: TaskId): Promise<void> {
       return scheduler.cancelTask(workspaceId, taskId);
+    },
+    sendInput(sessionId: string, input: string): Promise<void> {
+      return scheduler.send(workspaceId, sessionId, input);
+    },
+    interruptSession(sessionId: string): Promise<void> {
+      return scheduler.interrupt(workspaceId, sessionId);
+    },
+    resizeSession(sessionId: string, cols: number, rows: number): Promise<void> {
+      return scheduler.resize(workspaceId, sessionId, cols, rows);
     },
     subscribeEvents(listener: (event: RuntimeEvent) => void): () => void {
       listeners.add(listener);
