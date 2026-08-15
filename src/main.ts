@@ -13,7 +13,7 @@ import type {
   WorkspaceId,
   WorkspaceSnapshot,
 } from "./core/types.ts";
-import { Repository } from "./persistence/database.ts";
+import { Repository, type TemplateInput } from "./persistence/database.ts";
 import { GenericTerminalHarness } from "./harness/generic.ts";
 import { Scheduler, type HarnessLike, type HarnessRegistry } from "./runtime/scheduler.ts";
 import {
@@ -108,6 +108,70 @@ export function createChef(options: {
   if (!workspaceId) {
     workspaceId = repository.createWorkspace({ name: "Chef", rootPath: options.projectDir }).id;
     repository.insertProject({ workspaceId, name: "Chef", rootPath: options.projectDir });
+  }
+
+  // Seed the four Simple Mode templates (idempotent by name; skip when a
+  // workspace already has templates so user edits are never overwritten).
+  const SEED_TEMPLATES: Omit<TemplateInput, "workspaceId">[] = [
+    {
+      name: "Monthly Financial Report",
+      description:
+        "Generate a complete monthly financial report with income statement, balance sheet, and cash flow summary. Includes data validation and approval gate.",
+      nodes: [
+        { id: "fetch-data", type: "tool.file", title: "Fetch Financial Data", config: { title: "Fetch Financial Data", description: "Pull transaction data from accounting system" } },
+        { id: "validate", type: "tool.transform", title: "Validate Data", config: { title: "Validate Data", description: "Check for missing entries, duplicates, anomalies" } },
+        { id: "generate-report", type: "agent.llm", title: "Generate Report", config: { title: "Generate Report", description: "Build income statement, balance sheet, cash flow" } },
+        { id: "review", type: "human.approval", title: "CFO Review", config: { title: "CFO Review", description: "Human approval before finalizing" } },
+        { id: "deliver", type: "tool.output", title: "Deliver Report", config: { title: "Deliver Report", description: "Export PDF and email stakeholders" } },
+      ],
+      metadata: { category: "financial", estimatedDuration: "15 min", tags: ["monthly", "reporting", "cfo"] },
+    },
+    {
+      name: "Cash Flow Analysis",
+      description:
+        "Analyze cash inflows/outflows, forecast runway, and identify trends. Outputs a dashboard-ready summary with alerts.",
+      nodes: [
+        { id: "fetch-cash", type: "tool.file", title: "Fetch Cash Data", config: { title: "Fetch Cash Data", description: "Pull bank transactions and AR/AP" } },
+        { id: "categorize", type: "tool.transform", title: "Categorize Flows", config: { title: "Categorize Flows", description: "Classify operating, investing, financing" } },
+        { id: "forecast", type: "agent.llm", title: "Forecast Runway", config: { title: "Forecast Runway", description: "Project cash position 13 weeks forward" } },
+        { id: "alert-review", type: "human.approval", title: "Alert Review", config: { title: "Alert Review", description: "Flag negative projections for review" } },
+        { id: "dashboard", type: "tool.output", title: "Update Dashboard", config: { title: "Update Dashboard", description: "Push metrics to monitoring dashboard" } },
+      ],
+      metadata: { category: "financial", estimatedDuration: "10 min", tags: ["cash-flow", "forecast", "runway"] },
+    },
+    {
+      name: "Budget vs Actual",
+      description:
+        "Compare budgeted vs actual spend by department/category. Highlights variances >10% and routes exceptions for review.",
+      nodes: [
+        { id: "fetch-budget", type: "tool.file", title: "Fetch Budget", config: { title: "Fetch Budget", description: "Load approved budget from planning system" } },
+        { id: "fetch-actual", type: "tool.file", title: "Fetch Actuals", config: { title: "Fetch Actuals", description: "Pull YTD actual spend from ERP" } },
+        { id: "variance", type: "tool.transform", title: "Calculate Variance", config: { title: "Calculate Variance", description: "Compute $ and % variance by line item" } },
+        { id: "flag", type: "control.logic", title: "Flag Exceptions", config: { title: "Flag Exceptions", description: "Mark items exceeding 10% threshold" } },
+        { id: "exception-review", type: "human.approval", title: "Exception Review", config: { title: "Exception Review", description: "Department heads justify variances" } },
+        { id: "variance-report", type: "tool.output", title: "Variance Report", config: { title: "Variance Report", description: "Generate executive summary with charts" } },
+      ],
+      metadata: { category: "financial", estimatedDuration: "12 min", tags: ["budget", "variance", "department"] },
+    },
+    {
+      name: "Developer Fix/Verify",
+      description:
+        "Standardized bug fix workflow: reproduce → fix → test → verify → deploy. Includes automated test gate and deploy approval.",
+      nodes: [
+        { id: "reproduce", type: "tool.terminal", title: "Reproduce Issue", config: { title: "Reproduce Issue", description: "Create minimal failing test case" } },
+        { id: "diagnose", type: "agent.llm", title: "Root Cause", config: { title: "Root Cause", description: "Identify and document root cause" } },
+        { id: "fix", type: "tool.terminal", title: "Implement Fix", config: { title: "Implement Fix", description: "Write fix with unit test" } },
+        { id: "test-gate", type: "control.logic", title: "Test Gate", config: { title: "Test Gate", description: "Run full suite; block on failures" } },
+        { id: "deploy-approval", type: "human.approval", title: "Deploy Approval", config: { title: "Deploy Approval", description: "Lead review before production deploy" } },
+        { id: "deploy", type: "tool.terminal", title: "Deploy & Verify", config: { title: "Deploy & Verify", description: "Deploy to prod and verify resolution" } },
+      ],
+      metadata: { category: "operations", estimatedDuration: "30 min", tags: ["bug-fix", "ci-cd", "verification"] },
+    },
+  ];
+  if (repository.listTemplates(workspaceId).length === 0) {
+    for (const seed of SEED_TEMPLATES) {
+      repository.insertTemplate({ ...seed, workspaceId });
+    }
   }
 
   const runtimeRegistry = new RuntimeHarnessRegistry();

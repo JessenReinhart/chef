@@ -10,7 +10,7 @@ import { TerminalPanes } from "./TerminalPanes.tsx";
 import { ContextBusPanel } from "./ContextBusPanel.tsx";
 import { WideInspector } from "./WideInspector.tsx";
 import { TemplateGallery, type Template } from "./TemplateGallery.tsx";
-import { SetupWizard, type TemplateWithParams, type TemplateDraft } from "./SetupWizard.tsx";
+import { SetupWizard, getTemplateParameters, type TemplateDraft } from "./SetupWizard.tsx";
 import "./workbench.css";
 
 interface SessionInfo {
@@ -211,8 +211,8 @@ export function App() {
           <SetupWizard
             template={{
               ...selectedTemplate,
-              parameters: [],
-            } as TemplateWithParams}
+              parameters: getTemplateParameters(selectedTemplate),
+            }}
             onComplete={handleWizardComplete}
             onCancel={handleWizardCancel}
           />
