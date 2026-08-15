@@ -50,7 +50,8 @@ src/
   context/                 context reference system
   persistence/             Repository (SQLite) + schema
   runtime/                 Scheduler (dispatch, events, retry)
-  orchestrator/            Orchestrator (plan, execute, consume) + scripted decision provider
+  server/http-server.ts   read-only HTTP/SSE projection API
+  server/index.ts         inspector server entrypoint
 tests/
   golden-path.ts           P0 golden path test
   timeout-cancellation.ts  plan timeout teardown
@@ -60,6 +61,17 @@ tests/
   plan-persistence.ts      plan close/reopen durability
   pty-replay.ts            PTY output replay
   live-events.ts           live event subscription
+  direct-worker-interaction.ts  send/interrupt/resize regression
+  http-server.ts           projection API smoke test
+web/
+  src/App.tsx              read-only dashboard (tasks, sessions, event stream)
+```
+
+## Inspector & Dashboard
+
+```bash
+npm run server          # projection API on http://127.0.0.1:4321
+cd web && npm install && npm run dev   # dashboard proxying /api to the server
 ```
 
 ## Status
@@ -70,9 +82,11 @@ tests/
 - Concurrent dispatch respects `maxConcurrency`; timeout cancellation and terminal-task cancellation are regression-tested.
 - PTY terminal output is persisted as ordered `session.data` events and survives restart.
 - Live event subscription (`ChefRuntime.subscribeEvents`) delivers the persisted event stream with unsubscribe support.
-- Stable `sendUserMessage` resolution (flaky exit-13 fixed).
+- Direct worker controls (`sendInput`, `interruptSession`, `resizeSession`) persist `user.*` intervention events.
+- HTTP/SSE projection API: `src/server/http-server.ts` exposes `/api/state`, `/api/events`, and session-control POST endpoints.
+- Minimal React/Vite dashboard in `web/` consumes state and SSE events and displays tasks, sessions, and the live event stream.
 
-**Known gaps:** UI/canvas, approvals and permissions, workflows, MCP/tool adapters, and replay-driven resume are not implemented yet. See `handoff.md` and `AGENTS.md` for the evolving roadmap.
+**Known gaps:** canvas graph editing, approvals and permissions, workflows, MCP/tool adapters, and replay-driven resume are not implemented yet. See `handoff.md` and `AGENTS.md` for the evolving roadmap.
 
 ## Notes
 
