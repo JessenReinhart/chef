@@ -19,14 +19,14 @@
 - [x] ChatStream: LLMDecisionProvider + chat SSE + ConsolePanel ✅ f8eceb5
 
 ## Phase 7 — Execution Console + Results
-- [ ] ConsoleAtlas (after Phases 1–3 land)
+- [x] ConsoleAtlas (partial, merged): ConsolePanel timeline/artifacts/blockers/metrics in `26edc16`
 
 ## Phase 8 — Tool/MCP + Specialized Harnesses
-- [ ] CapabilityCrew (after Phases 1–2 land)
+- [x] CapabilityCrew (partial, merged + main-thread fixes): capabilities, tool-runner, harness adapters, browser/MCP clients in `26edc16`; wiring fixes + tests in `8270fae`
 
 ## Phase 9 — Integration, Docs, Verification
 - [ ] QAAtlas + main thread full verification
 
 ## Baseline
-- HEAD before wave 1: `64c413a`
-- HEAD after wave 1: `731047b`
+- HEAD after wave 3: `8270fae`
+
