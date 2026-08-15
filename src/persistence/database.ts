@@ -28,6 +28,7 @@ import type {
   ArtifactType,
   ContextReference,
   Decision,
+  DecisionStatus,
   EntityId,
   EntityRef,
   Plan,
