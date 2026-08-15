@@ -5,8 +5,8 @@
   "type": "module",
   "engines": { "node": ">=24.0.0" },
   "scripts": {
-    "start": "node --experimental-strip-types src/main.ts",
-    "test": "node --experimental-strip-types tests/golden-path.ts && node --experimental-strip-types tests/timeout-cancellation.ts && node --experimental-strip-types tests/seq-concurrency.ts && node --experimental-strip-types tests/cancel-facade.ts && node --experimental-strip-types tests/dispatch-concurrency.ts && node --experimental-strip-types tests/plan-persistence.ts && node --experimental-strip-types tests/pty-replay.ts && node --experimental-strip-types tests/live-events.ts && node --experimental-strip-types tests/live-events-failure.ts",
+    "server": "node --experimental-strip-types src/server/index.ts",
+    "test": "node --experimental-strip-types tests/golden-path.ts && node --experimental-strip-types tests/timeout-cancellation.ts && node --experimental-strip-types tests/seq-concurrency.ts && node --experimental-strip-types tests/cancel-facade.ts && node --experimental-strip-types tests/dispatch-concurrency.ts && node --experimental-strip-types tests/plan-persistence.ts && node --experimental-strip-types tests/pty-replay.ts && node --experimental-strip-types tests/live-events.ts && node --experimental-strip-types tests/live-events-failure.ts && node --experimental-strip-types tests/direct-worker-interaction.ts && node --experimental-strip-types tests/http-server.ts",
     "typecheck": "node --experimental-strip-types --experimental-transform-types src/main.ts --check 2>&1 || true"
   },
   "dependencies": {

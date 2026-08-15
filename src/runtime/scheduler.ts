@@ -38,9 +38,9 @@ export interface HarnessLike {
   readonly command: string;
   readonly args: string[];
   readonly cwd: string;
-  spawn(opts: { sessionId?: string; cols?: number; rows?: number }): Promise<{ id: string; pid: number }>;
-  writeContextRefs(sessionId: string, refs: ContextReference[]): Promise<string>;
-  events(sessionId: string): AsyncIterable<HarnessEvent>;
+  send(sessionId: string, input: string): Promise<void>;
+  interrupt(sessionId: string): Promise<void>;
+  resize(sessionId: string, cols: number, rows: number): Promise<void>;
   terminate(sessionId: string): Promise<void>;
   forget(sessionId: string): Promise<void>;
   close(): Promise<void>;
@@ -398,6 +398,54 @@ export class Scheduler {
         resultSummary: `artifact: ${(inner.name as string) || artifactType}`,
       });
       this.#appendEvent(workspaceId, doneEvt);
+    });
+  }
+
+  /** Send user input to a live worker PTY and persist the interaction event. */
+  async send(workspaceId: WorkspaceId, sessionId: SessionId, input: string): Promise<void> {
+    const tracking = this.#sessions.get(sessionId);
+    if (!tracking) throw new Error(`No active session: ${sessionId}`);
+    const harness = this.#registry.get(tracking.agentId);
+    if (!harness) throw new Error(`No harness registered for agent ${tracking.agentId}`);
+    await harness.send(sessionId, input);
+    this.#appendEvent(workspaceId, {
+      type: "user.input",
+      payload: { input },
+      taskId: tracking.taskId,
+      sessionId,
+      source: { type: "user", id: "ui" },
+    });
+  }
+
+  /** Interrupt a live worker PTY and persist the interaction event. */
+  async interrupt(workspaceId: WorkspaceId, sessionId: SessionId): Promise<void> {
+    const tracking = this.#sessions.get(sessionId);
+    if (!tracking) throw new Error(`No active session: ${sessionId}`);
+    const harness = this.#registry.get(tracking.agentId);
+    if (!harness) throw new Error(`No harness registered for agent ${tracking.agentId}`);
+    await harness.interrupt(sessionId);
+    this.#appendEvent(workspaceId, {
+      type: "user.interrupt",
+      payload: {},
+      taskId: tracking.taskId,
+      sessionId,
+      source: { type: "user", id: "ui" },
+    });
+  }
+
+  /** Resize a live worker PTY and persist the interaction event. */
+  async resize(workspaceId: WorkspaceId, sessionId: SessionId, cols: number, rows: number): Promise<void> {
+    const tracking = this.#sessions.get(sessionId);
+    if (!tracking) throw new Error(`No active session: ${sessionId}`);
+    const harness = this.#registry.get(tracking.agentId);
+    if (!harness) throw new Error(`No harness registered for agent ${tracking.agentId}`);
+    await harness.resize(sessionId, cols, rows);
+    this.#appendEvent(workspaceId, {
+      type: "user.resize",
+      payload: { cols, rows },
+      taskId: tracking.taskId,
+      sessionId,
+      source: { type: "user", id: "ui" },
     });
   }
 
