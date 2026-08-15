@@ -1,10 +1,13 @@
 import type { GraphNode } from "../../src/core/graph.ts";
 import { NodeIcon, NODE_LIBRARY } from "./nodeCatalog.tsx";
+import { SimpleConfigRenderer, mapRuntimeToSimple, mapSimpleToRuntime } from "./simpleNodeConfig.tsx";
 
 interface InspectorPanelProps {
   selectedNode: GraphNode | null;
   onAcceptApproval: (node: GraphNode) => void;
   onRejectApproval: (node: GraphNode) => void;
+  mode: "simple" | "power";
+  onConfigChange: (nodeId: string, key: string, value: unknown) => void;
 }
 
 function statusClass(status: string | undefined): string {
@@ -36,7 +39,7 @@ function Field({ label, value, mono }: { label: string; value: React.ReactNode; 
   );
 }
 
-export function InspectorPanel({ selectedNode, onAcceptApproval, onRejectApproval }: InspectorPanelProps) {
+export function InspectorPanel({ selectedNode, onAcceptApproval, onRejectApproval, mode, onConfigChange }: InspectorPanelProps) {
   if (!selectedNode) {
     return (
       <div className="wb-inspector__content">
@@ -76,9 +79,30 @@ export function InspectorPanel({ selectedNode, onAcceptApproval, onRejectApprova
 
       <div className="wb-inspector__section">
         <div className="wb-inspector__section-title">Configuration</div>
-        {Object.entries(node.config).map(([key, value]) => (
-          <Field key={key} label={key} value={String(value)} mono={typeof value !== "string" || key === "title" ? false : true} />
-        ))}
+        {mode === "simple" ? (
+          <SimpleConfigRenderer
+            node={node}
+            mode={mode}
+            values={mapRuntimeToSimple(node.type, node.config as Record<string, unknown>)}
+            onChange={(key, value) => {
+              const runtimeUpdates = mapSimpleToRuntime(node.type, { [key]: value });
+              Object.entries(runtimeUpdates).forEach(([k, v]) => onConfigChange(node.id, k, v));
+            }}
+          />
+        ) : (
+          <div className="wb-inspector__section wb-inspector__section--power">
+            {Object.entries(node.config).map(([key, value]) => (
+              <div key={key} className="wb-inspector__field wb-inspector__field--power">
+                <label className="wb-inspector__label">{key}</label>
+                <input
+                  className="wb-inspector__input wb-inspector__input--mono"
+                  value={typeof value === "object" ? JSON.stringify(value, null, 2) : String(value)}
+                  readOnly
+                />
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {isApproval && (

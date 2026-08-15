@@ -23,6 +23,7 @@ import {
   type OrchestratorHarness,
   type RuntimeAdapter,
 } from "./orchestrator/orchestrator.ts";
+import { createLLMDecisionProvider } from "./orchestrator/llm-decision-provider.ts";
 
 class RuntimeHarnessRegistry implements HarnessRegistry {
   readonly #byAgent = new Map<AgentId, HarnessLike>();
@@ -89,6 +90,8 @@ export interface ChefRuntime {
   /** Resolve a pending human approval gate (spec §11.3). */
   resolveApproval(approvalId: string, decision: ApprovalDecision, approver: string, reason?: string): Promise<Approval>;
   subscribeEvents(listener: (event: RuntimeEvent) => void): () => void;
+  /** Send a chat message and stream assistant replies via SSE. */
+  sendChatMessage(message: string): Promise<OrchestratorResult>;
   close(): Promise<void>;
 }
 export function createChef(options: {
@@ -97,6 +100,8 @@ export function createChef(options: {
   decisionProvider?: DecisionProvider;
   /** Plan execution timeout in ms (default 60s). Short values force timeout paths. */
   orchestratorTimeoutMs?: number;
+  /** Chat persistence for SSE streaming */
+  chatRepository?: { list: (workspaceId: WorkspaceId) => ChatMessage[]; insert: (input: { role: string; content: string; metadata?: Record<string, unknown> }) => ChatMessage };
 }): ChefRuntime {
   const repository = new Repository(options.dbPath);
   let workspaceId = repository.getWorkspaceId();
@@ -107,7 +112,10 @@ export function createChef(options: {
 
   const runtimeRegistry = new RuntimeHarnessRegistry();
   const orchestratorRegistry = new OrchestratorHarnessRegistry();
-  const scripted = options.decisionProvider ?? new ScriptedDecisionProvider();
+
+  // Use LLM provider from env if configured, otherwise use provided or scripted
+  const llmProvider = options.decisionProvider ?? createLLMDecisionProvider();
+  const scripted = llmProvider ?? new ScriptedDecisionProvider();
   const provider: OrchestratorDecisionProvider = {
     name: scripted.name,
     proposePlan: (input) => scripted.proposePlan(input),
@@ -171,6 +179,9 @@ export function createChef(options: {
     },
     sendUserMessage(message: string): Promise<OrchestratorResult> {
       return orchestrator.handleUserMessage(workspaceId, message);
+    },
+    sendChatMessage(message: string): Promise<OrchestratorResult> {
+      return orchestrator.handleChatMessage(workspaceId, message);
     },
     inspectState(): Promise<WorkspaceSnapshot> {
       return orchestrator.inspectState(workspaceId);
