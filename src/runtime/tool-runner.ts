@@ -12,7 +12,8 @@
 
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { access, mkdir, readFile, realpath, readdir, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { existsSync, realpathSync } from "node:fs";
 import { delimiter, dirname, isAbsolute, join, normalize, resolve } from "node:path";
 import type {
   Artifact,
@@ -119,18 +120,17 @@ export interface TerminalToolResult {
 
 /** Resolve a shell command against PATH (like the harness does). */
 export function resolveExecutablePath(command: string): string {
-  if (isAbsolute(command)) return command;
+  const binary = command.split(/\s+/, 1)[0] ?? command;
+  if (isAbsolute(binary)) return binary;
   const dirs = (process.env.PATH ?? "").split(delimiter);
   for (const dir of dirs) {
-    const candidate = join(dir, command);
-    try {
-      access(candidate);
+    const candidate = join(dir, binary);
+    if (existsSync(candidate)) {
       return candidate;
-    } catch {
-      // keep walking
     }
+    // keep walking
   }
-  return command;
+  return binary;
 }
 
 /**
@@ -232,14 +232,16 @@ export function validateFilePath(
   if (!isWithinRoot(root, target)) {
     throw new PermissionDeniedError("filesystem", "tool");
   }
-  const ext = target.slice(target.lastIndexOf("."));
-  if (operation === "read" || operation === "list") {
-    if (ext && !ALLOWED_READ_EXTENSIONS.has(ext.toLowerCase())) {
-      throw new CapabilityUnavailableError(`filesystem read: extension '.${ext}' not allowed`);
-    }
-  } else if (operation === "write") {
-    if (ext && !ALLOWED_WRITE_EXTENSIONS.has(ext.toLowerCase())) {
-      throw new CapabilityUnavailableError(`filesystem write: extension '.${ext}' not allowed`);
+  if (operation !== "list") {
+    const ext = target.slice(target.lastIndexOf("."));
+    if (operation === "read") {
+      if (ext && !ALLOWED_READ_EXTENSIONS.has(ext.toLowerCase())) {
+        throw new CapabilityUnavailableError(`filesystem read: extension '.${ext}' not allowed`);
+      }
+    } else if (operation === "write") {
+      if (ext && !ALLOWED_WRITE_EXTENSIONS.has(ext.toLowerCase())) {
+        throw new CapabilityUnavailableError(`filesystem write: extension '.${ext}' not allowed`);
+      }
     }
   }
   return target;
@@ -247,7 +249,7 @@ export function validateFilePath(
 
 function realpathSyncSafe(p: string): string | undefined {
   try {
-    return realpath(p) as unknown as string;
+    return realpathSync(p);
   } catch {
     return undefined;
   }
@@ -463,22 +465,28 @@ export class ToolRunner {
   }
 
   async #execute(call: ToolCall): Promise<Omit<ToolResult, "durationMs">> {
-    const ctx = { ...this.context, customPolicy: call.permissions };
+    const toolCtx: ToolContext = {
+      ...this.#context,
+      capabilities: { ...this.#context.capabilities, customPolicy: call.permissions },
+    };
     const { tool } = call;
     const input = call.input ?? {};
+    const caps = toolCtx.capabilities;
 
     if (tool === "bash" || tool === "terminal") {
-      const mode = this.registry.checkPermission(ctx, "terminal");
-      if (mode === "deny") throw new PermissionDeniedError("terminal", ctx.agentId);
+      const mode = this.#registry.checkPermission(caps, "terminal");
+      if (mode === "deny") throw new PermissionDeniedError("terminal", caps.agentId);
       const command = String(input.command ?? "");
       if (command === "") throw new Error("bash: command is required");
+      const parts = command.trim().split(/\s+/);
       const config: TerminalToolConfig = {
-        command,
+        command: parts[0] ?? "",
+        args: parts.slice(1),
         cwd: typeof input.cwd === "string" ? input.cwd : undefined,
         env: typeof input.env === "object" && input.env !== null ? (input.env as Record<string, string>) : undefined,
         timeoutMs: typeof input.timeoutMs === "number" ? input.timeoutMs : undefined,
       };
-      const result = await executeTerminal(ctx, config);
+      const result = await executeTerminal(toolCtx, config);
       return {
         ok: result.exitCode === 0,
         output: {
@@ -492,8 +500,8 @@ export class ToolRunner {
     }
 
     if (tool === "file_read" || tool === "file_write" || tool === "file_list") {
-      const mode = this.registry.checkPermission(ctx, "filesystem");
-      if (mode === "deny") throw new PermissionDeniedError("filesystem", ctx.agentId);
+      const mode = this.#registry.checkPermission(caps, "filesystem");
+      if (mode === "deny") throw new PermissionDeniedError("filesystem", caps.agentId);
       const rawPath = String(input.path ?? "");
       if (rawPath === "") throw new Error(`${tool}: path is required`);
       const operation = tool === "file_read" ? "read" : tool === "file_write" ? "write" : "list";
@@ -502,7 +510,7 @@ export class ToolRunner {
         path: rawPath,
         content: typeof input.content === "string" ? input.content : undefined,
       };
-      const result = await executeFile(ctx, config);
+      const result = await executeFile(toolCtx, config);
       return {
         ok: true,
         output: result.content !== undefined ? { content: truncateOutput(result.content) } : { entries: result.entries, path: result.path },
@@ -511,29 +519,29 @@ export class ToolRunner {
     }
 
     if (tool === "git") {
-      const mode = this.registry.checkPermission(ctx, "git");
-      if (mode === "deny") throw new PermissionDeniedError("git", ctx.agentId);
+      const mode = this.#registry.checkPermission(caps, "git");
+      if (mode === "deny") throw new PermissionDeniedError("git", caps.agentId);
       const operation = String(input.operation ?? "");
       if (!["status", "diff", "commit", "branch", "log", "push"].includes(operation)) {
         throw new Error(`git: operation must be one of status|diff|commit|branch|log|push, got '${operation}'`);
       }
       if (operation === "push") {
-        return this.#withApproval(ctx, "git", `git push ${input.remote ?? ""} ${input.branch ?? ""}`.trim(), async () => {
-          const result = await executeGit(ctx, { operation: "push", remote: typeof input.remote === "string" ? input.remote : undefined, branch: typeof input.branch === "string" ? input.branch : undefined });
+        return this.#withApproval(caps, "git", `git push ${input.remote ?? ""} ${input.branch ?? ""}`.trim(), async () => {
+          const result = await executeGit(toolCtx, { operation: "push", remote: typeof input.remote === "string" ? input.remote : undefined, branch: typeof input.branch === "string" ? input.branch : undefined });
           return { ok: result.exitCode === 0, output: { stdout: truncateOutput(result.stdout) }, status: result.exitCode === 0 ? "completed" : "failed" };
         });
       }
       if (operation === "commit") {
         // Commit mutates repo state; require approval for non-engineer roles.
-        const mode2 = this.registry.checkPermission(ctx, "git");
+        const mode2 = this.#registry.checkPermission(caps, "git");
         if (mode2 === "approval") {
-          return this.#withApproval(ctx, "git", `git commit -m "${input.message ?? ""}"`, async () => {
-            const result = await executeGit(ctx, { operation: "commit", message: typeof input.message === "string" ? input.message : undefined, paths: asStringArray(input.paths) });
+          return this.#withApproval(caps, "git", `git commit -m "${input.message ?? ""}"`, async () => {
+            const result = await executeGit(toolCtx, { operation: "commit", message: typeof input.message === "string" ? input.message : undefined, paths: asStringArray(input.paths) });
             return { ok: result.exitCode === 0, output: { stdout: truncateOutput(result.stdout) }, status: result.exitCode === 0 ? "completed" : "failed" };
           });
         }
       }
-      const result = await executeGit(ctx, {
+      const result = await executeGit(toolCtx, {
         operation,
         message: typeof input.message === "string" ? input.message : undefined,
         paths: asStringArray(input.paths),
@@ -570,9 +578,9 @@ export class ToolRunner {
       resolve,
     };
     this.#pending.set(approvalId, pending);
-    this.context.emitEvent?.({
+    this.#context.emitEvent?.({
       id: randomUUID(),
-      workspaceId: this.context.workspaceId,
+      workspaceId: this.#context.workspaceId,
       seq: 0,
       timestamp: Date.now(),
       source: { type: "runtime", id: "tool-runner" },
@@ -581,12 +589,12 @@ export class ToolRunner {
     });
     // Persist via repository so the approval shows in inspectState.
     try {
-      this.context.persistApproval?.({
+      this.#context.persistApproval?.({
         id: approvalId,
-        workspaceId: this.context.workspaceId,
+        workspaceId: this.#context.workspaceId,
         taskId: "tool-runner",
         status: "pending",
-        requester: this.context.agentId,
+        requester: this.#context.agentId,
         reason,
         createdAt: Date.now(),
       });
