@@ -377,7 +377,7 @@ try {
   for (const node of nodes) {
     const simpleType = toSimpleType(node.type);
     const runtimeConfig = mapSimpleToRuntime(simpleType, validAnswersFor(simpleType));
-    const def = nodeRegistry.getDefinition(node.type);
+    const def = nodeRegistry.require(node.type);
     assert.ok(def, `nodeRegistry must know '${node.type}'`);
     const validated = def.config.validate(runtimeConfig);
     assert.equal(typeof validated, "object", `registry must accept mapped config for '${node.type}'`);
@@ -423,7 +423,10 @@ try {
   // ====================================================================
   console.log("Testing workflow launch...");
 
-  const launchNodes = (monthly.nodes as Array<{ id: string; type: string }>).filter((n) => n.type !== "human.approval");
+  // Use the intact Developer Fix/Verify template (full chain incl. approval).
+  const devTemplate = current.find((t) => t.name === "Developer Fix/Verify");
+  assert.ok(devTemplate, "Developer Fix/Verify template must survive CRUD");
+  const launchNodes = (devTemplate.nodes as Array<{ id: string; type: string }>).filter((n) => n.type !== "human.approval");
   const taskIds: string[] = [];
   for (const node of launchNodes) {
     const res = await sendJson<{ taskId: string }>(base, "POST", "/api/nodes/run", {
@@ -447,14 +450,14 @@ try {
   }
 
   // Approval request for the human gate persists an approval.
-  const reviewNode = (monthly.nodes as Array<{ id: string; type: string }>).find((n) => n.type === "human.approval");
-  assert.ok(reviewNode, "monthly template must include a human approval node");
+  const reviewNode = (devTemplate.nodes as Array<{ id: string; type: string }>).find((n) => n.type === "human.approval");
+  assert.ok(reviewNode, "dev template must include a human approval node");
 
   // Graph projection includes the launched nodes.
   const graphRes = await getJson<{ version: number; nodes: Array<{ taskId?: string; type?: string }> }>(base, "/api/graph");
   assert.equal(graphRes.status, 200);
-  assert.equal(graphRes.data.data?.version, 1, "graph must be version 1");
-  const graph = graphRes.data.data!;
+  assert.equal(graphRes.data.version, 1, "graph must be version 1");
+  const graph = graphRes.data;
   for (const taskId of taskIds) {
     assert.ok(graph.nodes.some((n) => n.taskId === taskId), `graph must include task ${taskId}`);
   }
