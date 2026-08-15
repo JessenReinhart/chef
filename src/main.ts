@@ -91,13 +91,22 @@ export interface ChefRuntime {
   retryTask(taskId: TaskId): Promise<void>;
   /** Send a chat message and stream assistant replies via SSE. */
   sendChatMessage(message: string): Promise<OrchestratorResult>;
+  /** Ask the scheduler to dispatch any runnable pending tasks (blueprint canvas). */
+  dispatchPending(): Promise<number>;
+  /** Forward a harness event to the scheduler for task lifecycle updates. */
+  handleSessionEvent(sessionId: string, event: HarnessEvent): Promise<void>;
+  /** Register a harness for a specific agent id (blueprint canvas dispatch). */
+  registerHarness(agentId: string, harness: HarnessLike): void;
   /** Phase 8: deterministic tool runner (terminal/filesystem/git + approval gates). */
   readonly toolRunner: ToolRunner;
   /** Phase 8: browser sessions (Playwright; honest error when absent). */
   readonly browserTool: BrowserTool;
   /** Phase 8: MCP capability client registry. */
   readonly mcpRegistry: McpRegistry;
+  /** Known specialized harness candidates with live availability detection. */
+  readonly specializedHarnesses: SpecializedHarnessRegistry;
 }
+
 export function createChef(options: {
   dbPath: string;
   projectDir: string;
@@ -271,6 +280,7 @@ export function createChef(options: {
     workspaceId,
     repository,
     projectDir: options.projectDir,
+    specializedHarnesses,
     toolRunner,
     browserTool,
     mcpRegistry,
@@ -279,6 +289,11 @@ export function createChef(options: {
       // Detect and register specialized harnesses (Claude Code, Pi, OMP,
       // Freebuff) — binary absence is reported, not fatal.
       await specializedHarnesses.initialize();
+      // Wire specialized harnesses into the scheduler's registry so dispatch
+      // can find them by agent id (task.assignedTo).
+      for (const harness of specializedHarnesses.values()) {
+        runtimeRegistry.set(harness.id as AgentId, harness);
+      }
       try {
         await mcpRegistry.connectAll();
       } catch {
@@ -317,6 +332,15 @@ export function createChef(options: {
       return () => {
         listeners.delete(listener);
       };
+    },
+    dispatchPending(): Promise<number> {
+      return scheduler.dispatchPending(workspaceId);
+    },
+    handleSessionEvent(sessionId: string, event: HarnessEvent): Promise<void> {
+      return scheduler.handleSessionEvent(workspaceId, sessionId, event);
+    },
+    registerHarness(agentId: string, harness: HarnessLike): void {
+      runtimeRegistry.set(agentId as AgentId, harness);
     },
     async close(): Promise<void> {
       // Every harness close is attempted; a rejected harness teardown must not
