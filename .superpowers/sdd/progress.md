@@ -25,8 +25,8 @@
 - [x] CapabilityCrew (partial, merged + main-thread fixes): capabilities, tool-runner, harness adapters, browser/MCP clients in `26edc16`; wiring fixes + tests in `8270fae`
 
 ## Phase 9 — Integration, Docs, Verification
-- [ ] QAAtlas + main thread full verification
+- [x] Main thread: acceptance tests, docs/AUDIT.md, README refresh, full suite verification ✅ 189ac01
 
 ## Baseline
-- HEAD after wave 3: `8270fae`
+- HEAD after wave 4: `189ac01`
 

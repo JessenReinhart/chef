@@ -1,0 +1,340 @@
+import { useEffect, useRef, useState, useCallback } from "react";
+import { api } from "./api";
+import type { ChatMessage } from "./types";
+
+interface ChatPanelProps {
+  onPlanProposed: (taskIds: string[]) => void;
+}
+
+interface SSEChatEvent {
+  type: string;
+  payload: {
+    content?: string;
+    taskIds?: string[];
+    goal?: string;
+    planId?: string;
+    taskCount?: number;
+    error?: string;
+    ok?: boolean;
+    status?: string;
+  };
+  seq?: number;
+}
+
+const QUICK_PROMPTS = [
+  "Create a monthly financial report with CFO approval",
+  "Build a data pipeline: fetch, transform, store",
+  "Design a release workflow with a code-review gate",
+];
+
+/** Assistant system message kind — colors the bubble without abusing `type`. */
+type BubbleKind = "plan.proposed" | "plan.error" | "error";
+
+interface BubbleMessage extends ChatMessage {
+  bubbleKind?: BubbleKind;
+}
+
+export function ChatPanel({ onPlanProposed }: ChatPanelProps) {
+  const [messages, setMessages] = useState<BubbleMessage[]>([]);
+  const [input, setInput] = useState("");
+  const [streaming, setStreaming] = useState(false);
+  const [lastEventSeq, setLastEventSeq] = useState<number | undefined>(undefined);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const onPlanProposedRef = useRef(onPlanProposed);
+  onPlanProposedRef.current = onPlanProposed;
+  const processedIdsRef = useRef<Set<string>>(new Set());
+
+  const scrollToBottom = useCallback(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, []);
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages, scrollToBottom]);
+
+  // Initial history load — dedupes messages already present.
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .chatMessages()
+      .then((msgs) => {
+        if (cancelled) return;
+        setMessages(
+          msgs.filter((m) => m.content && m.timestamp > 0).map((m) => ({ ...m, bubbleKind: m.type === "error" ? "error" : undefined }))
+        );
+      })
+      .catch(() => {
+        // no history — fine
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // SSE subscription for live chat events (auto-reconnects; afterSeq param
+  // makes restarts replay-safe).
+  useEffect(() => {
+    const es = new EventSource(`/api/chat/stream${lastEventSeq !== undefined ? `?afterSeq=${lastEventSeq + 1}` : ""}`);
+    es.onmessage = (ev) => {
+      try {
+        const event = JSON.parse(ev.data) as SSEChatEvent;
+        if (event.seq) setLastEventSeq(event.seq);
+        const id = event.seq !== undefined ? String(event.seq) : `${event.type}:${event.payload.content ?? ""}`;
+
+        switch (event.type) {
+          case "chat.user": {
+            // Echo user message from server (reconnect / catch-up).
+            if (event.payload.content && !processedIdsRef.current.has(id)) {
+              processedIdsRef.current.add(id);
+              setMessages((prev) => {
+                const last = prev[prev.length - 1];
+                if (last?.role === "user" && last.content === event.payload.content) return prev;
+                return [...prev, { role: "user", content: event.payload.content ?? "", timestamp: Date.now() }];
+              });
+            }
+            break;
+          }
+          case "chat.assistant": {
+            if (event.payload.content && !processedIdsRef.current.has(id)) {
+              processedIdsRef.current.add(id);
+              setMessages((prev) => {
+                const last = prev[prev.length - 1];
+                if (last?.role === "assistant" && last.content === event.payload.content) return prev;
+                return [
+                  ...prev,
+                  {
+                    role: "assistant",
+                    content: event.payload.content ?? "",
+                    timestamp: Date.now(),
+                    bubbleKind: event.payload.ok === false ? "error" : undefined,
+                  },
+                ];
+              });
+            }
+            setStreaming(false);
+            break;
+          }
+          case "chat.plan.proposed": {
+            if (event.payload.taskIds && !processedIdsRef.current.has(id)) {
+              processedIdsRef.current.add(id);
+              const taskIds = event.payload.taskIds;
+              const count = event.payload.taskCount ?? taskIds.length;
+              setMessages((prev) => [
+                ...prev,
+                {
+                  role: "assistant",
+                  content: `Spawning ${count} node${count !== 1 ? "s" : ""} on canvas…`,
+                  timestamp: Date.now(),
+                  bubbleKind: "plan.proposed",
+                },
+              ]);
+              if (taskIds.length > 0) onPlanProposedRef.current(taskIds);
+            }
+            break;
+          }
+          case "chat.plan.error": {
+            if (!processedIdsRef.current.has(id)) {
+              processedIdsRef.current.add(id);
+              setMessages((prev) => [
+                ...prev,
+                {
+                  role: "assistant",
+                  content: `Plan failed: ${event.payload.error ?? "unknown error"}`,
+                  timestamp: Date.now(),
+                  bubbleKind: "plan.error",
+                },
+              ]);
+            }
+            setStreaming(false);
+            break;
+          }
+          case "chat.plan.none": {
+            if (!processedIdsRef.current.has(id)) {
+              processedIdsRef.current.add(id);
+              setMessages((prev) => [
+                ...prev,
+                {
+                  role: "assistant",
+                  content: `No plan proposed for: ${event.payload.goal ?? "your request"}`,
+                  timestamp: Date.now(),
+                  bubbleKind: "plan.error",
+                },
+              ]);
+            }
+            setStreaming(false);
+            break;
+          }
+          case "chat.plan.applied": {
+            if (event.payload.status === "failed" && !processedIdsRef.current.has(id)) {
+              processedIdsRef.current.add(id);
+              setMessages((prev) => [
+                ...prev,
+                {
+                  role: "assistant",
+                  content: `Plan execution failed: ${event.payload.error ?? "unknown error"}`,
+                  timestamp: Date.now(),
+                  bubbleKind: "plan.error",
+                },
+              ]);
+            }
+            break;
+          }
+        }
+      } catch {
+        // ignore parse errors
+      }
+    };
+    es.onerror = () => {
+      // auto-reconnect handled by the browser
+    };
+    return () => es.close();
+  }, [lastEventSeq]);
+
+  const send = useCallback(async () => {
+    if (!input.trim() || streaming) return;
+    const text = input.trim();
+    setInput("");
+    setStreaming(true);
+    setMessages((prev) => [...prev, { role: "user", content: text, timestamp: Date.now() }]);
+
+    try {
+      const result = await api.chat(text);
+      // The assistant reply arrives via SSE (chat.assistant). The POST
+      // response is a fallback in case the stream missed it.
+      if (!result.ok) {
+        setMessages((prev) => [
+          ...prev,
+          { role: "assistant", content: result.report, timestamp: Date.now(), bubbleKind: "error" },
+        ]);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: `Error: ${msg}`, timestamp: Date.now(), bubbleKind: "error" },
+      ]);
+    } finally {
+      setStreaming(false);
+      inputRef.current?.focus();
+    }
+  }, [input, streaming]);
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      send();
+    }
+  };
+
+  return (
+    <div className="flex flex-col h-full bg-[#0d1117]">
+      {/* Header */}
+      <div className="flex items-center justify-between h-12 px-4 border-b border-[#21262d] bg-[#010409]/80 backdrop-blur shrink-0">
+        <div className="flex items-center gap-2">
+          <span className="flex items-center justify-center h-6 w-6 rounded-md bg-cyan-500/15 border border-cyan-500/30">
+            <svg className="h-3.5 w-3.5 text-cyan-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+            </svg>
+          </span>
+          <div className="leading-tight">
+            <span className="text-sm font-semibold text-[#e6edf3]">Chat with Chef</span>
+            <span className="block text-[10px] text-[#8b949e]">Orchestrator</span>
+          </div>
+        </div>
+        {streaming && (
+          <span className="flex items-center gap-1.5 text-xs text-cyan-400">
+            <span className="h-2 w-2 rounded-full bg-cyan-400 animate-pulse" />
+            <span>Chef is thinking…</span>
+          </span>
+        )}
+      </div>
+
+      {/* Messages */}
+      <div className="flex-1 overflow-y-auto p-3 space-y-4" ref={messagesEndRef}>
+        {messages.length === 0 && (
+          <div className="text-center text-[#8b949e] pt-10 px-2 space-y-4">
+            <div className="mx-auto h-11 w-11 rounded-xl bg-[#161b22] border border-[#30363d] flex items-center justify-center">
+              <svg className="h-5 w-5 text-cyan-400/70" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+              </svg>
+            </div>
+            <div>
+              <p className="text-sm text-[#e6edf3]">Ask Chef to build a workflow</p>
+              <p className="text-xs mt-1">Chef plans the steps and spawns them as nodes on your canvas.</p>
+            </div>
+            <div className="flex flex-col items-center gap-2">
+              {QUICK_PROMPTS.map((p, i) => (
+                <button
+                  key={i}
+                  onClick={() => {
+                    setInput(p);
+                    inputRef.current?.focus();
+                  }}
+                  className="w-full max-w-xs px-3 py-2 text-left text-xs rounded-lg border border-[#30363d] bg-[#161b22] text-[#8b949e] hover:text-[#e6edf3] hover:border-cyan-500/50 hover:bg-cyan-500/5 transition-colors"
+                >
+                  {p}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        {messages.map((msg, idx) => (
+          <div key={idx} className={`flex gap-3 ${msg.role === "user" ? "flex-row-reverse" : ""}`}>
+            <div
+              className={`flex-shrink-0 h-7 w-7 rounded-full flex items-center justify-center text-xs font-semibold ${
+                msg.role === "user"
+                  ? "bg-cyan-500/20 text-cyan-400 border border-cyan-500/30"
+                  : "bg-green-500/20 text-green-400 border border-green-500/30"
+              }`}
+            >
+              {msg.role === "user" ? "U" : "C"}
+            </div>
+            <div className={`max-w-[80%] ${msg.role === "user" ? "text-right" : "text-left"}`}>
+              <div
+                className={`inline-block px-3 py-2 rounded-2xl text-sm leading-relaxed ${
+                  msg.role === "user"
+                    ? "bg-cyan-500/10 border border-cyan-500/20 text-[#e6edf3] rounded-br-md"
+                    : msg.bubbleKind === "plan.proposed"
+                    ? "bg-amber-500/10 border border-amber-500/20 text-[#e6edf3] rounded-bl-md"
+                    : msg.bubbleKind === "plan.error" || msg.bubbleKind === "error"
+                    ? "bg-red-500/10 border border-red-500/20 text-red-300 rounded-bl-md"
+                    : "bg-green-500/10 border border-green-500/20 text-[#e6edf3] rounded-bl-md"
+                }`}
+              >
+                {msg.content}
+              </div>
+              <div className="mt-1 text-[10px] text-[#8b949e]">
+                {new Date(msg.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Input */}
+      <div className="p-3 border-t border-[#21262d] bg-[#010409]/80 backdrop-blur shrink-0">
+        <div className="flex gap-2">
+          <input
+            ref={inputRef}
+            type="text"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Describe what you want to build…"
+            disabled={streaming}
+            className="flex-1 bg-[#161b22] border border-[#30363d] rounded-lg px-3 py-2 text-sm text-[#e6edf3] placeholder-[#8b949e] focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500 disabled:opacity-50 transition-colors"
+            autoFocus
+          />
+          <button
+            onClick={send}
+            disabled={!input.trim() || streaming}
+            className="px-4 py-2 bg-cyan-500 text-[#010409] font-medium rounded-lg hover:bg-cyan-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            Send
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

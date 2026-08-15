@@ -51,6 +51,27 @@ export function createHttpServer(runtime: ChefRuntime): Server {
         sendJson(res, 200, buildPlanGraph(snapshot));
         return;
       }
+      // Harness detection registry: every known specialized candidate plus the
+      // generic PTY fallback, with live availability from the runtime registry.
+      if (req.method === "GET" && path === "/api/harnesses") {
+        const available = new Set(runtime.specializedHarnesses.availableIds());
+        const KNOWN: Array<{ id: string; name: string; type: string }> = [
+          { id: "claude-code", name: "Claude Code", type: "claude-code" },
+          { id: "pi", name: "Pi", type: "pi" },
+          { id: "omp", name: "OMP", type: "omp" },
+          { id: "freebuff", name: "Freebuff", type: "freebuff" },
+          { id: "generic", name: "Generic Terminal", type: "generic" },
+        ];
+        const data = KNOWN.map((h) => ({
+          id: h.id,
+          name: h.name,
+          type: h.type,
+          available: h.id === "generic" ? true : available.has(h.id),
+        }));
+        sendJson(res, 200, { ok: true, data });
+        return;
+      }
+
 
       if (req.method === "GET" && path === "/api/events") {
         const typesParam = url.searchParams.get("types");
@@ -274,60 +295,129 @@ export function createHttpServer(runtime: ChefRuntime): Server {
         return;
       }
 
-      if (req.method === "DELETE" && templateIdMatch) {
-        const [, templateId] = templateIdMatch;
-        runtime.repository.deleteTemplate(templateId);
-        sendJson(res, 200, { ok: true });
-        return;
-      }
-
-      // ============================================================
-      // Node-run endpoints (task + session for node execution)
-      // ============================================================
-      if (req.method === "POST" && path === "/api/nodes/run") {
-        const body = (await readBody(req)) as { nodeId?: string; title?: string; assignedTo?: string; workflowNodeId?: string };
-        if (typeof body.nodeId !== "string" || body.nodeId.length === 0) {
-          sendJson(res, 400, { error: "nodeId is required" });
+      if (req.method === "POST" && path === "/api/nodes") {
+        const body = (await readBody(req)) as {
+          type?: string;
+          title?: string;
+          kind?: string;
+          config?: Record<string, unknown>;
+          position?: { x: number; y: number };
+          dependencies?: string[];
+          autoDispatch?: boolean;
+          assignedTo?: string;
+        };
+        if (typeof body.type !== "string" || body.type.length === 0) {
+          sendJson(res, 400, { error: "type is required" });
           return;
         }
         const task = runtime.repository.createTask({
           workspaceId: runtime.workspaceId,
-          title: body.title ?? `Run node ${body.nodeId}`,
-          description: `Execute node ${body.nodeId}`,
+          title: body.title ?? `Node ${body.type}`,
+          description: `Blueprint node: ${body.type}`,
           status: "pending",
+          workflowNodeId: body.type,
+          contextRefs: [],
+          dependencies: body.dependencies,
           assignedTo: body.assignedTo,
-          workflowNodeId: body.workflowNodeId ?? body.nodeId,
         });
-        sendJson(res, 201, { ok: true, data: { taskId: task.id } });
+        // If user wants immediate execution, trigger dispatch
+        if (body.autoDispatch) {
+          void runtime.dispatchPending().catch((err) => console.error("dispatch error:", err));
+        }
+        sendJson(res, 201, { ok: true, data: { taskId: task.id, workflowNodeId: task.workflowNodeId } });
         return;
       }
 
-      const nodeTaskIdMatch = path.match(/^\/api\/nodes\/([^/]+)\/status$/);
-      if (req.method === "GET" && nodeTaskIdMatch) {
-        const [, taskId] = nodeTaskIdMatch;
-        const task = runtime.repository.getTask(taskId);
-        if (!task) {
-          sendJson(res, 404, { error: `task not found: ${taskId}` });
+      const nodeIdMatch = path.match(/^\/api\/nodes\/([^/]+)$/);
+      if (req.method === "PATCH" && nodeIdMatch) {
+        const [, taskId] = nodeIdMatch;
+        const body = (await readBody(req)) as {
+          title?: string;
+          config?: Record<string, unknown>;
+          position?: { x: number; y: number };
+          dependencies?: string[];
+        };
+        const current = runtime.repository.getTask(taskId);
+        if (!current) {
+          sendJson(res, 404, { error: `node not found: ${taskId}` });
           return;
         }
-        sendJson(res, 200, { ok: true, data: task });
+        const patch: Record<string, unknown> = {};
+        if (typeof body.title === "string") patch.title = body.title;
+        if (body.config !== undefined) patch.contextRefs = body.config;
+        if (body.dependencies !== undefined) patch.dependencies = body.dependencies;
+        if (Object.keys(patch).length > 0) {
+          const updated = runtime.repository.updateTask(taskId, patch as Parameters<Repository["updateTask"]>[1]);
+          sendJson(res, 200, { ok: true, data: updated });
+        } else {
+          sendJson(res, 200, { ok: true, data: current });
+        }
         return;
       }
 
-      const nodeCancelMatch = path.match(/^\/api\/nodes\/([^/]+)\/cancel$/);
-      if (req.method === "POST" && nodeCancelMatch) {
-        const [, taskId] = nodeCancelMatch;
-        await runtime.cancelTask(taskId);
+      if (req.method === "DELETE" && nodeIdMatch) {
+        const [, taskId] = nodeIdMatch;
+        // Note: tasks are never truly deleted; we mark cancelled
+        const task = runtime.repository.getTask(taskId);
+        if (!task) {
+          sendJson(res, 404, { error: `node not found: ${taskId}` });
+          return;
+        }
+        runtime.repository.updateTask(taskId, { status: "cancelled" });
         sendJson(res, 200, { ok: true });
         return;
       }
 
-      const nodeRetryMatch = path.match(/^\/api\/nodes\/([^/]+)\/retry$/);
-      if (req.method === "POST" && nodeRetryMatch) {
-        const [, taskId] = nodeRetryMatch;
-        await runtime.retryTask(taskId);
+      // Edges: create task dependency
+      if (req.method === "POST" && path === "/api/edges") {
+        const body = (await readBody(req)) as { source?: string; target?: string; kind?: string };
+        if (typeof body.source !== "string" || typeof body.target !== "string") {
+          sendJson(res, 400, { error: "source and target required" });
+          return;
+        }
+        // Validate both tasks exist
+        const src = runtime.repository.getTask(body.source);
+        const tgt = runtime.repository.getTask(body.target);
+        if (!src || !tgt) {
+          sendJson(res, 404, { error: "source or target task not found" });
+          return;
+        }
+        // Add dependency: target depends on source
+        runtime.repository.updateTask(body.target, { dependencies: [...(tgt.dependencies ?? []), body.source] });
+        sendJson(res, 201, { ok: true, data: { source: body.source, target: body.target } });
+        return;
+      }
+
+      const edgeIdMatch = path.match(/^\/api\/edges\/([^/]+)$/);
+      if (req.method === "DELETE" && edgeIdMatch) {
+        // edgeId format: "source->target" (browser encodes `>` as %3E on the wire)
+        const [, edgeIdRaw] = edgeIdMatch;
+        const edgeId = decodeURIComponent(edgeIdRaw);
+        const [source, target] = edgeId.split("->");
+        if (!source || !target) {
+          sendJson(res, 400, { error: "invalid edge id format (use source->target)" });
+          return;
+        }
+        const tgt = runtime.repository.getTask(target);
+        if (!tgt) {
+          sendJson(res, 404, { error: `target task not found: ${target}` });
+          return;
+        }
+        const deps = (tgt.dependencies ?? []).filter((d) => d !== source);
+        runtime.repository.updateTask(target, { dependencies: deps });
         sendJson(res, 200, { ok: true });
         return;
+      }
+
+      // Dispatch: manually trigger scheduler
+      if (req.method === "POST" && path === "/api/dispatch") {
+        const dispatched = await runtime.dispatchPending();
+        sendJson(res, 200, { ok: true, data: { dispatched } });
+        return;
+      }
+
+      // Existing /api/nodes/run etc remain for backward compat
+      if (req.method === "POST" && path === "/api/nodes/run") {
       }
 
       // ============================================================

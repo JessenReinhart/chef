@@ -44,6 +44,17 @@ export class SpecializedCliHarness {
     this.#cwd = options.cwd;
   }
 
+  /** Scheduler-compatible command surface (resolved at spawn time). */
+  get command(): string {
+    return this.#binary;
+  }
+  get args(): string[] {
+    return [...this.#flags];
+  }
+  get cwd(): string {
+    return this.#cwd ?? process.cwd();
+  }
+
   /** Binary availability on PATH (absolute paths pass through). */
   async detect(): Promise<boolean> {
     const { access } = await import("node:fs/promises");
