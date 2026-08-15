@@ -1,10 +1,10 @@
-import { useEffect, useState, useCallback } from "react";
-import type { RuntimeEvent, WorkspaceSnapshot, Session } from "../../src/core/types.ts";
+import { useEffect, useRef, useState, useCallback } from "react";
+import type { RuntimeEvent, TaskStatus, WorkspaceSnapshot, Session } from "../../src/core/types.ts";
 import type { GraphNode } from "../../src/core/graph.ts";
 import { CanvasPanel } from "./CanvasPanel.tsx";
 import { NavigationPanel } from "./NavigationPanel.tsx";
 import { InspectorPanel } from "./InspectorPanel.tsx";
-import { ConsolePanel } from "./ConsolePanel.tsx";
+import { ConsolePanel, type ConsoleMetrics } from "./ConsolePanel.tsx";
 import { LogsPanel } from "./LogsPanel.tsx";
 import { TerminalPanes } from "./TerminalPanes.tsx";
 import { ContextBusPanel } from "./ContextBusPanel.tsx";
@@ -71,8 +71,17 @@ export function App() {
     }
     return "simple";
   });
+  const startTimeRef = useRef<number>(Date.now());
+  const [metrics, setMetrics] = useState<ConsoleMetrics>({
+    liveSessions: 0,
+    tasksByStatus: {},
+    artifacts: 0,
+    cost: null,
+    tokens: null,
+    elapsedMs: 0,
+  });
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
-  const [powerTabs, setPowerTabs] = useState<"logs" | "terminals" | "context" | "inspector">("logs");
+  const [powerTabs, setPowerTabs] = useState<"logs" | "terminals" | "context" | "inspector" | "console">("logs");
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
 
   // Simple mode state
@@ -115,6 +124,25 @@ export function App() {
       clearInterval(timer);
     };
   }, [refresh]);
+
+  // Derive execution metrics for the console strip; cost/tokens stay
+  // "unknown" until the runtime exposes them.
+  useEffect(() => {
+    if (!state.snapshot) return;
+    const tasksByStatus: Partial<Record<TaskStatus, number>> = {};
+    for (const task of state.snapshot.tasks) {
+      tasksByStatus[task.status] = (tasksByStatus[task.status] ?? 0) + 1;
+    }
+    const liveSessions = state.sessions.filter((s) => s.status === "running" || s.status === "spawning").length;
+    setMetrics({
+      liveSessions,
+      tasksByStatus,
+      artifacts: state.snapshot.artifacts.length,
+      cost: null,
+      tokens: null,
+      elapsedMs: Date.now() - startTimeRef.current,
+    });
+  }, [state.snapshot, state.sessions]);
 
   const send = async () => {
     const sessionId = state.sessions.find((s) => s.status === "running")?.id;
@@ -228,8 +256,7 @@ export function App() {
       </div>
 
       {/* ── Bottom: console ──────────────────────────────── */}
-      <ConsolePanel events={state.events} />
-
+      <ConsolePanel events={state.events} snapshot={state} metrics={metrics} />
       {/* Direct session controls ────────────────────────── */}
       {runningSession && (
         <div className="wb-session-ctl">
@@ -316,6 +343,14 @@ export function App() {
           >
             Wide Inspector
           </button>
+          <button
+            role="tab"
+            aria-selected={powerTabs === "console"}
+            className={`wb-power-panels__tab ${powerTabs === "console" ? "wb-power-panels__tab--active" : ""}`}
+            onClick={() => setPowerTabs("console")}
+          >
+            Console
+          </button>
         </div>
 
         <div className="wb-power-panels__content">
@@ -339,6 +374,9 @@ export function App() {
             />
           )}
           {powerTabs === "inspector" && <WideInspector selectedNode={selectedNode} />}
+          {powerTabs === "console" && (
+            <ConsolePanel events={state.events} snapshot={state} metrics={metrics} />
+          )}
         </div>
       </div>
     </>

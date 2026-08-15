@@ -1,5 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import type { RuntimeEvent } from "../../src/core/types.ts";
+import type {
+  Approval,
+  Artifact,
+  RuntimeEvent,
+  Task,
+  TaskStatus,
+  WorkspaceSnapshot,
+} from "../../src/core/types.ts";
 import { NodeIcon } from "./nodeCatalog.tsx";
 
 interface ChatMessageView {
@@ -18,6 +25,35 @@ interface ChatEventPayload {
   taskCount?: number;
   ok?: boolean;
 }
+
+/** Snapshot supplied by the workbench shell (App.tsx); may be null before first refresh. */
+export interface ConsoleSnapshot {
+  snapshot: WorkspaceSnapshot | null;
+  sessions: Array<{ id: string; taskId: string; status: string; pid: number }>;
+}
+
+export interface ConsoleMetrics {
+  liveSessions: number;
+  tasksByStatus: Partial<Record<TaskStatus, number>>;
+  artifacts: number;
+  cost: number | null;
+  tokens: number | null;
+  elapsedMs: number | null;
+}
+
+export type ConsoleTab = "timeline" | "artifacts" | "blockers" | "events" | "chat";
+
+const TABS: Array<{ id: ConsoleTab; label: string }> = [
+  { id: "timeline", label: "Timeline" },
+  { id: "artifacts", label: "Artifacts" },
+  { id: "blockers", label: "Blockers" },
+  { id: "events", label: "Events" },
+  { id: "chat", label: "Chat" },
+];
+
+// ---------------------------------------------------------------------------
+// Chat plumbing (unchanged from Phase 6)
+// ---------------------------------------------------------------------------
 
 function payloadContent(event: RuntimeEvent): string | null {
   const payload = event.payload as ChatEventPayload | undefined;
@@ -42,13 +78,141 @@ function isAssistantTerminal(event: RuntimeEvent): boolean {
   return event.type === "chat.assistant" || event.type === "chat.plan.error" || event.type === "chat.plan.none";
 }
 
-export function ConsolePanel({ events }: { events: RuntimeEvent[] }) {
-  const [activeTab, setActiveTab] = useState<"events" | "chat">("events");
+// ---------------------------------------------------------------------------
+// Execution console helpers
+// ---------------------------------------------------------------------------
+
+/** Event types that carry live node output (feed the progress indicator). */
+function isLiveOutput(event: RuntimeEvent): boolean {
+  return event.type === "session.data" || event.type.startsWith("task.") || event.type === "session.crash";
+}
+
+const TERMINAL_TASKS: ReadonlySet<TaskStatus> = new Set(["completed", "failed", "cancelled"]);
+
+/** Latest task snapshot plus timing derived from the event log (duration while running). */
+interface TaskRow {
+  task: Task;
+  startedAt: number | null;
+  durationMs: number | null;
+  lastLiveAt: number;
+  recentOutput: string[];
+}
+
+function summarizeTaskEvents(taskId: string, events: RuntimeEvent[]): TaskRow {
+  let startedAt: number | null = null;
+  let lastLiveAt = 0;
+  const recentOutput: string[] = [];
+  for (const event of events) {
+    if (event.taskId !== taskId) continue;
+    if (event.type === "task.started" && startedAt === null) startedAt = event.timestamp;
+    if (isLiveOutput(event)) lastLiveAt = Math.max(lastLiveAt, event.timestamp);
+    if (event.type === "session.data") {
+      const data = (event.payload as { data?: string } | undefined)?.data;
+      if (data) recentOutput.push(data);
+    }
+  }
+  return { task: null as unknown as Task, startedAt, durationMs: null, lastLiveAt, recentOutput: recentOutput.slice(-4) };
+}
+
+/** Group a task's live output into <=8 compact lines (latest first). */
+function compactOutput(rows: string[]): string[] {
+  const lines: string[] = [];
+  for (const chunk of rows) {
+    for (const line of chunk.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (trimmed.length === 0) continue;
+      lines.push(trimmed.length > 160 ? `${trimmed.slice(0, 157)}…` : trimmed);
+      if (lines.length >= 8) return lines;
+    }
+  }
+  return lines;
+}
+
+function formatDuration(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return "unknown";
+  const totalSeconds = Math.floor(ms / 1000);
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
+}
+
+function formatTime(ts: number): string {
+  return new Date(ts).toLocaleTimeString([], { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+const ARTIFACT_ICONS: Record<string, string> = {
+  file: "📄",
+  document: "📃",
+  code: "⌘",
+  image: "🖼",
+  research: "🔍",
+  result: "✓",
+};
+
+const TASK_STATUS_ORDER: TaskStatus[] = ["running", "completed", "failed", "blocked", "pending", "assigned", "cancelled"];
+const TASK_STATUS_LABEL: Record<TaskStatus, string> = {
+  pending: "Waiting",
+  assigned: "Assigned",
+  running: "Running",
+  blocked: "Blocked",
+  completed: "Completed",
+  failed: "Failed",
+  cancelled: "Cancelled",
+};
+
+/** Latest terminal status per task from the immutable event log (runtime-authoritative). */
+function statusFromEvents(taskId: string, events: RuntimeEvent[]): TaskStatus | null {
+  let status: TaskStatus | null = null;
+  for (const event of events) {
+    if (event.taskId !== taskId || !event.type.startsWith("task.")) continue;
+    const to = (event.payload as { to?: string } | undefined)?.to;
+    if (event.type === "task.started") status = "running";
+    else if (event.type === "task.completed") status = "completed";
+    else if (event.type === "task.failed") status = "failed";
+    else if (event.type === "task.cancelled") status = "cancelled";
+    else if (event.type === "task.blocked") status = "blocked";
+    else if (event.type === "task.assigned") status = "assigned";
+    else if (event.type === "task.created") status = "pending";
+    if (to && TERMINAL_TASKS.has(to as TaskStatus)) status = to as TaskStatus;
+  }
+  return status;
+}
+
+/** Event-log timing for a task: start time, terminal time, terminal status. */
+function eventTiming(taskId: string, events: RuntimeEvent[]): { startedAt: number | null; endedAt: number | null; terminal: TaskStatus | null } {
+  let startedAt: number | null = null;
+  let endedAt: number | null = null;
+  let terminal: TaskStatus | null = null;
+  for (const event of events) {
+    if (event.taskId !== taskId || !event.type.startsWith("task.")) continue;
+    if (event.type === "task.started" && startedAt === null) startedAt = event.timestamp;
+    if (event.type === "task.completed" || event.type === "task.failed" || event.type === "task.cancelled") {
+      endedAt = event.timestamp;
+      terminal = event.type === "task.completed" ? "completed" : event.type === "task.failed" ? "failed" : "cancelled";
+    }
+  }
+  return { startedAt, endedAt, terminal };
+}
+
+// ---------------------------------------------------------------------------
+// ConsolePanel
+// ---------------------------------------------------------------------------
+
+export function ConsolePanel({ events, snapshot, metrics }: { events: RuntimeEvent[]; snapshot: ConsoleSnapshot; metrics: ConsoleMetrics }) {
+  const [activeTab, setActiveTab] = useState<ConsoleTab>("timeline");
   const [chatInput, setChatInput] = useState("");
   const [messages, setMessages] = useState<ChatMessageView[]>([]);
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastSeq, setLastSeq] = useState(0);
+  const [now, setNow] = useState(Date.now());
+  const [expandedArtifacts, setExpandedArtifacts] = useState<Set<string>>(new Set());
+  const [artifacts, setArtifacts] = useState<Artifact[]>([]);
+  const [artifactsError, setArtifactsError] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState<Set<string>>(new Set());
+  const [approvalBusy, setApprovalBusy] = useState<Set<string>>(new Set());
+  const [actionError, setActionError] = useState<string | null>(null);
   const messagesRef = useRef<ChatMessageView[]>([]);
   const streamRef = useRef<EventSource | null>(null);
 
@@ -60,6 +224,12 @@ export function ConsolePanel({ events }: { events: RuntimeEvent[] }) {
   useEffect(() => {
     setLastSeq((prev) => Math.max(prev, ...events.map((e) => e.seq)));
   }, [events]);
+
+  // Clock tick so running-node durations and elapsed metrics update live.
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   // Load persisted chat history on mount.
   useEffect(() => {
@@ -82,6 +252,28 @@ export function ConsolePanel({ events }: { events: RuntimeEvent[] }) {
       }
     })();
   }, []);
+
+  // Load artifact cards from the inspector endpoint on mount and whenever the
+  // snapshot's artifact count changes (runtime-authoritative projection).
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch("/api/inspector/artifacts");
+        if (!res.ok) throw new Error(`artifacts ${res.status}`);
+        const data = (await res.json()) as { ok: boolean; data: Artifact[] };
+        if (!cancelled) {
+          setArtifacts(data.data);
+          setArtifactsError(null);
+        }
+      } catch (err) {
+        if (!cancelled) setArtifactsError(err instanceof Error ? err.message : String(err));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [snapshot.snapshot?.artifacts.length]);
 
   // Subscribe to the chat SSE stream; replays from the last seen seq.
   useEffect(() => {
@@ -136,17 +328,6 @@ export function ConsolePanel({ events }: { events: RuntimeEvent[] }) {
           pendingAssistant = updated;
           setMessages((prev) => prev.map((m) => (m === updated ? updated : m)));
         }
-
-        // Streaming progress (plan proposed / applied): accumulate into the
-        // current assistant bubble if one is open, otherwise start one.
-        if (!pendingAssistant) {
-          pendingAssistant = { role: "assistant", content, timestamp: event.timestamp };
-          setStreaming(true);
-          setMessages((prev) => [...prev, pendingAssistant as ChatMessageView]);
-        } else {
-          pendingAssistant = { ...pendingAssistant, content: pendingAssistant.content + "\n" + content };
-          setMessages((prev) => prev.map((m) => (m === pendingAssistant ? pendingAssistant! : m)));
-        }
       } catch {
         // Ignore malformed frames.
       }
@@ -200,6 +381,120 @@ export function ConsolePanel({ events }: { events: RuntimeEvent[] }) {
     setStreaming(false);
   };
 
+  // -------------------------------------------------------------------------
+  // Execution console actions (all go through runtime APIs)
+  // -------------------------------------------------------------------------
+
+  const retryTask = async (taskId: string) => {
+    setActionError(null);
+    setRetrying((prev) => new Set(prev).add(taskId));
+    try {
+      const res = await fetch(`/api/nodes/${taskId}/retry`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(body?.error ?? `retry failed (${res.status})`);
+      }
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRetrying((prev) => {
+        const next = new Set(prev);
+        next.delete(taskId);
+        return next;
+      });
+    }
+  };
+
+  const resolveApproval = async (approvalId: string, decision: "accept" | "reject") => {
+    setActionError(null);
+    setApprovalBusy((prev) => new Set(prev).add(approvalId));
+    try {
+      const res = await fetch(`/api/approvals/${approvalId}/${decision}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ approver: "console" }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(body?.error ?? `approval ${decision} failed (${res.status})`);
+      }
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setApprovalBusy((prev) => {
+        const next = new Set(prev);
+        next.delete(approvalId);
+        return next;
+      });
+    }
+  };
+
+  // -------------------------------------------------------------------------
+  // Derived execution views (runtime-authoritative projections)
+  // -------------------------------------------------------------------------
+
+  const { snapshot: ws } = snapshot;
+  const tasks: Task[] = ws?.tasks ?? [];
+  const approvals: Approval[] = ws?.approvals ?? [];
+  const pendingApprovals = approvals.filter((a) => a.status === "pending");
+  const approvalIds = new Set(approvals.map((a) => a.id));
+
+  // Timeline rows: one per task, status from the event log overrides the
+  // snapshot when the log shows a newer terminal state.
+  const timeline = tasks
+    .map((task) => {
+      const logStatus = statusFromEvents(task.id, events);
+      const timing = eventTiming(task.id, events);
+      const status: TaskStatus =
+        logStatus && (logStatus !== "running" || !TERMINAL_TASKS.has(task.status)) ? logStatus : task.status;
+      const durationMs =
+        timing.endedAt !== null && timing.startedAt !== null
+          ? timing.endedAt - timing.startedAt
+          : status === "running" && timing.startedAt !== null
+            ? now - timing.startedAt
+            : null;
+      const lastLiveAt = events
+        .filter((e) => e.taskId === task.id && isLiveOutput(e))
+        .reduce((max, e) => Math.max(max, e.timestamp), 0);
+      return { task, status, startedAt: timing.startedAt, durationMs, lastLiveAt };
+    })
+    .sort((a, b) => {
+      const rank: Record<TaskStatus, number> = { running: 0, blocked: 1, failed: 2, pending: 3, assigned: 4, completed: 5, cancelled: 6 };
+      return rank[a.status] - rank[b.status] || a.task.createdAt - b.task.createdAt;
+    });
+
+  const running = timeline.filter((row) => row.status === "running").length;
+  const failedCount = timeline.filter((row) => row.status === "failed").length;
+
+  // Blockers summary: pending approvals + tasks waiting on them, plus tasks
+  // with unresolved dependencies that keep them pending.
+  const blockedTasks = tasks.filter((t) => t.status === "blocked");
+  const pendingApprovalTaskIds = new Set(pendingApprovals.map((a) => a.taskId));
+  const waitingTasks = tasks.filter(
+    (t) =>
+      (t.status === "pending" || t.status === "assigned") &&
+      t.dependencies.some((dep) => {
+        const depTask = tasks.find((x) => x.id === dep);
+        return depTask === undefined || depTask.status !== "completed";
+      }),
+  );
+
+  // Metrics strip (App.tsx supplies computed values; missing = "unknown").
+  const metricCells: Array<{ label: string; value: string }> = [
+    { label: "Live sessions", value: String(metrics.liveSessions) },
+    { label: "Running", value: String(running) },
+    { label: "Completed", value: String(metrics.tasksByStatus.completed ?? 0) },
+    { label: "Failed", value: String(failedCount) },
+    { label: "Artifacts", value: String(metrics.artifacts) },
+    { label: "Cost", value: metrics.cost === null ? "unknown" : `$${metrics.cost.toFixed(2)}` },
+    { label: "Tokens", value: metrics.tokens === null ? "unknown" : String(metrics.tokens) },
+    { label: "Elapsed", value: metrics.elapsedMs === null ? "unknown" : formatDuration(metrics.elapsedMs) },
+  ];
+
   const eventColors: Record<string, string> = {
     "task.created": "var(--accent-blue)",
     "task.assigned": "var(--accent-blue)",
@@ -224,30 +519,284 @@ export function ConsolePanel({ events }: { events: RuntimeEvent[] }) {
       <header className="wb-console__header">
         <h3 className="wb-console__title">Console</h3>
         <div className="wb-console__tabs" role="tablist">
-          <button
-            className={`wb-console__tab ${activeTab === "events" ? "wb-console__tab--active" : ""}`}
-            role="tab"
-            aria-selected={activeTab === "events"}
-            onClick={() => setActiveTab("events")}
-          >
-            Events
-          </button>
-          <button
-            className={`wb-console__tab ${activeTab === "chat" ? "wb-console__tab--active" : ""}`}
-            role="tab"
-            aria-selected={activeTab === "chat"}
-            onClick={() => setActiveTab("chat")}
-          >
-            Chat with Chef
-          </button>
+          {TABS.map((tab) => (
+            <button
+              key={tab.id}
+              className={`wb-console__tab ${activeTab === tab.id ? "wb-console__tab--active" : ""}`}
+              role="tab"
+              aria-selected={activeTab === tab.id}
+              onClick={() => setActiveTab(tab.id)}
+            >
+              {tab.label}
+              {tab.id === "blockers" && pendingApprovals.length > 0 && (
+                <span className="wb-console__tab-badge">{pendingApprovals.length}</span>
+              )}
+              {tab.id === "artifacts" && artifacts.length > 0 && (
+                <span className="wb-console__tab-badge">{artifacts.length}</span>
+              )}
+            </button>
+          ))}
         </div>
       </header>
 
+      {/* ── Metrics strip ─────────────────────────────────────── */}
+      <div className="wb-console__metrics" role="group" aria-label="Execution metrics">
+        {metricCells.map((cell) => (
+          <div key={cell.label} className="wb-console__metric">
+            <span className="wb-console__metric-value">{cell.value}</span>
+            <span className="wb-console__metric-label">{cell.label}</span>
+          </div>
+        ))}
+      </div>
+
+      {actionError && (
+        <div className="wb-console__action-error" role="status">
+          {actionError}
+        </div>
+      )}
+
       <div className="wb-console__content">
+        {/* Timeline panel */}
+        <div className={`wb-console__panel ${activeTab === "timeline" ? "wb-console__panel--active" : ""}`} role="tabpanel">
+          {timeline.length === 0 ? (
+            <p className="wb-console__empty">No nodes executed yet. Run a workflow and watch it here.</p>
+          ) : (
+            <ol className="wb-console__timeline">
+              {timeline.map(({ task, status, startedAt, durationMs, lastLiveAt }) => {
+                const recentOutput = compactOutput(summarizeTaskEvents(task.id, events).recentOutput);
+                const failed = status === "failed";
+                const liveNow = status === "running";
+                return (
+                  <li key={task.id} className={`wb-console__timeline-row wb-console__timeline-row--${status}`}>
+                    <span className={`wb-console__dot wb-console__dot--${status}`} aria-hidden />
+                    <div className="wb-console__timeline-main">
+                      <div className="wb-console__timeline-head">
+                        <span className="wb-console__timeline-name">{task.title}</span>
+                        <span className="wb-console__timeline-status">{TASK_STATUS_LABEL[status]}</span>
+                        {durationMs !== null && (
+                          <span className="wb-console__timeline-duration">{formatDuration(durationMs)}</span>
+                        )}
+                        </div>
+                      {liveNow && (
+                        <div className="wb-console__progress" role="progressbar" aria-label={`${task.title} progress`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={100}>
+                          <div className="wb-console__progress-indeterminate" />
+                        </div>
+                      )}
+                      {failed && task.error && (
+                        <div className="wb-console__error">
+                          <span className="wb-console__error-message">{task.error}</span>
+                          <span className="wb-console__replan-hint">Tip: check node inputs, then retry or replan from the canvas.</span>
+                        </div>
+                      )}
+                      {failed && (
+                        <div className="wb-console__error-actions">
+                          <button
+                            className="wb-btn wb-btn--primary wb-btn--sm"
+                            onClick={() => void retryTask(task.id)}
+                            disabled={retrying.has(task.id)}
+                          >
+                            {retrying.has(task.id) ? "Retrying…" : "Retry"}
+                          </button>
+                        </div>
+                      )}
+                      {task.status === "blocked" && !approvalIds.has(task.approvalId ?? "") && (
+                        <div className="wb-console__blocked-note">Blocked — waiting on a dependency or external condition.</div>
+                      )}
+                      {recentOutput.length > 0 && (
+                        <details className="wb-console__output" open={liveNow}>
+                          <summary>{liveNow ? "live output" : "output"}</summary>
+                          {recentOutput.map((line, idx) => (
+                            <div key={idx} className="wb-console__output-line">{line}</div>
+                          ))}
+                        </details>
+                      )}
+                    </div>
+                    <div className="wb-console__timeline-meta">
+                      {startedAt !== null && <span className="wb-console__timeline-time">{formatTime(startedAt)}</span>}
+                      {liveNow && lastLiveAt > 0 && <span className="wb-console__timeline-live">● live</span>}
+                    </div>
+                  </li>
+                );
+              })}
+            </ol>
+          )}
+        </div>
+
+        {/* Artifacts panel */}
+        <div className={`wb-console__panel ${activeTab === "artifacts" ? "wb-console__panel--active" : ""}`} role="tabpanel">
+          {artifactsError ? (
+            <p className="wb-console__empty">Could not load artifacts: {artifactsError}</p>
+          ) : artifacts.length === 0 ? (
+            <p className="wb-console__empty">No artifacts yet. Completed nodes publish results here.</p>
+          ) : (
+            <ul className="wb-console__artifacts">
+              {artifacts.slice().reverse().map((artifact) => {
+                const expanded = expandedArtifacts.has(artifact.id);
+                const preview = artifact.metadata?.content;
+                const previewText =
+                  typeof preview === "string"
+                    ? preview
+                    : typeof preview === "object" && preview !== null
+                      ? JSON.stringify(preview, null, 2)
+                      : null;
+                return (
+                  <li key={artifact.id} className="wb-console__artifact">
+                    <div className="wb-console__artifact-icon" aria-hidden>
+                      {ARTIFACT_ICONS[artifact.type] ?? "📦"}
+                    </div>
+                    <div className="wb-console__artifact-info">
+                      <div className="wb-console__artifact-head">
+                        <span className="wb-console__artifact-name">{artifact.name}</span>
+                        <span className="wb-console__artifact-type">{artifact.type}</span>
+                        <span className="wb-console__artifact-version">v{artifact.version}</span>
+                      </div>
+                      <div className="wb-console__artifact-meta">
+                        by {artifact.createdBy}
+                        {artifact.taskId ? ` · task ${artifact.taskId.slice(0, 8)}` : ""}
+                        {artifact.uri ? ` · ${artifact.uri}` : ""}
+                      </div>
+                      <div className="wb-console__artifact-actions">
+                        <button
+                          className="wb-btn wb-btn--ghost wb-btn--sm"
+                          onClick={() => {
+                            setExpandedArtifacts((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(artifact.id)) next.delete(artifact.id);
+                              else next.add(artifact.id);
+                              return next;
+                            });
+                          }}
+                        >
+                          {expanded ? "Hide preview" : "Preview"}
+                        </button>
+                        <a
+                          className="wb-btn wb-btn--ghost wb-btn--sm"
+                          href={artifact.uri}
+                          target="_blank"
+                          rel="noreferrer"
+                          download={artifact.name}
+                        >
+                          Download
+                        </a>
+                        <button
+                          className="wb-btn wb-btn--ghost wb-btn--sm"
+                          onClick={() => {
+                            void navigator.clipboard?.writeText(artifact.uri).catch(() => undefined);
+                          }}
+                        >
+                          Share
+                        </button>
+                      </div>
+                      {expanded && previewText !== null && (
+                        <pre className="wb-console__artifact-preview">{previewText}</pre>
+                      )}
+                      {expanded && previewText === null && (
+                        <p className="wb-console__artifact-preview wb-console__artifact-preview--empty">
+                          No preview available for this artifact.
+                        </p>
+                      )}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+
+        {/* Blockers panel */}
+        <div className={`wb-console__panel ${activeTab === "blockers" ? "wb-console__panel--active" : ""}`} role="tabpanel">
+          {pendingApprovals.length === 0 && blockedTasks.length === 0 && waitingTasks.length === 0 ? (
+            <p className="wb-console__empty">No blockers. All clear.</p>
+          ) : (
+            <div className="wb-console__blockers">
+              {pendingApprovals.length > 0 && (
+                <section className="wb-console__blocker-section">
+                  <h4 className="wb-console__blocker-heading">Pending approvals ({pendingApprovals.length})</h4>
+                  <ul className="wb-console__approval-list">
+                    {pendingApprovals.map((approval) => {
+                      const linkedTask = tasks.find((t) => t.id === approval.taskId);
+                      const busy = approvalBusy.has(approval.id);
+                      return (
+                        <li key={approval.id} className="wb-console__approval">
+                          <div className="wb-console__approval-info">
+                            <span className="wb-console__approval-title">{linkedTask?.title ?? "Task"}</span>
+                            <span className="wb-console__approval-reason">{approval.reason}</span>
+                          </div>
+                          <div className="wb-console__approval-actions">
+                            <button
+                              className="wb-btn wb-btn--primary wb-btn--sm"
+                              onClick={() => void resolveApproval(approval.id, "accept")}
+                              disabled={busy}
+                            >
+                              Accept
+                            </button>
+                            <button
+                              className="wb-btn wb-btn--danger wb-btn--sm"
+                              onClick={() => void resolveApproval(approval.id, "reject")}
+                              disabled={busy}
+                            >
+                              Reject
+                            </button>
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </section>
+              )}
+              {blockedTasks.filter((t) => !pendingApprovalTaskIds.has(t.id)).length > 0 && (
+                <section className="wb-console__blocker-section">
+                  <h4 className="wb-console__blocker-heading">Blocked tasks</h4>
+                  <ul className="wb-console__blocked-list">
+                    {blockedTasks
+                      .filter((t) => !pendingApprovalTaskIds.has(t.id))
+                      .map((task) => (
+                        <li key={task.id} className="wb-console__blocked-item">
+                          <span className="wb-console__blocked-title">{task.title}</span>
+                          <span className="wb-console__blocked-reason">{task.error ?? "blocked"}</span>
+                          {task.status === "blocked" && (
+                            <button
+                              className="wb-btn wb-btn--ghost wb-btn--sm"
+                              onClick={() => void retryTask(task.id)}
+                              disabled={retrying.has(task.id)}
+                            >
+                              {retrying.has(task.id) ? "Retrying…" : "Retry"}
+                            </button>
+                          )}
+                        </li>
+                      ))}
+                  </ul>
+                </section>
+              )}
+              {waitingTasks.length > 0 && (
+                <section className="wb-console__blocker-section">
+                  <h4 className="wb-console__blocker-heading">Waiting on dependencies ({waitingTasks.length})</h4>
+                  <ul className="wb-console__blocked-list">
+                    {waitingTasks.map((task) => (
+                      <li key={task.id} className="wb-console__blocked-item">
+                        <span className="wb-console__blocked-title">{task.title}</span>
+                        <span className="wb-console__blocked-reason">
+                          waiting for:{" "}
+                          {task.dependencies
+                            .map((dep) => {
+                              const depTask = tasks.find((t) => t.id === dep);
+                              return depTask ? depTask.title : dep.slice(0, 8);
+                            })
+                            .join(", ")}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              )}
+            </div>
+          )}
+        </div>
+
         {/* Events panel */}
         <div className={`wb-console__panel ${activeTab === "events" ? "wb-console__panel--active" : ""}`} role="tabpanel">
           {events.length === 0 ? (
-            <p style={{ color: "var(--fg-muted)", fontSize: 13, margin: "8px 0" }}>No events yet.</p>
+            <p className="wb-console__empty">No events yet.</p>
           ) : (
             events.slice().reverse().map((event) => (
               <div key={event.id} className="wb-console__event">
@@ -269,10 +818,10 @@ export function ConsolePanel({ events }: { events: RuntimeEvent[] }) {
           <div className="wb-console__chat">
             <div className="wb-console__messages" role="log" aria-live="polite">
               {messages.length === 0 && (
-                <div style={{ color: "var(--fg-muted)", fontSize: 13, textAlign: "center", padding: "24px 0" }}>
-                  <NodeIcon category="Agents" size={32} style={{ marginBottom: 8, opacity: 0.3 }} />
+                <div className="wb-console__chat-empty">
+                  <NodeIcon category="Agents" size={32} />
                   <p>Chat with Chef</p>
-                  <p style={{ fontSize: 12 }}>Describe a workflow and Chef will plan, validate, and run it.</p>
+                  <p className="wb-console__chat-hint">Describe a workflow and Chef will plan, validate, and run it.</p>
                 </div>
               )}
               {messages.map((msg, idx) => (
