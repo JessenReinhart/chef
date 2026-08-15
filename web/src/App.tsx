@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { RuntimeEvent, WorkspaceSnapshot } from "../../src/core/types.ts";
+import { CanvasPanel } from "./CanvasPanel.tsx";
 
 interface SessionInfo {
   id: string;
@@ -33,8 +34,10 @@ function statusColor(status: string): string {
 }
 
 export function App() {
+
   const [state, setState] = useState<DashboardState>({ snapshot: null, events: [], sessions: [] });
   const [input, setInput] = useState("");
+  const [refreshTick, setRefreshTick] = useState(0);
 
   const refresh = async () => {
     const res = await fetch("/api/state");
@@ -46,6 +49,7 @@ export function App() {
       pid: s.pid,
     }));
     setState((prev) => ({ ...prev, snapshot, sessions }));
+    setRefreshTick((tick) => tick + 1);
   };
 
   useEffect(() => {
@@ -90,6 +94,11 @@ export function App() {
       <p style={{ color: "#8b949e", fontSize: 13, margin: "0 0 16px" }}>
         Read-only projection. The runtime remains authoritative (spec §4).
       </p>
+
+      <section style={{ border: "1px solid #30363d", borderRadius: 8, padding: 12, marginBottom: 16 }}>
+        <h2 style={{ fontSize: 14, margin: "0 0 8px" }}>Plan Canvas</h2>
+        <CanvasPanel refreshTick={refreshTick} />
+      </section>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
         <section style={{ border: "1px solid #30363d", borderRadius: 8, padding: 12 }}>

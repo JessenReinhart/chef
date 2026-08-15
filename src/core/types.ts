@@ -9,6 +9,10 @@
  * with the canonical contracts issued by the lead architect.
  */
 
+import type { Approval, ApprovalDecision, ApprovalStatus } from "./approvals.ts";
+
+export type { Approval, ApprovalDecision, ApprovalStatus };
+
 // ---------------------------------------------------------------------------
 // Identifier & time aliases
 // ---------------------------------------------------------------------------
@@ -28,7 +32,6 @@ export type MessageId = string;
 export type EventId = string;
 export type PlanId = string;
 export type ChannelId = string;
-export type { Approval, ApprovalDecision, ApprovalStatus } from "./approvals.ts";
 
 export type HarnessId = string;
 

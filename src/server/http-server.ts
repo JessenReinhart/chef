@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import type { ChefRuntime } from "../main.ts";
 import type { RuntimeEvent } from "../core/types.ts";
+import { buildPlanGraph } from "../core/graph.ts";
 
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8" } as const;
 const SSE_HEADERS = {
@@ -42,6 +43,12 @@ export function createHttpServer(runtime: ChefRuntime): Server {
       if (req.method === "GET" && path === "/api/state") {
         const snapshot = await runtime.inspectState();
         sendJson(res, 200, snapshot);
+        return;
+      }
+
+      if (req.method === "GET" && path === "/api/graph") {
+        const snapshot = await runtime.inspectState();
+        sendJson(res, 200, buildPlanGraph(snapshot));
         return;
       }
 
