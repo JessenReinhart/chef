@@ -93,6 +93,19 @@ export interface Harness {
   updatedAt: Timestamp;
 }
 
+/** UI workflow template (spec §13: node canvas templates). */
+export interface Template {
+  id: EntityId;
+  workspaceId: WorkspaceId;
+  name: string;
+  description: string;
+  /** Serialized canvas nodes: [{ id, type, title, position }] */
+  nodes: unknown[];
+  metadata: Record<string, unknown>;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
 // ---------------------------------------------------------------------------
 // Input shapes (ids and timestamps are optional; auto-generated when omitted)
 // ---------------------------------------------------------------------------
@@ -125,6 +138,17 @@ export interface HarnessInput {
   type: string;
   name: string;
   config?: Record<string, unknown>;
+}
+
+export interface TemplateInput {
+  id?: EntityId;
+  workspaceId: WorkspaceId;
+  name: string;
+  description?: string;
+  nodes?: unknown[];
+  metadata?: Record<string, unknown>;
+  createdAt?: Timestamp;
+  updatedAt?: Timestamp;
 }
 
 export interface TaskInput {
@@ -294,6 +318,19 @@ function mapHarness(row: Row): Harness {
     type: row.type as string,
     name: row.name as string,
     config: readJson(row.config_json as string, {}),
+    createdAt: row.created_at as number,
+    updatedAt: row.updated_at as number,
+  };
+}
+
+function mapTemplate(row: Row): Template {
+  return {
+    id: row.id as string,
+    workspaceId: row.workspace_id as string,
+    name: row.name as string,
+    description: row.description as string,
+    nodes: readJson(row.nodes_json as string, [] as unknown[]),
+    metadata: readJson(row.metadata_json as string, {}),
     createdAt: row.created_at as number,
     updatedAt: row.updated_at as number,
   };
@@ -1158,4 +1195,79 @@ export class Repository {
       this.db.prepare(`SELECT * FROM artifacts WHERE workspace_id = ? ORDER BY rowid`).all(workspaceId) as Row[]
     ).map(mapArtifact);
   }
+
+  // -------------------------------------------------------------------------
+  // Templates (UI workflow templates)
+  // -------------------------------------------------------------------------
+
+  insertTemplate(input: TemplateInput): Template {
+    const id = input.id ?? randomUUID();
+    const ts = now();
+    const createdAt = input.createdAt ?? ts;
+    const updatedAt = input.updatedAt ?? ts;
+    this.db
+      .prepare(
+        `INSERT INTO templates (
+           id, workspace_id, name, description, nodes_json, metadata_json,
+           created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        id,
+        input.workspaceId,
+        input.name,
+        input.description ?? "",
+        toJson(input.nodes ?? []),
+        toJson(input.metadata ?? {}),
+        createdAt,
+        updatedAt,
+      );
+    return this.getTemplate(id)!;
+  }
+
+  getTemplate(id: EntityId): Template | null {
+    const row = this.db
+      .prepare(`SELECT * FROM templates WHERE id = ?`)
+      .get(id) as Row | undefined;
+    return row ? mapTemplate(row) : null;
+  }
+
+  listTemplates(workspaceId: WorkspaceId): Template[] {
+    return (
+      this.db
+        .prepare(`SELECT * FROM templates WHERE workspace_id = ? ORDER BY created_at, id`)
+        .all(workspaceId) as Row[]
+    ).map(mapTemplate);
+  }
+
+  updateTemplate(id: EntityId, patch: Partial<TemplateInput>): Template {
+    const current = this.getTemplate(id);
+    if (!current) throw new Error(`Template not found: ${id}`);
+    const next = {
+      name: patch.name ?? current.name,
+      description: patch.description ?? current.description,
+      nodes: patch.nodes ?? current.nodes,
+      metadata: patch.metadata ?? current.metadata,
+    };
+    this.db
+      .prepare(
+        `UPDATE templates SET
+           name = ?, description = ?, nodes_json = ?, metadata_json = ?, updated_at = ?
+         WHERE id = ?`,
+      )
+      .run(
+        next.name,
+        next.description,
+        toJson(next.nodes),
+        toJson(next.metadata),
+        now(),
+        id,
+      );
+    return this.getTemplate(id)!;
+  }
+
+  deleteTemplate(id: EntityId): void {
+    this.db.prepare(`DELETE FROM templates WHERE id = ?`).run(id);
+  }
 }
+
