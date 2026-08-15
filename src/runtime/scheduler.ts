@@ -6,6 +6,7 @@ import type {
   WorkspaceId,
   TaskId,
   SessionId,
+  Session,
   AgentId,
   EntityRef,
   ContextReference,
@@ -130,30 +131,28 @@ export class Scheduler {
    * Returns the number of tasks dispatched.
    */
   async dispatchPending(workspaceId: WorkspaceId): Promise<number> {
-    const snapshot = this.#repo.getWorkspaceSnapshot(workspaceId);
-    const completedIds = new Set(
-      snapshot.tasks.filter(t => t.status === "completed").map(t => t.id),
-    );
-
-    const runningCount = snapshot.tasks.filter(t => t.status === "running").length;
-    const available = this.#maxConcurrency - runningCount;
-    if (available <= 0) return 0;
-
-
-    // Runnable: pending or assigned with an agent and all deps completed,
-    // sorted by descending priority then ascending createdAt. Tasks without
-    // an assigned agent wait for the orchestrator — never auto-assigned here.
-    const runnable = snapshot.tasks
-      .filter(t => (t.status === "pending" || t.status === "assigned") && t.assignedTo != null)
-      .filter(t => t.dependencies.every(dep => completedIds.has(dep)))
-      .sort((a, b) => b.priority - a.priority || a.createdAt - b.createdAt);
-
     let dispatched = 0;
-    for (const task of runnable) {
-      if (dispatched >= available) break;
-      await this.#dispatchOne(workspaceId, task);
+
+    while (true) {
+      const snapshot = this.#repo.getWorkspaceSnapshot(workspaceId);
+      const runningCount = snapshot.tasks.filter(t => t.status === "running").length;
+      const available = this.#maxConcurrency - runningCount;
+      if (available <= 0) break;
+
+      const completedIds = new Set(
+        snapshot.tasks.filter(t => t.status === "completed").map(t => t.id),
+      );
+      const runnable = snapshot.tasks
+        .filter(t => (t.status === "pending" || t.status === "assigned") && t.assignedTo != null)
+        .filter(t => t.dependencies.every(dep => completedIds.has(dep)))
+        .sort((a, b) => b.priority - a.priority || a.createdAt - b.createdAt);
+      if (runnable.length === 0) break;
+
+      const session = await this.#dispatchOne(workspaceId, runnable[0]);
+      if (!session) break;
       dispatched++;
     }
+
     return dispatched;
   }
   /**
@@ -162,64 +161,66 @@ export class Scheduler {
    * atomically, then spawn the harness process and return. The orchestrator
    * owns consuming the session event stream via handleSessionEvent.
    */
-  async #dispatchOne(workspaceId: WorkspaceId, task: Task): Promise<void> {
-    const agentId = task.assignedTo;
-    if (!agentId) {
-      throw new Error(`Task ${task.id} has no assigned agent`);
-    }
-    const harness = this.#registry.get(agentId);
-    if (!harness) {
-      throw new Error(`No harness registered for agent ${agentId}`);
-    }
-
-    this.#repo.transaction(() => {
-      let current = task;
-
-      // pending → assigned (agent chosen by the orchestrator)
-      if (current.status === "pending") {
-        TaskMachine.validateTransition(current.status, "assigned");
-        const { event } = TaskMachine.transition(current, "assigned", {
-          assignedTo: agentId,
-        });
-        this.#repo.updateTask(current.id, { status: "assigned", assignedTo: agentId });
-        this.#appendEvent(workspaceId, event);
-        current = this.#repo.getTask(current.id)!;
+  async #dispatchOne(workspaceId: WorkspaceId, task: Task): Promise<Session | null> {
+    let harness: HarnessLike | undefined;
+    const session = this.#repo.transaction(() => {
+      const current = this.#repo.getTask(task.id);
+      if (!current || !["pending", "assigned", "failed", "blocked"].includes(current.status)) {
+        return null;
       }
 
-      // failed/blocked → running (bounded retry)
-      if (current.status === "failed" || current.status === "blocked") {
-        if (current.retryCount >= this.#maxRetries) {
+      const agentId = current.assignedTo;
+      if (!agentId) {
+        throw new Error(`Task ${current.id} has no assigned agent`);
+      }
+      harness = this.#registry.get(agentId);
+      if (!harness) {
+        throw new Error(`No harness registered for agent ${agentId}`);
+      }
+      if (this.#repo.countLiveSessions(workspaceId) >= this.#maxConcurrency) return null;
+
+      let dispatchTask = current;
+      if (dispatchTask.status === "pending") {
+        TaskMachine.validateTransition(dispatchTask.status, "assigned");
+        const { event } = TaskMachine.transition(dispatchTask, "assigned", {
+          assignedTo: agentId,
+        });
+        this.#repo.updateTask(dispatchTask.id, { status: "assigned", assignedTo: agentId });
+        this.#appendEvent(workspaceId, event);
+        dispatchTask = this.#repo.getTask(dispatchTask.id)!;
+      }
+
+      if (dispatchTask.status === "failed" || dispatchTask.status === "blocked") {
+        if (dispatchTask.retryCount >= this.#maxRetries) {
           throw new Error(
-            `Task ${current.id} exceeds retry budget (${current.retryCount}/${this.#maxRetries})`,
+            `Task ${dispatchTask.id} exceeds retry budget (${dispatchTask.retryCount}/${this.#maxRetries})`,
           );
         }
-        TaskMachine.validateTransition(current.status, "running");
-        const { event: retryEvt } = TaskMachine.transition(current, "running", {
-          retryCount: current.retryCount + 1,
+        TaskMachine.validateTransition(dispatchTask.status, "running");
+        const { event: retryEvt } = TaskMachine.transition(dispatchTask, "running", {
+          retryCount: dispatchTask.retryCount + 1,
           error: undefined,
         });
-        this.#repo.updateTask(current.id, {
+        this.#repo.updateTask(dispatchTask.id, {
           status: "running",
-          retryCount: current.retryCount + 1,
+          retryCount: dispatchTask.retryCount + 1,
           error: undefined,
         });
         this.#appendEvent(workspaceId, retryEvt);
-        current = this.#repo.getTask(current.id)!;
+        dispatchTask = this.#repo.getTask(dispatchTask.id)!;
       }
 
-      // assigned → running (skip if already transitioned from failed/blocked)
-      if (current.status === "assigned") {
-        const { event: runEvt } = TaskMachine.transition(current, "running");
-        this.#repo.updateTask(current.id, { status: "running" });
+      if (dispatchTask.status === "assigned") {
+        const { event: runEvt } = TaskMachine.transition(dispatchTask, "running");
+        this.#repo.updateTask(dispatchTask.id, { status: "running" });
         this.#appendEvent(workspaceId, runEvt);
       }
 
-      // Session record persisted BEFORE spawn.
       const sessionInput: SessionInput = {
         workspaceId,
         harnessId: harness.id,
         agentId,
-        taskId: task.id,
+        taskId: dispatchTask.id,
         status: "spawning",
         command: harness.command,
         args: harness.args,
@@ -227,19 +228,13 @@ export class Scheduler {
         cols: 120,
         rows: 40,
       };
-      this.#repo.insertSession(sessionInput);
-
+      return this.#repo.insertSession(sessionInput);
     });
 
-    // Fetch the persisted session id, then spawn and wire async lifecycle.
-    const session = this.#repo
-      .listSessions(workspaceId)
-      .findLast(s => s.taskId === task.id && s.status === "spawning");
-    if (!session) {
-      throw new Error(`Session for task ${task.id} not found after insert`);
-    }
+    if (!session || !harness) return null;
 
-    this.#sessions.set(session.id, { taskId: task.id, agentId });
+    this.#sessions.set(session.id, { taskId: session.taskId, agentId: session.agentId });
+    const freshTask = this.#repo.getTask(task.id)!;
 
     try {
       const spawned = await harness.spawn({
@@ -249,32 +244,32 @@ export class Scheduler {
       });
       this.#repo.updateSession(session.id, { status: "running", pid: spawned.pid });
 
-      // Inject task context refs into sideband inbox (after spawn).
-      if (task.contextRefs.length > 0) {
-        await harness.writeContextRefs(session.id, task.contextRefs);
+      if (freshTask.contextRefs.length > 0) {
+        await harness.writeContextRefs(session.id, freshTask.contextRefs);
       }
-
-
     } catch (err: unknown) {
-      // Spawn failure — mark session crashed, task failed.
       const message = err instanceof Error ? err.message : String(err);
       this.#repo.transaction(() => {
         this.#repo.updateSession(session.id, { status: "crashed", endedAt: now() });
         const currentTask = this.#repo.getTask(task.id)!;
         if (currentTask.status !== "running") return;
+        const retryCount = Math.min(currentTask.retryCount + 1, this.#maxRetries + 1);
         const { event: failEvt } = TaskMachine.transition(currentTask, "failed", {
           error: `spawn failed: ${message}`,
-          retryCount: currentTask.retryCount + 1,
+          retryCount,
         });
         this.#repo.updateTask(task.id, {
           status: "failed",
           error: `spawn failed: ${message}`,
-          retryCount: currentTask.retryCount + 1,
+          retryCount,
         });
         this.#appendEvent(workspaceId, failEvt);
       });
       this.#sessions.delete(session.id);
+      return null;
     }
+
+    return session;
   }
 
   // -------------------------------------------------------------------------
@@ -298,7 +293,18 @@ export class Scheduler {
     const { taskId } = tracking;
     console.error(`[sched] handleSessionEvent ${event.type} task=${taskId.slice(0,8)} session=${sessionId.slice(0,8)}`);
 
-    if (event.type === "data") return; // terminal output — no transition
+    if (event.type === "data") {
+      const payload = event.data;
+      this.#repo.transaction(() => {
+        this.#appendEvent(workspaceId, {
+          type: "session.data",
+          payload: { encoding: "utf8", data: payload },
+          taskId,
+          sessionId,
+        });
+      });
+      return;
+    }
 
     if (event.type === "structured") {
       await this.#handleStructured(workspaceId, sessionId, taskId, event.payload);
@@ -307,11 +313,13 @@ export class Scheduler {
 
     if (event.type === "exit" || event.type === "crash") {
       this.#repo.transaction(() => {
-        this.#repo.updateSession(sessionId, {
-          status: event.type === "exit" ? "completed" : "crashed",
-          endedAt: now(),
-          exitCode: event.exitCode,
-        });
+        // CAS the session from a live state: a session already marked
+        // terminated (cancelTask) or completed must not be overwritten by a
+        // late exit/crash event from the same PTY teardown.
+        const status = event.type === "exit" ? "completed" : "crashed";
+        const claimed = this.#repo.casSessionStatus(sessionId, ["spawning", "running"], status, now());
+        if (!claimed) return;
+        this.#repo.updateSession(sessionId, { status, endedAt: now(), exitCode: event.exitCode });
 
         const task = this.#repo.getTask(taskId)!;
         if (task.status !== "running") return; // e.g. already completed by structured event
@@ -327,15 +335,18 @@ export class Scheduler {
           });
           this.#appendEvent(workspaceId, doneEvt);
         } else {
+          // Bound retryCount at maxRetries+1 so the budget check in
+          // retryTask/dispatch stays authoritative for re-dispatch.
+          const retryCount = Math.min(task.retryCount + 1, this.#maxRetries + 1);
           TaskMachine.validateTransition(task.status, "failed");
           const { event: failEvt } = TaskMachine.transition(task, "failed", {
             error: `crashed with exit code ${event.exitCode}`,
-            retryCount: task.retryCount + 1,
+            retryCount,
           });
           this.#repo.updateTask(taskId, {
             status: "failed",
             error: `crashed with exit code ${event.exitCode}`,
-            retryCount: task.retryCount + 1,
+            retryCount,
           });
           this.#appendEvent(workspaceId, failEvt);
         }
@@ -398,20 +409,31 @@ export class Scheduler {
     const task = this.#repo.getTask(taskId);
     if (!task) throw new Error(`Task ${taskId} not found`);
 
+    // 1. Request PTY termination for every live session of the task.
+    const targets: Array<{ sessionId: string; harness: HarnessLike }> = [];
     for (const [sessionId, tracking] of this.#sessions) {
-      if (tracking.taskId === taskId) {
-        const harness = this.#registry.get(tracking.agentId);
-        if (harness) {
-          await harness.terminate(sessionId).catch(() => {});
-        }
-        break;
-      }
+      if (tracking.taskId !== taskId) continue;
+      const harness = this.#registry.get(tracking.agentId);
+      if (harness) targets.push({ sessionId, harness });
     }
+    await Promise.all(targets.map(({ sessionId, harness }) => harness.terminate(sessionId).catch(() => {})));
 
-    TaskMachine.validateTransition(task.status, "cancelled");
-    const { event } = TaskMachine.transition(task, "cancelled");
-    this.#repo.updateTask(taskId, { status: "cancelled" });
-    this.#appendEvent(workspaceId, event);
+    // 2. Atomically: CAS the task from its CURRENT status to cancelled, CAS
+    //    every live session to terminated, and append the cancellation event.
+    //    A task that completed/failed while terminate awaited is left as-is.
+    this.#repo.transaction(() => {
+      const current = this.#repo.getTask(taskId);
+      if (!current) throw new Error(`Task ${taskId} not found`);
+      if (current.status === "cancelled") return;
+      TaskMachine.validateTransition(current.status, "cancelled");
+      const claimed = this.#repo.casTaskStatus(taskId, current.status, "cancelled");
+      if (!claimed) return;
+      for (const { sessionId } of targets) {
+        this.#repo.casSessionStatus(sessionId, ["spawning", "running"], "terminated", now());
+      }
+      const { event } = TaskMachine.transition(current, "cancelled");
+      this.#appendEvent(workspaceId, event);
+    });
   }
 
   /** Retry a failed/blocked task within the bounded retry budget. */

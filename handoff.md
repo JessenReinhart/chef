@@ -43,15 +43,22 @@ tests/
   golden-path.ts                   — P0 golden path test
 ```
 
-## What Works
-
-- ✅ Golden path runs: user message → orchestrator plans (2 tasks: investigator + verifier) → scheduler dispatches → PTY sessions spawn → structured sideband events delivered → artifacts persisted → tasks complete.
-- ✅ Close/reopen cycle: workspace, tasks, events, artifacts, sessions, messages all survive restart.
+- ✅ Golden path runs: user message → orchestrator plans (2 tasks: investigator + verifier) → scheduler dispatches → PTY sessions spawn → structured sideband events and PTY data events delivered → artifacts and replay events persisted → tasks complete.
+- ✅ Close/reopen cycle: workspace, plans, tasks, events, artifacts, sessions, and messages all survive restart.
 - ✅ `sendUserMessage` promise settles reliably (was flaky exit-13, now fixed — see below).
-- ✅ `diag-handles.mjs` runs 20/20 clean (no exit-13, no unsettled top-level await).
+- ✅ `diag-handles.mjs` runs clean in the current Linux verification environment.
 - ✅ No `process.exit()` in golden path (diag uses `process.exit(0)` in finally for handle dump).
+- ✅ Concurrent dispatch is guarded atomically by live session count; plan timeout/cancellation and terminal-task cancellation are covered by regressions.
+- ✅ `ChefRuntime.subscribeEvents` provides a failure-isolated live projection stream.
 
-## What's Broken (Active Bugs)
+### Bug 1 fix (applied): exit events always reach the scheduler
+The exit-skip in `#consumeSession` was removed; every non-aborted event is forwarded to `scheduler.handleSessionEvent`, whose exit/crash branch claims the session with a status CAS. Sessions no longer stick `running`.
+
+### Dispatch hardening (applied)
+`#dispatchOne` re-reads the task inside its transaction, aborts on terminal/capacity-full states, and enforces `maxConcurrency` via `countLiveSessions`; it returns the inserted `Session` directly instead of a `listSessions().findLast` lookup. `dispatchPending` loops until capacity or no runnable tasks.
+
+### Durable plans, PTY replay, and live events (applied)
+Plans persist in a `plans` table and appear in `WorkspaceSnapshot.plans`; PTY output persists as ordered `session.data` runtime events; `ChefRuntime.subscribeEvents` streams persisted events with failure isolation.
 
 ### Bug 1: Sessions stuck "running" in DB (ROOT CAUSE IDENTIFIED)
 
