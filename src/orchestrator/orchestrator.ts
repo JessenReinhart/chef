@@ -69,6 +69,7 @@ export interface OrchestratorOptions {
   harnessRegistry: HarnessRegistry;
   decisionProvider?: OrchestratorDecisionProvider;
   timeoutMs?: number;
+  onEvent?: (event: RuntimeEvent) => void;
 }
 
 /** P0 scripted decision provider: investigator + verifier via node scripts. */
@@ -172,6 +173,7 @@ export class Orchestrator {
   readonly #decisionProvider: OrchestratorDecisionProvider;
   readonly #context: ContextManager;
   readonly #timeoutMs: number;
+  readonly #onEvent: ((event: RuntimeEvent) => void) | undefined;
   #activePlan: Plan | null = null;
   readonly #terminalEvents = new Map<TaskId, string>();
 
@@ -182,6 +184,7 @@ export class Orchestrator {
     this.#decisionProvider = options.decisionProvider ?? new ScriptedDecisionProvider();
     this.#context = new ContextManager(options.repository);
     this.#timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    this.#onEvent = options.onEvent;
   }
 
   async handleUserMessage(workspaceId: WorkspaceId, message: string): Promise<OrchestratorResult> {
@@ -199,15 +202,26 @@ export class Orchestrator {
       this.#appendEvent(workspaceId, { type: "orchestrator.plan.none", payload: { goal: message } });
       return { workspaceId, taskIds: [], report: `No plan proposed for: ${message}`, ok: false };
     }
+    this.#repository.insertPlan({
+      id: plan.id,
+      workspaceId,
+      goal: plan.goal,
+      status: "proposed",
+      tasks: plan.tasks,
+      taskIds: plan.taskIds,
+      createdAt: plan.createdAt,
+    });
     this.#appendEvent(workspaceId, { type: "orchestrator.plan.proposed", payload: { planId: plan.id, goal: plan.goal, taskIds: plan.taskIds } });
-
+    const controller = new AbortController();
     let executionError: string | undefined;
     try {
-      await this.#withTimeout(this.#executePlan(workspaceId, plan), `plan ${plan.id}`);
+      await this.#withTimeout(this.#executePlan(workspaceId, plan, controller.signal), `plan ${plan.id}`, controller);
     } catch (error) {
       executionError = error instanceof Error ? error.message : String(error);
     }
-    plan.status = executionError ? "failed" : "completed";
+    const finalStatus = executionError ? "failed" : "completed";
+    plan.status = finalStatus;
+    this.#repository.updatePlanStatus(plan.id, finalStatus);
 
     const snapshot = this.#repository.getWorkspaceSnapshot(workspaceId);
     const tasks = snapshot.tasks.filter((t) => plan.taskIds.includes(t.id));
@@ -243,7 +257,13 @@ export class Orchestrator {
   async executePlan(planId: string): Promise<void> {
     const plan = this.#activePlan;
     if (!plan || plan.id !== planId) throw new Error(`Unknown plan ${planId}`);
-    await this.#withTimeout(this.#executePlan(plan.workspaceId, plan), `plan ${planId}`);
+    const controller = new AbortController();
+    try {
+      await this.#withTimeout(this.#executePlan(plan.workspaceId, plan, controller.signal), `plan ${planId}`, controller);
+    } catch (error) {
+      plan.status = "failed";
+      throw error;
+    }
   }
 
   async handleEvent(event: RuntimeEvent): Promise<void> {
@@ -253,45 +273,48 @@ export class Orchestrator {
     }
   }
 
-  async #executePlan(workspaceId: WorkspaceId, plan: Plan): Promise<void> {
+  async #executePlan(workspaceId: WorkspaceId, plan: Plan, signal: AbortSignal): Promise<void> {
     this.#activePlan = plan;
     plan.status = "executing";
+    this.#repository.updatePlanStatus(plan.id, "executing");
     this.#appendEvent(workspaceId, { type: "orchestrator.plan.executing", payload: { planId: plan.id, goal: plan.goal, taskIds: plan.taskIds } });
 
     const created = new Map<string, Task>();
     let remaining = [...plan.tasks];
-
-    while (remaining.length > 0) {
-      const batch = remaining.filter((pt) => pt.dependencies.every((dep) => created.has(dep)));
-      if (batch.length === 0) {
-        throw new Error(`Plan ${plan.id} has unsatisfiable dependencies: ${remaining.map((t) => t.id).join(", ")}`);
-      }
-      for (const pt of batch) {
-        remaining = remaining.filter((t) => t.id !== pt.id);
-        const refs = this.#dependencyRefs(workspaceId, pt);
-        const task = this.#createPlanTask(workspaceId, plan, pt, refs);
-        created.set(pt.id, task);
-      }
-      const batchTaskIds = batch.map((pt) => pt.id);
-      const dispatched = await this.#runtime.dispatchPending(workspaceId);
-      if (dispatched > 0) {
-        await this.#materializeContexts(workspaceId, [...created.values()]);
-        await this.#consumeSessions(workspaceId, [...created.keys()]);
-      }
-      for (const id of batchTaskIds) {
-        const task = this.#repository.getTask(id)!;
-        if (!this.#isTerminal(task)) throw new Error(`Task ${id} did not reach a terminal state (${task.status})`);
-        try {
-          const decision = await this.#decisionProvider.evaluate({ taskId: task.id, status: task.status, resultSummary: task.resultSummary });
-          this.#appendEvent(workspaceId, { type: "orchestrator.task.evaluated", payload: { taskId: task.id, status: task.status, decision: decision.status, summary: decision.summary }, taskId: task.id });
-        } catch (error) {
-          this.#appendEvent(workspaceId, { type: "orchestrator.task.evaluated", payload: { taskId: task.id, status: task.status, error: error instanceof Error ? error.message : String(error) }, taskId: task.id });
+    try {
+      while (remaining.length > 0) {
+        if (signal.aborted) return;
+        const batch = remaining.filter((pt) => pt.dependencies.every((dep) => created.has(dep)));
+        if (batch.length === 0) {
+          throw new Error(`Plan ${plan.id} has unsatisfiable dependencies: ${remaining.map((t) => t.id).join(", ")}`);
+        }
+        for (const pt of batch) {
+          remaining = remaining.filter((t) => t.id !== pt.id);
+          const refs = this.#dependencyRefs(workspaceId, pt);
+          const task = this.#createPlanTask(workspaceId, plan, pt, refs);
+          created.set(pt.id, task);
+        }
+        const batchTaskIds = batch.map((pt) => pt.id);
+        const dispatched = await this.#runtime.dispatchPending(workspaceId);
+        if (dispatched > 0) {
+          await this.#materializeContexts(workspaceId, [...created.values()]);
+          await this.#consumeSessions(workspaceId, [...created.keys()], signal);
+        }
+        for (const id of batchTaskIds) {
+          if (signal.aborted) return;
+          const task = this.#repository.getTask(id)!;
+          if (!this.#isTerminal(task)) throw new Error(`Task ${id} did not reach a terminal state (${task.status})`);
+          try {
+            const decision = await this.#decisionProvider.evaluate({ taskId: task.id, status: task.status, resultSummary: task.resultSummary });
+            this.#appendEvent(workspaceId, { type: "orchestrator.task.evaluated", payload: { taskId: task.id, status: task.status, decision: decision.status, summary: decision.summary }, taskId: task.id });
+          } catch (error) {
+            this.#appendEvent(workspaceId, { type: "orchestrator.task.evaluated", payload: { taskId: task.id, status: task.status, error: error instanceof Error ? error.message : String(error) }, taskId: task.id });
+          }
         }
       }
+    } finally {
+      await this.#cleanupSessions(workspaceId, [...created.values()]);
     }
-
-    // Terminate any sessions still running after plan completion.
-    await this.#cleanupSessions(workspaceId, [...created.values()]);
   }
 
   async #cleanupSessions(workspaceId: WorkspaceId, tasks: Task[]): Promise<void> {
@@ -305,7 +328,12 @@ export class Orchestrator {
           try {
             await harness.terminate(session.id);
           } catch {
-            // Ignore termination failures.
+            // Ignore termination failures; persist a crash event below.
+          }
+          try {
+            await this.#runtime.handleSessionEvent(workspaceId, session.id, { type: "crash", exitCode: 1 });
+          } catch {
+            // Cleanup must continue even if runtime persistence rejects the event.
           }
           try {
             await harness.forget(session.id);
@@ -371,27 +399,31 @@ export class Orchestrator {
       if (session) await this.#context.materialize(session.id, task.contextRefs, workspaceId);
     }
   }
-
-  async #consumeSessions(workspaceId: WorkspaceId, taskIds: TaskId[]): Promise<void> {
+  async #consumeSessions(workspaceId: WorkspaceId, taskIds: TaskId[], signal: AbortSignal): Promise<void> {
     const mine = new Set(taskIds);
     const deadline = Date.now() + SESSION_ACTIVE_WAIT_MS;
     let sessions: Session[] = [];
     while (sessions.length === 0 && Date.now() < deadline) {
+      if (signal.aborted) return;
       const snapshot = this.#repository.getWorkspaceSnapshot(workspaceId);
       sessions = snapshot.sessions.filter((s) => mine.has(s.taskId) && (s.status === "spawning" || s.status === "running"));
       if (sessions.length === 0) await this.#sleep(SLEEP_STEP_MS);
     }
+    if (signal.aborted) return;
     for (const session of sessions) {
+      if (signal.aborted) return;
       const harness = this.#registry.get(session.agentId);
       if (!harness) throw new Error(`No harness registered for agent ${session.agentId}`);
-      await this.#consumeSession(workspaceId, session.id, session.taskId, harness);
+      await this.#consumeSession(workspaceId, session.id, session.taskId, harness, signal);
     }
   }
 
-  async #consumeSession(workspaceId: WorkspaceId, sessionId: string, taskId: TaskId, harness: OrchestratorHarness): Promise<void> {
+  async #consumeSession(workspaceId: WorkspaceId, sessionId: string, taskId: string, harness: OrchestratorHarness, signal: AbortSignal): Promise<void> {
+    if (signal.aborted) return;
     let stream: AsyncIterable<HarnessEvent> | null = null;
     const deadline = Date.now() + SESSION_ACTIVE_WAIT_MS;
     while (stream === null && Date.now() < deadline) {
+      if (signal.aborted) return;
       try {
         stream = harness.events(sessionId);
       } catch {
@@ -400,15 +432,32 @@ export class Orchestrator {
         await this.#sleep(SLEEP_STEP_MS);
       }
     }
-    if (stream === null) return;
-    for await (const event of stream) {
-      if (event.type === "data") continue;
-      if (event.type === "exit" || event.type === "crash") {
-        const task = this.#repository.getTask(taskId);
-        if (task && (task.status === "completed" || task.status === "failed" || task.status === "cancelled" || task.status === "blocked")) continue;
+    if (stream === null) throw new Error(`Session ${sessionId} event stream unavailable`);
+
+    const iterator = stream[Symbol.asyncIterator]();
+    const abortWait = Promise.withResolvers<void>();
+    const onAbort = () => {
+      void harness.terminate(sessionId).catch(() => undefined);
+      abortWait.resolve();
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    try {
+      while (true) {
+        const result = await Promise.race([iterator.next(), abortWait.promise.then(() => null)]);
+        if (result === null || signal.aborted) return;
+        if (result.done) return;
+        await this.#runtime.handleSessionEvent(workspaceId, sessionId, result.value);
       }
-      await this.#runtime.handleSessionEvent(workspaceId, sessionId, event);
+    } finally {
+      signal.removeEventListener("abort", onAbort);
+      await iterator.return?.();
     }
+  }
+
+  #appendEvent(workspaceId: WorkspaceId, input: { type: string; payload?: unknown; taskId?: TaskId; sessionId?: string }): RuntimeEvent {
+    const event = this.#repository.appendEvent({ workspaceId, source: ORCHESTRATOR_SOURCE, ...input });
+    if (this.#onEvent) this.#onEvent(event);
+    return event;
   }
 
   #isTerminal(task: Task): boolean {
@@ -427,16 +476,20 @@ export class Orchestrator {
     return lines.join("\n");
   }
 
-  #appendEvent(workspaceId: WorkspaceId, input: { type: string; payload?: unknown; taskId?: TaskId; sessionId?: string }): RuntimeEvent {
-    return this.#repository.appendEvent({ workspaceId, source: ORCHESTRATOR_SOURCE, ...input });
-  }
-
-  async #withTimeout<T>(work: Promise<T>, label: string): Promise<T> {
+  async #withTimeout<T>(work: Promise<T>, label: string, controller?: AbortController): Promise<T> {
     const { promise: timeout, resolve } = Promise.withResolvers<typeof TIMED_OUT>();
-    const timer = setTimeout(resolve, this.#timeoutMs, TIMED_OUT);
+    const timer = setTimeout(() => {
+      controller?.abort();
+      resolve(TIMED_OUT);
+    }, this.#timeoutMs);
     timer.unref();
     try {
-      return await Promise.race([work, timeout]);
+      const result = await Promise.race([work, timeout]);
+      if (result === TIMED_OUT) {
+        try { await work; } catch { /* timeout remains the primary error */ }
+        throw new Error(`Timed out after ${this.#timeoutMs}ms: ${label}`);
+      }
+      return result;
     } finally {
       clearTimeout(timer);
     }
@@ -474,14 +527,15 @@ function findSessionId() {
 
 const sid = findSessionId();
 if (!sid) {
-  console.error("investigator: cannot locate sideband session");
-  process.exit(2);
+  console.error("investigator: no session id");
+  process.exit(1);
 }
 
-const findings = {
-  summary: "Investigated the reported issue and located the root cause.",
-  evidence: ["reproduced the failure", "traced event ordering", "identified the fix target"]
-};
+const findings = [
+  { file: "src/orchestrator/orchestrator.ts", line: 1, note: "audited during smoke test" },
+  { file: "src/runtime/scheduler.ts", line: 1, note: "audited during smoke test" },
+];
+
 
 const envelope = {
   version: 1,

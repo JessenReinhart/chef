@@ -29,12 +29,22 @@ async function main(): Promise<void> {
     assert.equal(snapshot.workspaceId, workspaceId);
     assert.ok(snapshot.tasks.length >= result.taskIds.length, "created tasks must be persisted");
     assert.ok(snapshot.tasks.every((task) => task.status === "completed"), "golden path tasks must complete");
+    assert.equal(snapshot.plans.length, 1, "the executed plan must be persisted");
+    assert.equal(snapshot.plans[0].status, "completed", "the executed plan must complete durably");
+    assert.deepEqual(snapshot.plans[0].taskIds, result.taskIds, "plan must retain task lineage");
     assert.ok(snapshot.events.length > 0, "runtime transitions must be recorded as events");
     assert.ok(snapshot.events.some((event) => event.type.startsWith("task.")), "task lifecycle events must be recorded");
     assert.ok(snapshot.artifacts.length > 0, "worker must produce a durable artifact");
     assert.ok(snapshot.sessions.length > 0, "runtime must persist the PTY session");
     assert.ok(snapshot.sessions.some((session) => session.status === "completed"), "real PTY session must exit successfully");
     assert.ok(snapshot.sessions.every((session) => session.command.length > 0), "session command must be recorded");
+    // Regression (handoff.md Bug 1): terminal exit events must reach the
+    // scheduler even when a structured event already completed the task, or
+    // sessions stay "running" and reopen recovery corrupts event counts.
+    assert.ok(
+      snapshot.sessions.every((session) => session.status !== "running"),
+      "no session may remain stuck in running after plan completion",
+    );
 
     const messagesBeforeClose = chef.repository.listMessages(workspaceId);
     assert.ok(messagesBeforeClose.length > 0, "structured agent/message history must be persisted");
@@ -50,6 +60,7 @@ async function main(): Promise<void> {
     assert.equal(restored.events.length, snapshot.events.length, "event history must survive reopen");
     assert.equal(restored.artifacts.length, snapshot.artifacts.length, "artifact history must survive reopen");
     assert.equal(restored.sessions.length, snapshot.sessions.length, "session history must survive reopen");
+    assert.equal(restored.plans.length, snapshot.plans.length, "plan history must survive reopen");
 
     const messagesAfterReopen = reopened.repository.listMessages(workspaceId);
     assert.equal(messagesAfterReopen.length, messagesBeforeClose.length, "message history must survive reopen");

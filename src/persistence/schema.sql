@@ -142,3 +142,15 @@ CREATE TABLE IF NOT EXISTS decisions (
   status TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_decisions_workspace ON decisions(workspace_id);
+
+CREATE TABLE IF NOT EXISTS plans (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  goal TEXT NOT NULL,
+  status TEXT NOT NULL,
+  tasks_json TEXT NOT NULL DEFAULT '[]',
+  task_ids_json TEXT NOT NULL DEFAULT '[]',
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_plans_workspace ON plans(workspace_id);

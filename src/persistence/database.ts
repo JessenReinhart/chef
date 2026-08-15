@@ -25,9 +25,12 @@ import type {
   ArtifactType,
   ContextReference,
   Decision,
-  DecisionStatus,
   EntityId,
   EntityRef,
+  Plan,
+  PlanId,
+  PlanStatus,
+  PlanTask,
   RuntimeEvent,
   Session,
   SessionStatus,
@@ -196,6 +199,16 @@ export interface ArtifactInput {
   taskId?: TaskId;
   sessionId?: string;
   metadata?: Record<string, unknown>;
+}
+export interface PlanInput {
+  id?: PlanId;
+  workspaceId: WorkspaceId;
+  goal: string;
+  status: PlanStatus;
+  tasks: PlanTask[];
+  taskIds: TaskId[];
+  createdAt?: Timestamp;
+  updatedAt?: Timestamp;
 }
 
 // ---------------------------------------------------------------------------
@@ -370,6 +383,19 @@ function mapDecision(row: Row): Decision {
   };
 }
 
+function mapPlan(row: Row): Plan {
+  return {
+    id: row.id as string,
+    workspaceId: row.workspace_id as string,
+    goal: row.goal as string,
+    status: row.status as PlanStatus,
+    tasks: readJson(row.tasks_json as string, [] as PlanTask[]),
+    taskIds: readJson(row.task_ids_json as string, [] as TaskId[]),
+    createdAt: row.created_at as number,
+    updatedAt: (row.updated_at as number | null) ?? undefined,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Repository
 // ---------------------------------------------------------------------------
@@ -516,32 +542,99 @@ export class Repository {
     return mapHarness(row);
   }
 
-  getWorkspaceSnapshot(workspaceId: WorkspaceId): WorkspaceSnapshot {
-    const tasks = (
-      this.db.prepare(`SELECT * FROM tasks WHERE workspace_id = ? ORDER BY created_at`).all(workspaceId) as Row[]
-    ).map((row) => this.withTaskDependencies(mapTask(row)));
-    const sessions = (
-      this.db.prepare(`SELECT * FROM sessions WHERE workspace_id = ? ORDER BY started_at`).all(workspaceId) as Row[]
-    ).map(mapSession);
-    const artifacts = (
-      this.db.prepare(`SELECT * FROM artifacts WHERE workspace_id = ? ORDER BY rowid`).all(workspaceId) as Row[]
-    ).map(mapArtifact);
-    const decisions = (
-      this.db.prepare(`SELECT * FROM decisions WHERE workspace_id = ? ORDER BY timestamp`).all(workspaceId) as Row[]
-    ).map(mapDecision);
-    const events = (
-      this.db.prepare(`SELECT * FROM events WHERE workspace_id = ? ORDER BY seq`).all(workspaceId) as Row[]
-    ).map(mapEvent);
+  // -------------------------------------------------------------------------
+  // Plans
+  // -------------------------------------------------------------------------
 
-    return {
-      workspaceId,
-      tasks,
-      sessions,
-      artifacts,
-      decisions,
-      events,
-      generatedAt: now(),
-    };
+  insertPlan(input: PlanInput): Plan {
+    const id = input.id ?? randomUUID();
+    const ts = now();
+    const createdAt = input.createdAt ?? ts;
+    const updatedAt = input.updatedAt ?? ts;
+    this.db
+      .prepare(
+        `INSERT INTO plans (
+           id, workspace_id, goal, status, tasks_json, task_ids_json,
+           created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        id,
+        input.workspaceId,
+        input.goal,
+        input.status,
+        toJson(input.tasks),
+        toJson(input.taskIds),
+        createdAt,
+        updatedAt,
+      );
+    return this.getPlan(id)!;
+  }
+
+  getPlan(id: PlanId): Plan | null {
+    const row = this.db.prepare(`SELECT * FROM plans WHERE id = ?`).get(id) as Row | undefined;
+    return row ? mapPlan(row) : null;
+  }
+
+  listPlans(workspaceId: WorkspaceId): Plan[] {
+    return (
+      this.db
+        .prepare(`SELECT * FROM plans WHERE workspace_id = ? ORDER BY created_at, id`)
+        .all(workspaceId) as Row[]
+    ).map(mapPlan);
+  }
+
+  updatePlanStatus(id: PlanId, status: PlanStatus): Plan {
+    const current = this.getPlan(id);
+    if (!current) throw new Error(`Plan not found: ${id}`);
+    this.db
+      .prepare(`UPDATE plans SET status = ?, updated_at = ? WHERE id = ?`)
+      .run(status, now(), id);
+    return this.getPlan(id)!;
+    return this.getPlan(id)!;
+  }
+
+  getWorkspaceSnapshot(workspaceId: WorkspaceId): WorkspaceSnapshot {
+    // All five collection reads happen inside one read transaction so a
+    // snapshot is a single consistent cut even when another process shares
+    // the database file (multi-connection deployments).
+    this.db.exec("BEGIN");
+    try {
+      const tasks = (
+        this.db.prepare(`SELECT * FROM tasks WHERE workspace_id = ? ORDER BY created_at, id`).all(workspaceId) as Row[]
+      ).map((row) => this.withTaskDependencies(mapTask(row)));
+      const sessions = (
+        this.db.prepare(`SELECT * FROM sessions WHERE workspace_id = ? ORDER BY started_at, id`).all(workspaceId) as Row[]
+      ).map(mapSession);
+      const artifacts = (
+        this.db.prepare(`SELECT * FROM artifacts WHERE workspace_id = ? ORDER BY rowid`).all(workspaceId) as Row[]
+      ).map(mapArtifact);
+      const decisions = (
+        this.db.prepare(`SELECT * FROM decisions WHERE workspace_id = ? ORDER BY timestamp, id`).all(workspaceId) as Row[]
+      ).map(mapDecision);
+      const events = (
+        this.db.prepare(`SELECT * FROM events WHERE workspace_id = ? ORDER BY seq`).all(workspaceId) as Row[]
+      ).map(mapEvent);
+      const plans = (
+        this.db.prepare(`SELECT * FROM plans WHERE workspace_id = ? ORDER BY created_at, id`).all(workspaceId) as Row[]
+      ).map(mapPlan);
+
+      const snapshot = {
+        workspaceId,
+        tasks,
+        sessions,
+        artifacts,
+        decisions,
+        events,
+        plans,
+        generatedAt: now(),
+      };
+      this.db.exec("COMMIT");
+      return snapshot;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -684,6 +777,14 @@ export class Repository {
     return this.updateTask(id, { status, updatedAt: now() });
   }
 
+  /** Optimistic status CAS: rows updated only when the current status matches. */
+  casTaskStatus(id: TaskId, expectedStatus: TaskStatus, status: TaskStatus): boolean {
+    const result = this.db
+      .prepare(`UPDATE tasks SET status = ?, updated_at = ? WHERE id = ? AND status = ?`)
+      .run(status, now(), id, expectedStatus);
+    return result.changes > 0;
+  }
+
   // -------------------------------------------------------------------------
   // Sessions
   // -------------------------------------------------------------------------
@@ -763,6 +864,16 @@ export class Repository {
     return mapSession(row);
   }
 
+  /** Optimistic session status CAS for lifecycle race resolution. */
+  casSessionStatus(id: string, expected: SessionStatus[], status: SessionStatus, endedAt = now()): boolean {
+    if (expected.length === 0) return false;
+    const placeholders = expected.map(() => "?").join(", ");
+    const result = this.db
+      .prepare(`UPDATE sessions SET status = ?, ended_at = ? WHERE id = ? AND status IN (${placeholders})`)
+      .run(status, endedAt, id, ...expected);
+    return result.changes > 0;
+  }
+
   /** Alias matching Main's integration seam (`createChef` -> `createSession`). */
   createSession(input: SessionInput): Session {
     return this.insertSession(input);
@@ -773,26 +884,39 @@ export class Repository {
       this.db.prepare(`SELECT * FROM sessions WHERE workspace_id = ? ORDER BY started_at`).all(workspaceId) as Row[]
     ).map(mapSession);
   }
+  /** Counts sessions that still consume scheduler concurrency capacity. */
+  countLiveSessions(workspaceId: WorkspaceId): number {
+    const row = this.db
+      .prepare(
+        `SELECT COUNT(*) AS count FROM sessions
+         WHERE workspace_id = ? AND status IN ('spawning', 'running')`,
+      )
+      .get(workspaceId) as { count: number };
+    return row.count;
+  }
 
   // -------------------------------------------------------------------------
   // Events (immutable, append-only)
   // -------------------------------------------------------------------------
 
+  // SQLite serializes writers; this single statement computes the per-workspace next seq atomically, and UNIQUE(workspace_id, seq) guards duplicates. AUTOINCREMENT cannot provide per-workspace sequences.
   appendEvent(input: EventInput): RuntimeEvent {
     const id = input.id ?? randomUUID();
     const timestamp = input.timestamp ?? now();
-    const seq = this.nextSeq(input.workspaceId);
-    this.db
+    const row = this.db
       .prepare(
         `INSERT INTO events (
            id, workspace_id, seq, timestamp, source_type, source_id, type,
            payload_json, task_id, session_id, correlation_id
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         )
+         SELECT ?, ?, COALESCE(MAX(seq), 0) + 1, ?, ?, ?, ?, ?, ?, ?, ?
+         FROM events
+         WHERE workspace_id = ?
+         RETURNING seq`,
       )
-      .run(
+      .get(
         id,
         input.workspaceId,
-        seq,
         timestamp,
         input.source.type,
         input.source.id,
@@ -801,7 +925,9 @@ export class Repository {
         input.taskId ?? null,
         input.sessionId ?? null,
         input.correlationId ?? null,
-      );
+        input.workspaceId,
+      ) as { seq: number };
+    const seq = row.seq;
     return {
       id,
       workspaceId: input.workspaceId,
@@ -835,18 +961,9 @@ export class Repository {
             .prepare(`SELECT * FROM events WHERE workspace_id = ? ORDER BY seq`)
             .all(workspaceId)
     ) as Row[];
-
     const sliced = limit != null ? rows.slice(0, limit) : rows;
     return sliced.map(mapEvent);
   }
-
-  private nextSeq(workspaceId: WorkspaceId): number {
-    const row = this.db
-      .prepare(`SELECT COALESCE(MAX(seq), 0) AS m FROM events WHERE workspace_id = ?`)
-      .get(workspaceId) as { m: number };
-    return row.m + 1;
-  }
-
   // -------------------------------------------------------------------------
   // Messages
   // -------------------------------------------------------------------------

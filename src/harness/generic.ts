@@ -199,6 +199,10 @@ interface ActiveSession {
   signal?: number;
   /** Outbox poll timer; cleared when the session exits. */
   watcher?: ReturnType<typeof setInterval>;
+  outboxDrains: Set<Promise<void>>;
+  finishing?: boolean;
+  /** Pending #finish drain callback, awaited by close(). */
+  finishDrain?: Promise<void>;
 }
 
 /**
@@ -223,6 +227,7 @@ export class GenericTerminalHarness implements Harness {
   readonly #sessions = new Map<string, ActiveSession>();
   /** Queues of finished sessions stay readable (stream attachment may race exit). */
   readonly #endedQueues = new Map<string, SessionQueue>();
+  #closed = false;
 
   constructor(
     config: GenericHarnessConfig,
@@ -248,8 +253,8 @@ export class GenericTerminalHarness implements Harness {
   async detect(): Promise<boolean> {
     return typeof ptySpawn === "function";
   }
-
   async spawn(options: SpawnOptions = {}): Promise<HarnessSession> {
+    if (this.#closed) throw new Error("Harness is closed");
     const sessionId = options.sessionId ?? randomUUID();
     const rawCommand = options.command ?? this.command;
     const command = resolveExecutable(rawCommand);
@@ -288,7 +293,7 @@ export class GenericTerminalHarness implements Harness {
       startedAt: Date.now(),
       sideband,
     };
-    const active: ActiveSession = { session, pty, queue, intentionalStop: false };
+    const active: ActiveSession = { session, pty, queue, intentionalStop: false, outboxDrains: new Set() };
 
     pty.onData((data) => {
       if (data.length > 0) queue.push({ type: "data", data });
@@ -304,11 +309,9 @@ export class GenericTerminalHarness implements Harness {
     return session;
   }
 
-  /** Classify and emit the terminal lifecycle event, then close the stream. */
   #finish(active: ActiveSession, rawExitCode: number | undefined): void {
-    // onExit can re-fire once we destroy the underlying socket below; ignore
-    // any repeat invocation for an already-torn-down session.
-    if (!this.#sessions.has(active.session.id)) return;
+    // onExit can re-fire once teardown starts; one finish owns the queue.
+    if (this.#closed || !this.#sessions.has(active.session.id) || active.finishing) return;
     if (active.watcher !== undefined) clearInterval(active.watcher);
     const exitCode = rawExitCode ?? active.signal ?? 1;
     const event: HarnessEvent =
@@ -322,16 +325,19 @@ export class GenericTerminalHarness implements Harness {
       : exitCode === 0
         ? "completed"
         : "crashed";
-    active.queue.push(event);
-    // Close queue synchronously — PTY process has already exited (onExit fired).
-    active.queue.close();
-    // Release the winpty backend resources (sockets + conout worker) that
-    // node-pty leaves alive after kill(), then close the sideband.
-    try { active.pty.kill(); } catch { /* ignore */ }
-    this.#destroyAgentResources(active.pty);
-    void active.session.sideband.dispose().catch(() => undefined);
-    this.#sessions.delete(active.session.id);
-    this.#endedQueues.set(active.session.id, active.queue);
+    // Flush in-flight outbox reads so envelopes read from disk are pushed
+    // BEFORE the queue closes — otherwise they are deleted and dropped.
+    const drain = Promise.allSettled([...active.outboxDrains]).then(() => undefined);
+    active.finishDrain = drain.then(() => {
+      if (this.#closed) return; // close() owns teardown after it clears maps
+      active.queue.push(event);
+      active.queue.close();
+      try { active.pty.kill(); } catch { /* ignore */ }
+      this.#destroyAgentResources(active.pty);
+      void active.session.sideband.dispose().catch(() => undefined);
+      this.#sessions.delete(active.session.id);
+      this.#endedQueues.set(active.session.id, active.queue);
+    });
   }
 
   /** Release node-pty's private Windows backend resources after kill(). */
@@ -363,10 +369,10 @@ export class GenericTerminalHarness implements Harness {
     }
   }
 
-  /** Poll the outbox and surface structured envelopes as events. */
   #watchOutbox(active: ActiveSession): void {
-    active.watcher = setInterval(() => {
-      void active.session.sideband.readOutbox()
+    const poll = (): void => {
+      if (this.#closed || active.finishing) return;
+      const read = active.session.sideband.readOutbox()
         .then((envelopes) => {
           for (const envelope of envelopes) {
             active.queue.push({ type: "structured", payload: envelope });
@@ -375,7 +381,12 @@ export class GenericTerminalHarness implements Harness {
         .catch(() => {
           // Session teardown may remove the sideband directory concurrently.
         });
-    }, this.#pollIntervalMs);
+      active.outboxDrains.add(read);
+      void read.finally(() => {
+        active.outboxDrains.delete(read);
+      });
+    };
+    active.watcher = setInterval(poll, this.#pollIntervalMs);
     active.watcher.unref();
   }
 
@@ -459,29 +470,38 @@ export class GenericTerminalHarness implements Harness {
     return active.session.sideband.readOutbox();
   }
 
-  /** Remove a session from the registry (does not touch the PTY). */
+  /** Remove a finished session from both active and ended registries. */
   async forget(sessionId: string): Promise<void> {
     this.#sessions.delete(sessionId);
+    this.#endedQueues.delete(sessionId);
   }
 
   /** Release every owned session: terminate PTYs, dispose sidebands, clear the registry. */
   async close(): Promise<void> {
     const actives = [...this.#sessions.values()];
+    this.#closed = true;
     this.#sessions.clear();
+    this.#endedQueues.clear();
     await Promise.allSettled(
       actives.map(async (active) => {
         clearInterval(active.watcher);
         active.intentionalStop = true;
+        active.finishing = true;
+        // Let in-flight outbox reads finish pushing their envelopes before the
+        // queue closes and the sideband is disposed.
+        await Promise.allSettled([...active.outboxDrains]);
+        // A #finish already scheduled its drain callback before close ran —
+        // await it so a late #endedQueues write cannot resurrect a cleared
+        // session or undo a forget().
+        await active.finishDrain;
         try { active.pty.kill(); } catch { /* ignore */ }
         this.#destroyAgentResources(active.pty);
         active.session.status = "terminated";
         active.session.endedAt = Date.now();
         active.queue.push({ type: "exit", exitCode: active.session.exitCode ?? 0 });
         try { active.queue.close(); } catch { /* ignore */ }
-        this.#endedQueues.set(active.session.id, active.queue);
         try { await active.session.sideband.dispose(); } catch { /* ignore */ }
       }),
     );
-    this.#endedQueues.clear();
   }
 }

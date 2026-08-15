@@ -325,5 +325,6 @@ export interface WorkspaceSnapshot {
   artifacts: Artifact[];
   decisions: Decision[];
   events: RuntimeEvent[];
+  plans: Plan[];
   generatedAt: Timestamp;
 }

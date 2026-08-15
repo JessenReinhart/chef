@@ -6,6 +6,8 @@ import type {
   HarnessEvent,
   HarnessId,
   OrchestratorResult,
+  RuntimeEvent,
+  TaskId,
   WorkspaceId,
   WorkspaceSnapshot,
 } from "./core/types.ts";
@@ -69,13 +71,14 @@ function asSchedulerHarness(harness: GenericTerminalHarness): HarnessLike {
   };
 }
 
-/** Public P0 runtime for one local workspace. */
 export interface ChefRuntime {
   readonly workspaceId: WorkspaceId;
   readonly repository: Repository;
   start(): Promise<void>;
   sendUserMessage(message: string): Promise<OrchestratorResult>;
   inspectState(): Promise<WorkspaceSnapshot>;
+  cancelTask(taskId: TaskId): Promise<void>;
+  subscribeEvents(listener: (event: RuntimeEvent) => void): () => void;
   close(): Promise<void>;
 }
 
@@ -84,6 +87,8 @@ export function createChef(options: {
   dbPath: string;
   projectDir: string;
   decisionProvider?: DecisionProvider;
+  /** Plan execution timeout in ms (default 60s). Short values force timeout paths. */
+  orchestratorTimeoutMs?: number;
 }): ChefRuntime {
   const repository = new Repository(options.dbPath);
   let workspaceId = repository.getWorkspaceId();
@@ -115,7 +120,19 @@ export function createChef(options: {
       return orchestratorHarness;
     },
   };
-  const scheduler = new Scheduler(repository, runtimeRegistry, { maxConcurrency: 1 });
+  const listeners = new Set<(event: RuntimeEvent) => void>();
+  const scheduler = new Scheduler(repository, runtimeRegistry, {
+    maxConcurrency: 1,
+    onEvent: (event) => {
+      for (const listener of listeners) {
+        try {
+          listener(event);
+        } catch {
+          // Inspector failures must not abort authoritative runtime writes.
+        }
+      }
+    },
+  });
   const runtimeAdapter: RuntimeAdapter = {
     dispatchPending: (wsId) => scheduler.dispatchPending(wsId),
     handleSessionEvent: (wsId, sessionId, event) => scheduler.handleSessionEvent(wsId, sessionId, event),
@@ -126,6 +143,16 @@ export function createChef(options: {
     runtime: runtimeAdapter,
     harnessRegistry: orchestratorRegistry,
     decisionProvider: provider,
+    timeoutMs: options.orchestratorTimeoutMs,
+    onEvent: (event) => {
+      for (const listener of listeners) {
+        try {
+          listener(event);
+        } catch {
+          // Inspector failures must not abort authoritative runtime writes.
+        }
+      }
+    },
   });
 
   return {
@@ -140,8 +167,19 @@ export function createChef(options: {
     inspectState(): Promise<WorkspaceSnapshot> {
       return orchestrator.inspectState(workspaceId);
     },
+    cancelTask(taskId: TaskId): Promise<void> {
+      return scheduler.cancelTask(workspaceId, taskId);
+    },
+    subscribeEvents(listener: (event: RuntimeEvent) => void): () => void {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
     async close(): Promise<void> {
-      await Promise.all([...runtimeRegistry.values()].map((harness) => harness.close()));
+      // Every harness close is attempted; a rejected harness teardown must not
+      // skip the repository close (durable state + DB lock release).
+      await Promise.allSettled([...runtimeRegistry.values()].map((harness) => harness.close()));
       repository.close();
     },
   };
