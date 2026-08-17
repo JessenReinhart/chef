@@ -6,14 +6,21 @@ import {
   Controls,
   Handle,
   Position,
+  applyNodeChanges,
+  applyEdgeChanges,
+  addEdge,
+  useNodesState,
+  useEdgesState,
   type Node,
   type Edge,
   type Connection,
   type OnNodesChange,
   type OnEdgesChange,
+  type NodePositionChange,
   type NodeTypes,
   type NodeMouseHandler,
 } from "@xyflow/react";
+import "@xyflow/react/dist/style.css";
 import { catalogEntry, KIND_COLORS, STATUS_COLORS } from "./nodeCatalog";
 import type { UiTask, NodeKind, NodeCatalogEntry, HarnessInfo } from "./types";
 
@@ -27,11 +34,7 @@ export interface CanvasNodeData {
   [key: string]: unknown;
 }
 
-const nodeDefaults = {
-  type: "blueprint",
-  sourcePosition: "right" as const,
-  targetPosition: "left" as const,
-};
+const nodeDefaults = { type: "blueprint" } as const;
 
 const POSITIONS_KEY = "chef:canvas:positions";
 const VIEW_KEY = "chef:canvas:view";
@@ -105,7 +108,7 @@ const nodeTypes: NodeTypes = {
     const icon = data.entry?.icon ?? "◆";
     return (
       <div
-        className={`min-w-[180px] max-w-[240px] rounded-xl border bg-[#0d1117]/95 text-left shadow-xl transition-all duration-200 ${
+        className={`relative min-w-[180px] max-w-[240px] rounded-xl border bg-[#0d1117]/95 text-left shadow-xl transition-all duration-200 ${
           selected ? "ring-2 ring-cyan-400/60 shadow-cyan-500/20" : "border-[#30363d]"
         }`}
         style={{ boxShadow: `0 0 0 1px ${accent}22, 0 6px 20px rgba(0,0,0,.55)` }}
@@ -141,37 +144,50 @@ export function BlueprintCanvas({ tasks, dependencies, onConnect, onDisconnect, 
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const flowRef = useRef<HTMLDivElement | null>(null);
 
-  // ── Derive React Flow nodes from runtime tasks, preserving local drag positions ──
-  const nodes: Node<CanvasNodeData>[] = useMemo(() => {
-    const savedPositions = loadJson<Record<string, { x: number; y: number }>>(POSITIONS_KEY, {});
-    let cascade = 0;
-    return tasks.map((task, index) => {
-      const saved = savedPositions[task.id];
-      const position = saved ?? { x: 100 + (index % 4) * 320, y: 80 + Math.floor(index / 4) * 200 + cascade * 12 };
-      if (!saved) cascade++;
-      const entry = catalogEntry(task.workflowNodeId ?? task.id) ?? catalogEntry(`harness.${task.assignedTo ?? ""}`);
-      return {
-        id: task.id,
-        position,
-        ...nodeDefaults,
-        data: {
-          label: task.title,
-          status: task.status,
-          kind: entry?.kind ?? (task.assignedTo ? "agent" : "tool"),
-          taskId: task.id,
-          type: task.workflowNodeId ?? task.id,
-          entry,
-        },
-      } as Node<CanvasNodeData>;
-    });
-  }, [tasks, harnesses]);
+  // Local React Flow state is the source of truth for canvas interactions (drag, zoom, connect).
+  // Runtime `tasks`/`dependencies` stay authoritative and are reconciled into this state below,
+  // preserving whatever the user has dragged or connected locally.
+  const [rfNodes, setRfNodes] = useNodesState<Node<CanvasNodeData>>([]);
+  const [rfEdges, setRfEdges] = useEdgesState<Edge>([]);
 
-  // ── Edges from runtime dependencies, animated when source is running ──
-  const edges: Edge[] = useMemo(
-    () =>
+  // ── Reconcile runtime tasks → canvas nodes (add new, update status/label, keep positions) ──
+  useEffect(() => {
+    const saved = loadJson<Record<string, { x: number; y: number }>>(POSITIONS_KEY, {});
+    setRfNodes((nds) => {
+      const existing = new Map(nds.map((n) => [n.id, n]));
+      let cascade = 0;
+      const merged: Node<CanvasNodeData>[] = [];
+      for (const task of tasks) {
+        const prev = existing.get(task.id);
+        const base = prev?.position ?? saved[task.id];
+        const position = base ?? { x: 100 + (cascade % 4) * 320, y: 80 + Math.floor(cascade / 4) * 200 };
+        if (!base) cascade += 1;
+        const entry = catalogEntry(task.workflowNodeId ?? task.id) ?? catalogEntry(`harness.${task.assignedTo ?? ""}`);
+        merged.push({
+          id: task.id,
+          position,
+          ...nodeDefaults,
+          data: {
+            label: task.title,
+            status: task.status,
+            kind: entry?.kind ?? (task.assignedTo ? "agent" : "tool"),
+            taskId: task.id,
+            type: task.workflowNodeId ?? task.id,
+            entry,
+          },
+        });
+      }
+      return merged;
+    });
+  }, [tasks, harnesses, setRfNodes]);
+
+  // ── Reconcile runtime dependencies → edges ──
+  useEffect(() => {
+    setRfEdges(
       dependencies.map((d) => {
         const sourceTask = tasks.find((t) => t.id === d.source);
-        const isRunning = sourceTask && (sourceTask.status === "running" || sourceTask.status === "spawning" || sourceTask.status === "assigned");
+        const isRunning =
+          sourceTask && (sourceTask.status === "running" || sourceTask.status === "spawning" || sourceTask.status === "assigned");
         return {
           id: `${d.source}->${d.target}`,
           source: d.source,
@@ -180,17 +196,16 @@ export function BlueprintCanvas({ tasks, dependencies, onConnect, onDisconnect, 
           style: { stroke: isRunning ? "#06b6d4" : "#58a6ff", strokeWidth: isRunning ? 3 : 2 },
           animated: isRunning,
           markerEnd: { type: "arrowclosed", color: isRunning ? "#06b6d4" : "#58a6ff" },
-        } as Edge;
+        };
       }),
-    [dependencies, tasks],
-  );
+    );
+  }, [dependencies, tasks, setRfEdges]);
 
-  // Track selected node for toolbar (parent renders toolbar over canvas)
+  // Track selected node so the parent can show the toolbar
   const handleNodeClick: NodeMouseHandler = useCallback(
     (_event, node) => {
       const data = node.data as CanvasNodeData;
-      const task = tasks.find((t) => t.id === data.taskId) ?? null;
-      onSelectNode(task);
+      onSelectNode(tasks.find((t) => t.id === data.taskId) ?? null);
     },
     [tasks, onSelectNode],
   );
@@ -199,37 +214,58 @@ export function BlueprintCanvas({ tasks, dependencies, onConnect, onDisconnect, 
     onSelectNode(null);
   }, [onSelectNode]);
 
-  // Persist drag positions
-  const onNodesChange: OnNodesChange = useCallback((changes) => {
-    const positionChanges = changes.filter((c) => c.type === "position" && c.position);
-    if (positionChanges.length === 0) return;
-    const positions = loadJson<Record<string, { x: number; y: number }>>(POSITIONS_KEY, {});
-    for (const change of positionChanges) {
-      if (change.type === "position" && change.id && change.position) {
-        positions[change.id] = { x: change.position.x, y: change.position.y };
-      }
-    }
-    saveJson(POSITIONS_KEY, positions);
-  }, []);
-
-  const onEdgesChange: OnEdgesChange = useCallback(
+  // Node drag / select / remove: apply to React Flow state AND persist dropped positions
+  const onNodesChange: OnNodesChange<Node<CanvasNodeData>> = useCallback(
     (changes) => {
-      const removals = changes.filter((c) => c.type === "remove");
-      for (const removal of removals) {
-        const [source, target] = removal.id.split("->");
-        if (source && target) onDisconnect(source, target);
+      const positionChanges = changes.filter(
+        (c): c is NodePositionChange => c.type === "position" && typeof c.position !== "undefined" && typeof c.id === "string",
+      );
+      if (positionChanges.length > 0) {
+        const saved = loadJson<Record<string, { x: number; y: number }>>(POSITIONS_KEY, {});
+        for (const c of positionChanges) {
+          if (!c.position) continue;
+          saved[c.id] = { x: c.position.x, y: c.position.y };
+        }
+        saveJson(POSITIONS_KEY, saved);
       }
+      setRfNodes((nds) => applyNodeChanges(changes, nds));
     },
-    [onDisconnect],
+    [setRfNodes],
   );
 
+  // Edge removal (select + Delete): tell the runtime, then apply locally
+  const onEdgesChange: OnEdgesChange = useCallback(
+    (changes) => {
+      for (const c of changes) {
+        if (c.type === "remove") {
+          const [source, target] = c.id.split("->");
+          if (source && target) onDisconnect(source, target);
+        }
+      }
+      setRfEdges((eds) => applyEdgeChanges(changes, eds));
+    },
+    [setRfEdges, onDisconnect],
+  );
+
+  // Optimistic connect (same as React Flow's addEdge) so the line renders instantly.
   const handleConnect = useCallback(
     (connection: Connection) => {
-      if (!connection.source || !connection.target) return;
-      if (connection.source === connection.target) return;
+      if (!connection.source || !connection.target || connection.source === connection.target) return;
+      setRfEdges((eds) =>
+        addEdge(
+          {
+            id: `${connection.source}->${connection.target}`,
+            source: connection.source,
+            target: connection.target,
+            type: "smoothstep",
+            style: { stroke: "#58a6ff", strokeWidth: 2 },
+          },
+          eds,
+        ),
+      );
       onConnect(connection.source, connection.target);
     },
-    [onConnect],
+    [setRfEdges, onConnect],
   );
 
   // ── Drag-and-drop from the node palette ──
@@ -259,27 +295,19 @@ export function BlueprintCanvas({ tasks, dependencies, onConnect, onDisconnect, 
     event.dataTransfer.dropEffect = "move";
   }, []);
 
-  // Restore viewport on first load
-  useEffect(() => {
-    const savedView = loadJson<{ x: number; y: number; zoom: number } | null>(VIEW_KEY, null);
-    if (savedView) {
-      const el = wrapperRef.current;
-      if (el) {
-        const viewport = el.querySelector(".react-flow__viewport") as HTMLElement | null;
-        if (viewport) {
-          viewport.style.transform = `translate(${savedView.x}px, ${savedView.y}px) scale(${savedView.zoom})`;
-        }
-      }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // Restore the saved viewport on mount instead of mutating the DOM transform,
+  // so React Flow's internal (d3-zoom) viewport stays consistent with what's rendered.
+  const defaultViewport = useMemo(
+    () => loadJson<{ x: number; y: number; zoom: number } | null>(VIEW_KEY, null) ?? undefined,
+    [],
+  );
 
   return (
     <div ref={wrapperRef} className="relative h-full w-full bg-[#010409]" onDrop={onDrop} onDragOver={onDragOver}>
       <div ref={flowRef} className="h-full w-full">
         <ReactFlow
-          nodes={nodes}
-          edges={edges}
+          nodes={rfNodes}
+          edges={rfEdges}
           nodeTypes={nodeTypes}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
@@ -287,13 +315,17 @@ export function BlueprintCanvas({ tasks, dependencies, onConnect, onDisconnect, 
           onNodeClick={handleNodeClick}
           onPaneClick={handlePaneClick}
           onMoveEnd={(_event, viewport) => saveJson(VIEW_KEY, viewport)}
-          fitView
+          defaultViewport={defaultViewport}
+          fitView={!defaultViewport}
           fitViewOptions={{ padding: 0.2, maxZoom: 1.2 }}
           minZoom={0.2}
           maxZoom={2.5}
           defaultEdgeOptions={{ type: "smoothstep", style: { stroke: "#58a6ff", strokeWidth: 2 } }}
           connectionLineStyle={{ stroke: "#58a6ff", strokeWidth: 2 }}
-          connectionRadius={6}
+          connectionRadius={12}
+          panOnDrag
+          zoomOnScroll
+          zoomOnPinch
           className="!bg-[#010409]"
         >
           <Background gap={24} size={1} color="#161b22" />
