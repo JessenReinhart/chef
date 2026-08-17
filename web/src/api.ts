@@ -13,6 +13,7 @@ import type {
   UiTask,
   UiCanvasNode,
   UiCanvasEdge,
+  LlmStatus,
 } from "./types";
 export interface CreateNodeInput {
   type: string;
@@ -57,6 +58,12 @@ export class Api {
   // ── Harnesses ────────────────────────────────────────────────────
   async harnesses(): Promise<HarnessInfo[]> {
     const data = await this.request<{ ok: boolean; data: HarnessInfo[] }>("/api/harnesses");
+    return data.data;
+  }
+
+  // ── LLM status ───────────────────────────────────────────────────
+  async llmStatus(): Promise<LlmStatus> {
+    const data = await this.request<{ ok: boolean; data: LlmStatus }>("/api/llm/status");
     return data.data;
   }
 
@@ -185,6 +192,30 @@ export class Api {
 
   async interruptSession(sessionId: string): Promise<void> {
     await this.request("/api/sessions/interrupt", { method: "POST", body: JSON.stringify({ sessionId }) });
+  }
+
+  async sendPeerMessage(sessionId: string, from: string, text: string): Promise<void> {
+    await this.request(`/api/sessions/${sessionId}/message`, {
+      method: "POST",
+      body: JSON.stringify({ from, text }),
+    });
+  }
+
+  async sessions(): Promise<Array<{ id: string; taskId: string; status: string; pid: number }>> {
+    const snapshot = await this.stateRaw();
+    return (snapshot.sessions as Array<{ id: string; taskId: string; status: string; pid: number }>).map((s) => ({
+      id: s.id,
+      taskId: s.taskId,
+      status: s.status,
+      pid: s.pid,
+    }));
+  }
+
+  async sendToSession(sessionId: string, data: string): Promise<void> {
+    await this.request("/api/sessions/send", {
+      method: "POST",
+      body: JSON.stringify({ sessionId, data }),
+    });
   }
 
   // ── Approvals ───────────────────────────────────────────────────

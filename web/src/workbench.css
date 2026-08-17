@@ -3040,3 +3040,148 @@ body {
 [data-mode="simple"] .wb-wizard {
   border-radius: var(--radius-lg);
 }
+
+/* ── Chef Web Terminal (xterm.js) ────────────────────────────────────── */
+.wb-terminal-panel {
+  display: flex;
+  flex-direction: row;
+  height: 100%;
+  background: var(--bg-base);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.wb-terminal-panel__sidebar {
+  display: flex;
+  flex-direction: column;
+  width: 180px;
+  min-width: 140px;
+  max-width: 220px;
+  background: var(--bg-surface);
+  border-right: 1px solid var(--border-subtle);
+  overflow-y: auto;
+}
+
+.wb-terminal-panel__title {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--fg-secondary);
+  flex-shrink: 0;
+}
+
+.wb-terminal-panel__error {
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--accent-red);
+}
+
+.wb-terminal-panel__empty {
+  padding: var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--fg-muted);
+}
+
+.wb-terminal-panel__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.wb-terminal-panel__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-xs);
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: var(--fg-primary);
+  cursor: pointer;
+  border-left: 2px solid transparent;
+}
+
+.wb-terminal-panel__item--active {
+  background: var(--bg-elevated);
+  border-left-color: var(--accent-blue);
+  color: var(--fg-primary);
+}
+
+.wb-terminal-panel__item--live {
+  font-weight: 600;
+}
+
+.wb-terminal-panel__status-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--fg-muted);
+}
+
+.wb-terminal-panel__status-dot[data-status="running"] { background: var(--accent-green); }
+.wb-terminal-panel__status-dot[data-status="spawning"] { background: var(--accent-gold); }
+.wb-terminal-panel__status-dot[data-status="completed"] { background: var(--accent-blue); }
+.wb-terminal-panel__status-dot[data-status="failed"] { background: var(--accent-red); }
+
+.wb-terminal-panel__task {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  font-size: var(--text-xs);
+  color: var(--fg-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-terminal-panel__pid {
+  margin-left: auto;
+  font-size: var(--text-xs);
+  color: var(--fg-muted);
+}
+
+.wb-terminal-panel__view {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
+}
+
+.wb-terminal-panel__placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  font-size: var(--text-xs);
+  color: var(--fg-muted);
+}
+
+/* xterm.js container — must be explicit so FitAddon has a measurable box */
+.wb-terminal-view {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 4px;
+  box-sizing: border-box;
+}
+
+.wb-terminal-view .terminal {
+  height: 100%;
+  background: #0d1117;
+}
+
+.wb-terminal-view .xterm-viewport {
+  background: #0d1117;
+}
+
+/* Collapsed terminal node in the canvas */
+.wb-terminal-node--collapsed {
+  overflow: hidden;
+}

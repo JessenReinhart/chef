@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, memo } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, memo } from "react";
 import {
   ReactFlow,
   Background,
@@ -23,6 +23,14 @@ import {
 import "@xyflow/react/dist/style.css";
 import { catalogEntry, KIND_COLORS, STATUS_COLORS } from "./nodeCatalog";
 import type { UiTask, NodeKind, NodeCatalogEntry, HarnessInfo, UiCanvasNode, UiCanvasEdge } from "./types";
+import { TerminalView } from "./TerminalView";
+
+/** Light session projection passed down for terminal nodes (see api.sessions()). */
+export interface TerminalSession {
+  id: string;
+  taskId: string;
+  status: string;
+}
 
 export interface CanvasNodeData {
   label: string;
@@ -31,6 +39,8 @@ export interface CanvasNodeData {
   taskId: string;
   type: string;
   entry: NodeCatalogEntry | undefined;
+  /** Live session id for terminal nodes (session.taskId === taskId). */
+  sessionId?: string;
   [key: string]: unknown;
 }
 
@@ -69,6 +79,8 @@ interface BlueprintCanvasProps {
   onDropNode: (payload: { type: string; harnessId?: string }, position: { x: number; y: number }) => void;
   onNodeDragStop?: (id: string, position: { x: number; y: number }, label: string) => void;
   harnesses: HarnessInfo[];
+  sessions: TerminalSession[];
+  selectedSessionId: string | null;
 }
 
 function HarnessHandle({ color }: { color: string }) {
@@ -142,6 +154,57 @@ const nodeTypes: NodeTypes = {
       </div>
     );
   }),
+
+  terminal: memo(function TerminalNode({ data, selected }: { data: CanvasNodeData; selected: boolean }) {
+  const accent = data.entry ? (data.kind === "agent" ? "#06b6d4" : KIND_COLORS[data.kind] ?? "#6b7280") : KIND_COLORS[data.kind] ?? "#6b7280";
+  const statusColor = STATUS_COLORS[data.status] ?? "#6b7280";
+  const icon = data.entry?.icon ?? ">_";
+  const sessionId = typeof data.sessionId === "string" ? data.sessionId : undefined;
+  const [open, setOpen] = useState(false);
+  return (
+    <div
+      className={`relative w-[540px] max-w-[90vw] rounded-xl border bg-[#0d1117]/95 text-left shadow-xl transition-all duration-200 ${
+        selected ? "ring-2 ring-cyan-400/60 shadow-cyan-500/20" : "border-[#30363d]"
+      }`}
+      style={{ boxShadow: `0 0 0 1px ${accent}22, 0 6px 20px rgba(0,0,0,.55)`, overflow: "hidden" }}
+    >
+      <div
+        className="flex cursor-pointer items-center gap-2 rounded-t-xl border-b border-[#21262d] px-3 py-1.5"
+        style={{ background: `${accent}1a` }}
+        onClick={() => setOpen((v) => !v)}
+        title={open ? "Collapse terminal" : "Expand terminal"}
+      >
+        <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: statusColor, boxShadow: data.status === "running" ? `0 0 6px ${statusColor}` : "none" }} />
+        <span className="truncate text-[11px] font-semibold text-[#cbd5e1]" style={{ color: accent }}>
+          {icon}
+        </span>
+        <span className="truncate text-[11px] font-semibold text-[#cbd5e1]">
+          {data.entry?.label ?? data.label}
+        </span>
+        <span className="ml-auto text-[10px] text-[#8b949e]">{open ? "▾" : "▸"}</span>
+      </div>
+      {open && sessionId ? (
+        <div className="h-[300px] border-b border-[#21262d]">
+          <TerminalView sessionId={sessionId} />
+        </div>
+      ) : (
+        <div className="px-3 py-2">
+          <div className="truncate text-[13px] font-medium text-[#e6edf3]">{data.label}</div>
+          <div className="mt-0.5 flex items-center gap-1.5">
+            <span className="text-[10px] uppercase tracking-wide" style={{ color: statusColor }}>
+              {data.status}
+            </span>
+            {sessionId && (
+              <span className="truncate text-[10px] text-[#8b949e]">{sessionId}</span>
+            )}
+          </div>
+        </div>
+      )}
+      <HarnessHandle color={accent} />
+      <HarnessHandleRight color={accent} />
+    </div>
+  );
+}),
 };
 
 export function BlueprintCanvas({
@@ -154,6 +217,8 @@ export function BlueprintCanvas({
   onDropNode,
   onNodeDragStop,
   harnesses,
+  sessions,
+  selectedSessionId,
 }: BlueprintCanvasProps) {
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const flowRef = useRef<HTMLDivElement | null>(null);
@@ -183,14 +248,29 @@ export function BlueprintCanvas({
         const position = prev?.position ?? node.position;
         const task = node.taskId ? taskById.get(node.taskId) : undefined;
         const status = task?.status ?? "pending";
-        const entry = catalogEntry(node.nodeType === "blueprint" ? (node.kind === "agent" ? `harness.${node.harnessId ?? ""}` : node.label) : node.label)
-          ?? catalogEntry(task?.workflowNodeId ?? node.id);
+
+        // Determine if this is a terminal node (by kind or label)
+        const isTerminalNode = node.kind === "tool" && (node.label === "Terminal" || node.label === "tool.terminal");
+        const nodeTypeForRF = isTerminalNode ? "terminal" : "blueprint";
+
+        // Find session for this task (session.taskId === node.taskId)
+        const session = sessions.find((s) => s.taskId === node.taskId);
+        const sessionId = session?.status === "running" || session?.status === "spawning" ? session.id : undefined;
+
+        const entry = catalogEntry(
+          isTerminalNode ? "tool.terminal"
+            : node.nodeType === "blueprint"
+              ? (node.kind === "agent" ? `harness.${node.harnessId ?? ""}` : node.label)
+              : node.label
+        ) ?? catalogEntry(task?.workflowNodeId ?? node.id);
+
         merged.push({
           id: node.id,
           position,
           width: 180,
           height: 84,
           ...nodeDefaults,
+          type: nodeTypeForRF,
           data: {
             label: node.label,
             status,
@@ -198,12 +278,13 @@ export function BlueprintCanvas({
             taskId: node.taskId ?? node.id,
             type: node.id,
             entry,
+            sessionId,
           },
         });
       }
       return merged;
     });
-  }, [canvasNodes, taskById, setRfNodes]);
+  }, [canvasNodes, taskById, sessions, setRfNodes]);
 
   // ── Reconcile runtime canvas edges ──
   useEffect(() => {

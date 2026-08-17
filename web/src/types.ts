@@ -81,6 +81,13 @@ export interface HarnessInfo {
   available: boolean;
 }
 
+/** LLM decision-provider status — mirrors server runtime.llmStatus. */
+export interface LlmStatus {
+  configured: boolean;
+  provider: string | null;
+  model: string | null;
+}
+
 export interface NodeCatalogEntry {
   type: string;
   label: string;

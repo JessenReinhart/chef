@@ -4,21 +4,31 @@ import { NodePalette } from "./NodePalette";
 import { ChatPanel } from "./ChatPanel";
 import { api } from "./api";
 import { NODE_LIBRARY, registerHarnesses, subscribeLibrary } from "./nodeCatalog";
+import { TerminalView } from "./TerminalView";
 import type { UiTask, HarnessInfo, NodeCatalogEntry, UiCanvasNode, UiCanvasEdge } from "./types";
-
 export function App() {
   const [tasks, setTasks] = useState<UiTask[]>([]);
   const [canvasNodes, setCanvasNodes] = useState<UiCanvasNode[]>([]);
   const [canvasEdges, setCanvasEdges] = useState<UiCanvasEdge[]>([]);
   const [selectedTask, setSelectedTask] = useState<UiTask | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Terminal canvas nodes mount a live TerminalView. This state picks which
+  // node's session the terminal is tied to. TerminalView self-manages its own
+  // SSE stream via /api/events?types=session.data; App only needs the ids.
+  const [terminalSelection, setTerminalSelection] = useState<{ nodeId: string | null; sessionId: string | null }>({
+    nodeId: null,
+    sessionId: null,
+  });
+  // Live agent sessions snapshot, polled so terminal nodes can resolve a
+  // task id → session id and mount a TerminalView against it.
+  const [sessions, setSessions] = useState<Array<{ id: string; taskId: string; status: string; pid: number }>>([]);
   const [isDispatching, setIsDispatching] = useState(false);
   const [approvals, setApprovals] = useState<Array<{ id: string; reason: string; taskId: string; status: string }>>([]);
   const [showPalette, setShowPalette] = useState(true);
   const [harnesses, setHarnesses] = useState<HarnessInfo[]>([]);
-  const pollingRef = useRef<number | null>(null);
   const librarySubRef = useRef<(() => void) | null>(null);
   const sseRef = useRef<EventSource | null>(null);
+  const pollingRef = useRef<number | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -40,6 +50,25 @@ export function App() {
       if (pollingRef.current) window.clearInterval(pollingRef.current);
     };
   }, [refresh]);
+  // Poll sessions for terminal canvas nodes so each node can resolve its
+  // task id to an active session id. TerminalView consumes session.data SSE
+  // itself — App only maintains the id mapping here.
+  const sessionsPollRef = useRef<number | null>(null);
+  const refreshSessions = useCallback(async () => {
+    try {
+      const list = await api.sessions();
+      setSessions(list);
+    } catch {
+      // sessions optional — keep prior snapshot
+    }
+  }, []);
+  useEffect(() => {
+    void refreshSessions();
+    sessionsPollRef.current = window.setInterval(() => void refreshSessions(), 2000);
+    return () => {
+      if (sessionsPollRef.current) window.clearInterval(sessionsPollRef.current);
+    };
+  }, [refreshSessions]);
 
   // SSE /api/events — canvas.patched events trigger an immediate refresh
   // (no wait for the next poll tick).
@@ -158,6 +187,18 @@ export function App() {
       setError(err instanceof Error ? err.message : "Failed to update position");
     }
   }, []);
+  const handleSelectNode = useCallback(
+    (task: UiTask | null) => {
+      setSelectedTask(task);
+      if (task) {
+        const session = sessions.find((s) => s.taskId === task.id);
+        setTerminalSelection({ nodeId: task.id, sessionId: session?.id ?? null });
+      } else {
+        setTerminalSelection({ nodeId: null, sessionId: null });
+      }
+    },
+    [sessions],
+  );
 
   const handleDispatch = useCallback(async () => {
     if (isDispatching) return;
@@ -297,10 +338,12 @@ export function App() {
               canvasEdges={canvasEdges}
               onConnect={handleConnect}
               onDisconnect={handleDisconnect}
-              onSelectNode={setSelectedTask}
+              onSelectNode={handleSelectNode}
               onDropNode={handleDropNode}
               onNodeDragStop={handleNodeDragStop}
               harnesses={harnesses}
+              sessions={sessions}
+              selectedSessionId={terminalSelection.sessionId}
             />
 
             {/* Selected node toolbar */}
