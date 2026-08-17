@@ -909,6 +909,18 @@ export class Repository {
     return this.getTask(id)!;
   }
 
+  /** Replace a task's resolved context references (canvas-edge derived). */
+  updateTaskContextRefs(id: TaskId, contextRefs: ContextReference[]): Task {
+    const current = this.getTask(id);
+    if (!current) {
+      throw new Error(`Task not found: ${id}`);
+    }
+    this.db
+      .prepare(`UPDATE tasks SET context_refs_json = ?, updated_at = ? WHERE id = ?`)
+      .run(toJson(contextRefs), now(), id);
+    return this.getTask(id)!;
+  }
+
   getTask(id: TaskId): Task | null {
     const row = this.db.prepare(`SELECT * FROM tasks WHERE id = ?`).get(id) as Row | undefined;
     if (!row) return null;
