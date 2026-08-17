@@ -12,6 +12,10 @@ import type {
   TaskId,
   WorkspaceId,
   WorkspaceSnapshot,
+  CanvasNode,
+  CanvasEdge,
+  CanvasPatch,
+  CanvasPatchResult,
 } from "./core/types.ts";
 import { Repository, type TemplateInput } from "./persistence/database.ts";
 import { GenericTerminalHarness } from "./harness/generic.ts";
@@ -97,6 +101,10 @@ export interface ChefRuntime {
   handleSessionEvent(sessionId: string, event: HarnessEvent): Promise<void>;
   /** Register a harness for a specific agent id (blueprint canvas dispatch). */
   registerHarness(agentId: string, harness: HarnessLike): void;
+  /** Apply a durable canvas graph mutation (validate → write → arrange → emit). */
+  patchCanvas(workspaceId: WorkspaceId, patch: CanvasPatch): Promise<CanvasPatchResult>;
+  /** Read the durable canvas graph projection. */
+  listCanvas(workspaceId: WorkspaceId): { nodes: CanvasNode[]; edges: CanvasEdge[] };
   /** Phase 8: deterministic tool runner (terminal/filesystem/git + approval gates). */
   readonly toolRunner: ToolRunner;
   /** Phase 8: browser sessions (Playwright; honest error when absent). */
@@ -308,6 +316,12 @@ export function createChef(options: {
     },
     inspectState(): Promise<WorkspaceSnapshot> {
       return orchestrator.inspectState(workspaceId);
+    },
+    patchCanvas(workspaceId: WorkspaceId, patch: CanvasPatch): Promise<CanvasPatchResult> {
+      return orchestrator.patchCanvasGraph(workspaceId, patch);
+    },
+    listCanvas(workspaceId: WorkspaceId): { nodes: CanvasNode[]; edges: CanvasEdge[] } {
+      return orchestrator.listCanvasGraph(workspaceId);
     },
     cancelTask(taskId: TaskId): Promise<void> {
       return scheduler.cancelTask(workspaceId, taskId);

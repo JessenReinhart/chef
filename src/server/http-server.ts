@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import type { ChefRuntime } from "../main.ts";
-import type { RuntimeEvent, PlanTask, PlanStatus } from "../core/types.ts";
+import type { RuntimeEvent, PlanTask, PlanStatus, CanvasPatch } from "../core/types.ts";
 import { buildPlanGraph } from "../core/graph.ts";
 
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8" } as const;
@@ -406,6 +406,14 @@ export function createHttpServer(runtime: ChefRuntime): Server {
         const deps = (tgt.dependencies ?? []).filter((d) => d !== source);
         runtime.repository.updateTask(target, { dependencies: deps });
         sendJson(res, 200, { ok: true });
+        return;
+      }
+      // Canvas graph patch (new, additive — existing /api/nodes, /api/edges,
+      // DELETE /api/edges/:source->target behavior is unchanged).
+      if (req.method === "POST" && path === "/api/canvas/patch") {
+        const body = (await readBody(req)) as CanvasPatch;
+        const result = await runtime.patchCanvas(runtime.workspaceId, body);
+        sendJson(res, result.ok ? 200 : 422, result);
         return;
       }
 
