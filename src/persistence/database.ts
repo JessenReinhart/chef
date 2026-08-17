@@ -26,6 +26,8 @@ import type {
   ApprovalStatus,
   Artifact,
   ArtifactType,
+  CanvasEdge,
+  CanvasNode,
   ContextReference,
   Decision,
   DecisionStatus,
@@ -517,6 +519,32 @@ function mapCanvasEdge(row: Row): CanvasEdgeRecord {
   };
 }
 
+function mapCanvasNodeRecord(rec: CanvasNodeRecord): CanvasNode {
+  return {
+    id: rec.id,
+    workspaceId: rec.workspaceId,
+    taskId: rec.taskId,
+    label: rec.label,
+    nodeType: rec.nodeType,
+    kind: rec.kind as CanvasNode["kind"],
+    harnessId: rec.harnessId,
+    position: { x: rec.positionX, y: rec.positionY },
+    updatedAt: rec.updatedAt,
+  };
+}
+
+function mapCanvasEdgeRecord(rec: CanvasEdgeRecord): CanvasEdge {
+  return {
+    id: rec.id,
+    workspaceId: rec.workspaceId,
+    source: rec.source,
+    target: rec.target,
+    sourceHandle: rec.sourceHandle,
+    targetHandle: rec.targetHandle,
+    updatedAt: rec.updatedAt,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Repository
 // ---------------------------------------------------------------------------
@@ -742,6 +770,14 @@ export class Repository {
       const approvals = (
         this.db.prepare(`SELECT * FROM approvals WHERE workspace_id = ? ORDER BY created_at, id`).all(workspaceId) as Row[]
       ).map(mapApproval);
+      const canvasNodes = (
+        this.db.prepare(`SELECT * FROM canvas_nodes WHERE workspace_id = ? ORDER BY id`).all(workspaceId) as Row[]
+      ).map(mapCanvasNode);
+      const canvasEdges = (
+        this.db.prepare(`SELECT * FROM canvas_edges WHERE workspace_id = ? ORDER BY id`).all(workspaceId) as Row[]
+      ).map(mapCanvasEdge);
+
+
 
 
       const snapshot = {
@@ -753,6 +789,8 @@ export class Repository {
         events,
         plans,
         approvals,
+        canvasNodes: canvasNodes.map(mapCanvasNodeRecord),
+        canvasEdges: canvasEdges.map(mapCanvasEdgeRecord),
         generatedAt: now(),
       };
       this.db.exec("COMMIT");
