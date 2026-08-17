@@ -465,6 +465,58 @@ function mapPlan(row: Row): Plan {
   };
 }
 
+/** Durable blueprint canvas node (spec §5.4 nodes). */
+export interface CanvasNodeRecord {
+  id: string;
+  workspaceId: WorkspaceId;
+  taskId: string | null;
+  label: string;
+  nodeType: "blueprint" | "proxy";
+  kind: string;
+  harnessId: string | null;
+  positionX: number;
+  positionY: number;
+  updatedAt: Timestamp;
+}
+
+/** Durable blueprint canvas edge (spec §5.4 edges). */
+export interface CanvasEdgeRecord {
+  id: string;
+  workspaceId: WorkspaceId;
+  source: string;
+  target: string;
+  sourceHandle: string | null;
+  targetHandle: string | null;
+  updatedAt: Timestamp;
+}
+
+function mapCanvasNode(row: Row): CanvasNodeRecord {
+  return {
+    id: String(row.id),
+    workspaceId: String(row.workspace_id),
+    taskId: row.task_id == null ? null : String(row.task_id),
+    label: String(row.label),
+    nodeType: row.node_type === "proxy" ? "proxy" : "blueprint",
+    kind: String(row.kind),
+    harnessId: row.harness_id == null ? null : String(row.harness_id),
+    positionX: Number(row.position_x),
+    positionY: Number(row.position_y),
+    updatedAt: Number(row.updated_at),
+  };
+}
+
+function mapCanvasEdge(row: Row): CanvasEdgeRecord {
+  return {
+    id: String(row.id),
+    workspaceId: String(row.workspace_id),
+    source: String(row.source),
+    target: String(row.target),
+    sourceHandle: row.source_handle == null ? null : String(row.source_handle),
+    targetHandle: row.target_handle == null ? null : String(row.target_handle),
+    updatedAt: Number(row.updated_at),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Repository
 // ---------------------------------------------------------------------------
@@ -1269,6 +1321,98 @@ export class Repository {
 
   deleteTemplate(id: EntityId): void {
     this.db.prepare(`DELETE FROM templates WHERE id = ?`).run(id);
+  }
+  // -------------------------------------------------------------------------
+  // Canvas nodes & edges (spec §5.4)
+  // -------------------------------------------------------------------------
+
+  upsertCanvasNode(rec: {
+    id: string;
+    workspaceId: WorkspaceId;
+    taskId?: string | null;
+    label: string;
+    nodeType?: "blueprint" | "proxy";
+    kind?: string;
+    harnessId?: string | null;
+    position?: { x: number; y: number };
+  }): void {
+    this.db
+      .prepare(
+        `INSERT INTO canvas_nodes
+           (id, workspace_id, task_id, label, node_type, kind, harness_id, position_x, position_y, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           task_id = excluded.task_id,
+           label = excluded.label,
+           node_type = excluded.node_type,
+           kind = excluded.kind,
+           harness_id = excluded.harness_id,
+           position_x = excluded.position_x,
+           position_y = excluded.position_y,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        rec.id,
+        rec.workspaceId,
+        rec.taskId ?? null,
+        rec.label,
+        rec.nodeType ?? "blueprint",
+        rec.kind ?? "agent",
+        rec.harnessId ?? null,
+        rec.position?.x ?? 0,
+        rec.position?.y ?? 0,
+        now(),
+      );
+  }
+
+  upsertCanvasEdge(rec: {
+    workspaceId: WorkspaceId;
+    source: string;
+    target: string;
+    sourceHandle?: string | null;
+    targetHandle?: string | null;
+  }): void {
+    this.db
+      .prepare(
+        `INSERT INTO canvas_edges
+           (id, workspace_id, source, target, source_handle, target_handle, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(source, target) DO UPDATE SET
+           source_handle = excluded.source_handle,
+           target_handle = excluded.target_handle,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        `${rec.source}->${rec.target}`,
+        rec.workspaceId,
+        rec.source,
+        rec.target,
+        rec.sourceHandle ?? null,
+        rec.targetHandle ?? null,
+        now(),
+      );
+  }
+
+  deleteCanvasNode(id: string): void {
+    this.db.prepare(`DELETE FROM canvas_nodes WHERE id = ?`).run(id);
+  }
+
+  deleteCanvasEdge(id: string): void {
+    this.db.prepare(`DELETE FROM canvas_edges WHERE id = ?`).run(id);
+  }
+
+  listCanvasNodes(workspaceId: WorkspaceId): CanvasNodeRecord[] {
+    return this.db
+      .prepare(`SELECT * FROM canvas_nodes WHERE workspace_id = ? ORDER BY id`)
+      .all(workspaceId)
+      .map((r) => mapCanvasNode(r as Row));
+  }
+
+  listCanvasEdges(workspaceId: WorkspaceId): CanvasEdgeRecord[] {
+    return this.db
+      .prepare(`SELECT * FROM canvas_edges WHERE workspace_id = ? ORDER BY id`)
+      .all(workspaceId)
+      .map((r) => mapCanvasEdge(r as Row));
   }
 }
 

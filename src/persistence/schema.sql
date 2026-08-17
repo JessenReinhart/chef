@@ -182,3 +182,30 @@ CREATE TABLE IF NOT EXISTS templates (
   updated_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_templates_workspace ON templates(workspace_id);
+
+-- Orchestrator-owned canvas graph (spec §5.4)
+CREATE TABLE IF NOT EXISTS canvas_nodes (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE,
+  label TEXT NOT NULL,
+  node_type TEXT NOT NULL DEFAULT 'blueprint',
+  kind TEXT NOT NULL DEFAULT 'agent',
+  harness_id TEXT,
+  position_x REAL NOT NULL DEFAULT 0,
+  position_y REAL NOT NULL DEFAULT 0,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_canvas_nodes_workspace ON canvas_nodes(workspace_id);
+
+CREATE TABLE IF NOT EXISTS canvas_edges (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  source TEXT NOT NULL REFERENCES canvas_nodes(id) ON DELETE CASCADE,
+  target TEXT NOT NULL REFERENCES canvas_nodes(id) ON DELETE CASCADE,
+  source_handle TEXT,
+  target_handle TEXT,
+  updated_at INTEGER NOT NULL,
+  UNIQUE(source, target)
+);
+CREATE INDEX IF NOT EXISTS idx_canvas_edges_workspace ON canvas_edges(workspace_id);
