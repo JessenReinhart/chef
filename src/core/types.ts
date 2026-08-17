@@ -392,5 +392,7 @@ export interface WorkspaceSnapshot {
   events: RuntimeEvent[];
   plans: Plan[];
   approvals: Approval[];
+  canvasNodes: CanvasNode[];
+  canvasEdges: CanvasEdge[];
   generatedAt: Timestamp;
 }

@@ -306,6 +306,28 @@ export class Orchestrator {
     plan.status = finalStatus;
     this.#repository.updatePlanStatus(plan.id, finalStatus);
 
+    // Materialize the plan as a durable canvas graph (spawn + connect + arrange).
+    // Canvas failure is non-fatal: the plan already executed; the canvas
+    // simply stays as-is. patchCanvasGraph already emits canvas.patched /
+    // canvas.patch.failed events internally.
+    try {
+      await this.patchCanvasGraph(workspaceId, {
+        upsertNodes: plan.tasks.map((t) => ({
+          id: t.id,
+          taskId: t.id,
+          label: t.title,
+          kind: t.assignedTo ? "agent" : "tool",
+          nodeType: "blueprint",
+        })),
+        upsertEdges: plan.tasks.flatMap((t) =>
+          t.dependencies.map((dep) => ({ source: dep, target: t.id })),
+        ),
+        arrange: { mode: "columns" },
+      });
+    } catch {
+      // Plan succeeded even if canvas layout failed — do not block chat.
+    }
+
     const snapshot = this.#repository.getWorkspaceSnapshot(workspaceId);
     const tasks = snapshot.tasks.filter((t) => plan.taskIds.includes(t.id));
     const artifacts = snapshot.artifacts.filter((a) => a.taskId !== undefined && plan.taskIds.includes(a.taskId));
