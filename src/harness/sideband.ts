@@ -102,6 +102,27 @@ export class SidebandDirectory {
     return this.writeInbox({ contextRefs }, { kind: "context", contextRefs });
   }
 
+  /**
+   * Write a peer-to-peer message envelope into the inbox (October-style
+   * message_peer capability). `peerFrom` names the sending agent so the
+   * receiving process knows who to trust/reply to.
+   */
+  async writeMessage(from: string, text: string): Promise<string> {
+    await this.init();
+    const envelope = {
+      version: 1,
+      id: randomUUID(),
+      kind: "message",
+      from: "peer",
+      payload: { peerFrom: from, text },
+      peerFrom: from,
+      text,
+      timestamp: Date.now(),
+    };
+    await this.#writeEnvelope(this.inbox, envelope);
+    return envelope.id;
+  }
+
   /** Read and remove all outbox envelopes (FIFO by filename). */
   async readOutbox(): Promise<SidebandEnvelope[]> {
     await this.init();
