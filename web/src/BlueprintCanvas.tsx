@@ -22,7 +22,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { catalogEntry, KIND_COLORS, STATUS_COLORS } from "./nodeCatalog";
-import type { UiTask, NodeKind, NodeCatalogEntry, HarnessInfo } from "./types";
+import type { UiTask, NodeKind, NodeCatalogEntry, HarnessInfo, UiCanvasNode, UiCanvasEdge } from "./types";
 
 export interface CanvasNodeData {
   label: string;
@@ -36,7 +36,9 @@ export interface CanvasNodeData {
 
 const nodeDefaults = { type: "blueprint" } as const;
 
-const POSITIONS_KEY = "chef:canvas:positions";
+// Viewport (pan/zoom) stays in localStorage — it's a user preference, not
+// authoritative runtime state. Position writes are REMOVED: positions now
+// live in the runtime-owned canvas graph and are persisted via patchCanvas.
 const VIEW_KEY = "chef:canvas:view";
 
 function loadJson<T>(key: string, fallback: T): T {
@@ -53,17 +55,19 @@ function saveJson(key: string, value: unknown): void {
   try {
     localStorage.setItem(key, JSON.stringify(value));
   } catch {
-    // storage unavailable — positions just won't persist
+    // storage unavailable — viewport just won't persist
   }
 }
 
 interface BlueprintCanvasProps {
   tasks: UiTask[];
-  dependencies: Array<{ source: string; target: string }>;
+  canvasNodes: UiCanvasNode[];
+  canvasEdges: UiCanvasEdge[];
   onConnect: (source: string, target: string) => void;
   onDisconnect: (source: string, target: string) => void;
   onSelectNode: (task: UiTask | null) => void;
   onDropNode: (payload: { type: string; harnessId?: string }, position: { x: number; y: number }) => void;
+  onNodeDragStop?: (id: string, position: { x: number; y: number }, label: string) => void;
   harnesses: HarnessInfo[];
 }
 
@@ -140,58 +144,76 @@ const nodeTypes: NodeTypes = {
   },
 };
 
-export function BlueprintCanvas({ tasks, dependencies, onConnect, onDisconnect, onSelectNode, onDropNode, harnesses }: BlueprintCanvasProps) {
+export function BlueprintCanvas({
+  tasks,
+  canvasNodes,
+  canvasEdges,
+  onConnect,
+  onDisconnect,
+  onSelectNode,
+  onDropNode,
+  onNodeDragStop,
+  harnesses,
+}: BlueprintCanvasProps) {
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const flowRef = useRef<HTMLDivElement | null>(null);
 
   // Local React Flow state is the source of truth for canvas interactions (drag, zoom, connect).
-  // Runtime `tasks`/`dependencies` stay authoritative and are reconciled into this state below,
-  // preserving whatever the user has dragged or connected locally.
+  // Runtime `canvasNodes`/`canvasEdges` stay authoritative and are reconciled into this state below,
+  // preserving whatever the user has dragged locally.
   const [rfNodes, setRfNodes] = useNodesState<Node<CanvasNodeData>>([]);
   const [rfEdges, setRfEdges] = useEdgesState<Edge>([]);
 
-  // ── Reconcile runtime tasks → canvas nodes (add new, update status/label, keep positions) ──
+  // Status lookup keyed by node id (status comes from runtime tasks).
+  const taskById = useMemo(() => {
+    const map = new Map<string, UiTask>();
+    for (const t of tasks) map.set(t.id, t);
+    return map;
+  }, [tasks]);
+
+  // ── Reconcile runtime canvas nodes → canvas nodes (positions from server) ──
   useEffect(() => {
-    const saved = loadJson<Record<string, { x: number; y: number }>>(POSITIONS_KEY, {});
     setRfNodes((nds) => {
       const existing = new Map(nds.map((n) => [n.id, n]));
       let cascade = 0;
       const merged: Node<CanvasNodeData>[] = [];
-      for (const task of tasks) {
-        const prev = existing.get(task.id);
-        const base = prev?.position ?? saved[task.id];
-        const position = base ?? { x: 100 + (cascade % 4) * 320, y: 80 + Math.floor(cascade / 4) * 200 };
-        if (!base) cascade += 1;
-        const entry = catalogEntry(task.workflowNodeId ?? task.id) ?? catalogEntry(`harness.${task.assignedTo ?? ""}`);
+      for (const node of canvasNodes) {
+        const prev = existing.get(node.id);
+        // Preserve a live in-progress drag position; otherwise use the server position.
+        const position = prev?.position ?? node.position;
+        const task = node.taskId ? taskById.get(node.taskId) : undefined;
+        const status = task?.status ?? "pending";
+        const entry = catalogEntry(node.nodeType === "blueprint" ? (node.kind === "agent" ? `harness.${node.harnessId ?? ""}` : node.label) : node.label)
+          ?? catalogEntry(task?.workflowNodeId ?? node.id);
         merged.push({
-          id: task.id,
+          id: node.id,
           position,
           ...nodeDefaults,
           data: {
-            label: task.title,
-            status: task.status,
-            kind: entry?.kind ?? (task.assignedTo ? "agent" : "tool"),
-            taskId: task.id,
-            type: task.workflowNodeId ?? task.id,
+            label: node.label,
+            status,
+            kind: (entry?.kind ?? node.kind) as NodeKind,
+            taskId: node.taskId ?? node.id,
+            type: node.id,
             entry,
           },
         });
       }
       return merged;
     });
-  }, [tasks, harnesses, setRfNodes]);
+  }, [canvasNodes, taskById, setRfNodes]);
 
-  // ── Reconcile runtime dependencies → edges ──
+  // ── Reconcile runtime canvas edges ──
   useEffect(() => {
     setRfEdges(
-      dependencies.map((d) => {
-        const sourceTask = tasks.find((t) => t.id === d.source);
+      canvasEdges.map((e) => {
+        const sourceTask = e.source ? taskById.get(e.source) : undefined;
         const isRunning =
           sourceTask && (sourceTask.status === "running" || sourceTask.status === "spawning" || sourceTask.status === "assigned");
         return {
-          id: `${d.source}->${d.target}`,
-          source: d.source,
-          target: d.target,
+          id: `${e.source}->${e.target}`,
+          source: e.source,
+          target: e.target,
           type: "smoothstep",
           style: { stroke: isRunning ? "#06b6d4" : "#58a6ff", strokeWidth: isRunning ? 3 : 2 },
           animated: isRunning,
@@ -199,35 +221,24 @@ export function BlueprintCanvas({ tasks, dependencies, onConnect, onDisconnect, 
         };
       }),
     );
-  }, [dependencies, tasks, setRfEdges]);
+  }, [canvasEdges, taskById, setRfEdges]);
 
   // Track selected node so the parent can show the toolbar
   const handleNodeClick: NodeMouseHandler = useCallback(
     (_event, node) => {
       const data = node.data as CanvasNodeData;
-      onSelectNode(tasks.find((t) => t.id === data.taskId) ?? null);
+      onSelectNode(taskById.get(data.taskId) ?? null);
     },
-    [tasks, onSelectNode],
+    [taskById, onSelectNode],
   );
 
   const handlePaneClick = useCallback(() => {
     onSelectNode(null);
   }, [onSelectNode]);
 
-  // Node drag / select / remove: apply to React Flow state AND persist dropped positions
+  // Node drag: apply to React Flow state only. Persisted on drag-stop (debounced).
   const onNodesChange: OnNodesChange<Node<CanvasNodeData>> = useCallback(
     (changes) => {
-      const positionChanges = changes.filter(
-        (c): c is NodePositionChange => c.type === "position" && typeof c.position !== "undefined" && typeof c.id === "string",
-      );
-      if (positionChanges.length > 0) {
-        const saved = loadJson<Record<string, { x: number; y: number }>>(POSITIONS_KEY, {});
-        for (const c of positionChanges) {
-          if (!c.position) continue;
-          saved[c.id] = { x: c.position.x, y: c.position.y };
-        }
-        saveJson(POSITIONS_KEY, saved);
-      }
       setRfNodes((nds) => applyNodeChanges(changes, nds));
     },
     [setRfNodes],
@@ -266,6 +277,23 @@ export function BlueprintCanvas({ tasks, dependencies, onConnect, onDisconnect, 
       onConnect(connection.source, connection.target);
     },
     [setRfEdges, onConnect],
+  );
+
+  // Persist drag-end position via patchCanvas (debounced 500ms to coalesce).
+  const dragStopTimer = useRef<number | null>(null);
+  const handleNodeDragStop = useCallback(
+    (_event: MouseEvent | TouchEvent, node: Node) => {
+      if (!onNodeDragStop) return;
+      if (dragStopTimer.current) window.clearTimeout(dragStopTimer.current);
+      const id = node.id;
+      const position = node.position;
+      const data = node.data as CanvasNodeData;
+      const label = data.label;
+      dragStopTimer.current = window.setTimeout(() => {
+        void onNodeDragStop(id, position, label);
+      }, 500);
+    },
+    [onNodeDragStop],
   );
 
   // ── Drag-and-drop from the node palette ──
@@ -314,6 +342,7 @@ export function BlueprintCanvas({ tasks, dependencies, onConnect, onDisconnect, 
           onConnect={handleConnect}
           onNodeClick={handleNodeClick}
           onPaneClick={handlePaneClick}
+          onNodeDragStop={handleNodeDragStop}
           onMoveEnd={(_event, viewport) => saveJson(VIEW_KEY, viewport)}
           defaultViewport={defaultViewport}
           fitView={!defaultViewport}

@@ -91,3 +91,54 @@ export interface NodeCatalogEntry {
   harnessId?: string;
   icon?: string;
 }
+
+/** Canvas graph types — mirrors server CanvasNode/CanvasEdge from core/types.ts */
+export type CanvasNodeType = "blueprint" | "proxy";
+export type CanvasNodeKind = "agent" | "tool" | "data" | "approval" | "system";
+
+export interface UiCanvasNode {
+  id: string;
+  workspaceId: string;
+  taskId: string | null;
+  label: string;
+  nodeType: CanvasNodeType;
+  kind: CanvasNodeKind;
+  harnessId: string | null;
+  position: { x: number; y: number };
+  updatedAt: number;
+}
+
+export interface UiCanvasEdge {
+  id: string;
+  workspaceId: string;
+  source: string;
+  target: string;
+  sourceHandle: string | null;
+  targetHandle: string | null;
+  updatedAt: number;
+}
+
+export interface CanvasNodeInput {
+  id: string;
+  taskId?: string | null;
+  label: string;
+  nodeType?: CanvasNodeType;
+  kind?: CanvasNodeKind;
+  harnessId?: string | null;
+  position?: { x: number; y: number };
+}
+
+export interface CanvasPatch {
+  upsertNodes?: CanvasNodeInput[];
+  upsertEdges?: Array<{ source: string; target: string; sourceHandle?: string | null; targetHandle?: string | null }>;
+  deleteEdges?: Array<{ source: string; target: string }>;
+  deleteNodes?: string[];
+  arrange?: { mode: "columns" | "snake" | "radial" };
+}
+
+export interface CanvasPatchResult {
+  ok: boolean;
+  error?: string;
+  nodes?: UiCanvasNode[];
+  edges?: UiCanvasEdge[];
+}
