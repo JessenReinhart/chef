@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, memo } from "react";
 import {
   ReactFlow,
   Background,
@@ -106,7 +106,7 @@ function HarnessHandleRight({ color }: { color: string }) {
 }
 
 const nodeTypes: NodeTypes = {
-  blueprint: function BlueprintNode({ data, selected }: { data: CanvasNodeData; selected: boolean }) {
+  blueprint: memo(function BlueprintNode({ data, selected }: { data: CanvasNodeData; selected: boolean }) {
     const accent = data.entry ? (data.kind === "agent" ? "#06b6d4" : KIND_COLORS[data.kind] ?? "#6b7280") : KIND_COLORS[data.kind] ?? "#6b7280";
     const statusColor = STATUS_COLORS[data.status] ?? "#6b7280";
     const icon = data.entry?.icon ?? "◆";
@@ -141,7 +141,7 @@ const nodeTypes: NodeTypes = {
         <HarnessHandleRight color={accent} />
       </div>
     );
-  },
+  }),
 };
 
 export function BlueprintCanvas({
@@ -188,6 +188,8 @@ export function BlueprintCanvas({
         merged.push({
           id: node.id,
           position,
+          width: 180,
+          height: 84,
           ...nodeDefaults,
           data: {
             label: node.label,
@@ -344,8 +346,8 @@ export function BlueprintCanvas({
           onPaneClick={handlePaneClick}
           onNodeDragStop={handleNodeDragStop}
           onMoveEnd={(_event, viewport) => saveJson(VIEW_KEY, viewport)}
-          defaultViewport={defaultViewport}
-          fitView={!defaultViewport}
+          defaultViewport={undefined}
+          fitView={true}
           fitViewOptions={{ padding: 0.2, maxZoom: 1.2 }}
           minZoom={0.2}
           maxZoom={2.5}
