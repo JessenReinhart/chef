@@ -324,6 +324,62 @@ export interface OrchestratorResult {
 }
 
 // ---------------------------------------------------------------------------
+// Canvas graph (spec 5.4) — durable orchestrator-owned blueprint graph
+// ---------------------------------------------------------------------------
+
+export type CanvasNodeType = "blueprint" | "proxy";
+export type CanvasNodeKind = "agent" | "tool" | "data" | "approval" | "system";
+
+/** Durable blueprint canvas node exposed via runtime API. */
+export interface CanvasNode {
+  id: string;
+  workspaceId: WorkspaceId;
+  taskId: string | null;
+  label: string;
+  nodeType: CanvasNodeType;
+  kind: CanvasNodeKind;
+  harnessId: string | null;
+  position: { x: number; y: number };
+  updatedAt: Timestamp;
+}
+
+/** Durable blueprint canvas edge. */
+export interface CanvasEdge {
+  id: string;
+  workspaceId: WorkspaceId;
+  source: string;
+  target: string;
+  sourceHandle: string | null;
+  targetHandle: string | null;
+  updatedAt: Timestamp;
+}
+
+export interface CanvasNodeInput {
+  id: string;
+  taskId?: string | null;
+  label: string;
+  nodeType?: CanvasNodeType;
+  kind?: CanvasNodeKind;
+  harnessId?: string | null;
+  position?: { x: number; y: number };
+}
+
+export interface CanvasPatch {
+  upsertNodes?: CanvasNodeInput[];
+  upsertEdges?: Array<{ source: string; target: string; sourceHandle?: string | null; targetHandle?: string | null }>;
+  deleteEdges?: Array<{ source: string; target: string }>;
+  deleteNodes?: string[];
+  arrange?: { mode: "columns" | "snake" | "radial" };
+}
+
+export interface CanvasPatchResult {
+  ok: boolean;
+  error?: string;
+  nodes?: CanvasNode[];
+  edges?: CanvasEdge[];
+}
+
+// ---------------------------------------------------------------------------
 // Workspace state (spec 5.4 inspectState)
 // ---------------------------------------------------------------------------
 

@@ -4,6 +4,10 @@ import { newId, now } from "../core/ids.ts";
 import type {
   AgentId,
   Artifact,
+  CanvasEdge,
+  CanvasNode,
+  CanvasPatch,
+  CanvasPatchResult,
   ContextReference,
   Decision,
   DecisionProvider,
@@ -20,7 +24,8 @@ import type {
   WorkspaceId,
   WorkspaceSnapshot,
 } from "../core/types.ts";
-import type { Repository } from "../persistence/database.ts";
+import { type CanvasEdgeRecord, type CanvasNodeRecord, type Repository } from "../persistence/database.ts";
+import { computeLayout } from "../runtime/layout.ts";
 import { GenericTerminalHarness } from "../harness/generic.ts";
 import { defaultSidebandRoot } from "../harness/sideband.ts";
 import { ContextManager } from "../context/context.ts";
@@ -328,6 +333,73 @@ export class Orchestrator {
     return this.#repository.getWorkspaceSnapshot(workspaceId);
   }
 
+  async patchCanvasGraph(workspaceId: WorkspaceId, patch: CanvasPatch): Promise<CanvasPatchResult> {
+    // Node / edge reference validation — edges must reference nodes that
+    // exist AFTER this patch's upserts are applied, and self-loops are rejected.
+    for (const node of patch.upsertNodes ?? []) {
+      if (node.position !== undefined && (!Number.isFinite(node.position.x) || !Number.isFinite(node.position.y))) {
+        return this.#patchFailure(workspaceId, "invalid position");
+      }
+    }
+    const ids = new Set(this.#repository.listCanvasNodes(workspaceId).map((n) => n.id));
+    for (const node of patch.upsertNodes ?? []) ids.add(node.id);
+    for (const ed of patch.upsertEdges ?? []) {
+      if (ed.source === ed.target) return this.#patchFailure(workspaceId, `self-loop edge ${ed.source}->${ed.target}`);
+      if (!ids.has(ed.source)) return this.#patchFailure(workspaceId, `edge references missing node ${ed.source}`);
+      if (!ids.has(ed.target)) return this.#patchFailure(workspaceId, `edge references missing node ${ed.target}`);
+    }
+
+    // Apply transactionally — any failure rolls the whole batch back.
+    try {
+      this.#repository.transaction(() => {
+        for (const node of patch.upsertNodes ?? []) this.#repository.upsertCanvasNode({ ...node, workspaceId });
+        for (const ed of patch.upsertEdges ?? []) this.#repository.upsertCanvasEdge({ ...ed, workspaceId });
+        for (const id of patch.deleteNodes ?? []) {
+          this.#deleteCanvasEdgesFor(workspaceId, id);
+          this.#repository.deleteCanvasNode(id);
+        }
+        for (const ed of patch.deleteEdges ?? []) this.#repository.deleteCanvasEdge(`${ed.source}->${ed.target}`);
+      });
+    } catch (error) {
+      return this.#patchFailure(workspaceId, error instanceof Error ? error.message : String(error));
+    }
+
+    // Arrange (deterministic server-side layout) when requested.
+    if (patch.arrange) {
+      const arrangeNodes = this.#repository.listCanvasNodes(workspaceId);
+      const arrangeEdges = this.#repository.listCanvasEdges(workspaceId);
+      const layout = computeLayout(arrangeNodes, arrangeEdges, patch.arrange.mode);
+      this.#repository.transaction(() => {
+        for (const nd of arrangeNodes) {
+          const position = layout.get(nd.id);
+          if (!position) continue;
+          this.#repository.upsertCanvasNode({
+            id: nd.id,
+            workspaceId,
+            taskId: nd.taskId,
+            label: nd.label,
+            kind: nd.kind,
+            nodeType: nd.nodeType,
+            harnessId: nd.harnessId,
+            position,
+          });
+        }
+      });
+    }
+
+    const nodes = this.#repository.listCanvasNodes(workspaceId).map((n) => this.#mapToCanvasNode(n));
+    const edges = this.#repository.listCanvasEdges(workspaceId).map((e) => this.#mapToCanvasEdge(e));
+    this.#appendEvent(workspaceId, { type: "canvas.patched", payload: { nodes, edges } });
+    return { ok: true, nodes, edges };
+  }
+
+  listCanvasGraph(workspaceId: WorkspaceId): { nodes: CanvasNode[]; edges: CanvasEdge[] } {
+    return {
+      nodes: this.#repository.listCanvasNodes(workspaceId).map((n) => this.#mapToCanvasNode(n)),
+      edges: this.#repository.listCanvasEdges(workspaceId).map((e) => this.#mapToCanvasEdge(e)),
+    };
+  }
+
   async proposePlan(input: PlanProposalContext): Promise<Plan | null> {
     return this.#decisionProvider.proposePlan(input);
   }
@@ -583,6 +655,46 @@ export class Orchestrator {
     const event = this.#repository.appendEvent({ workspaceId, source: ORCHESTRATOR_SOURCE, ...input });
     if (this.#onEvent) this.#onEvent(event);
     return event;
+  }
+
+  #patchFailure(workspaceId: WorkspaceId, error: string): CanvasPatchResult {
+    this.#appendEvent(workspaceId, { type: "canvas.patch.failed", payload: { error } });
+    return { ok: false, error };
+  }
+
+  /** Delete every edge whose source or target is the removed node. */
+  #deleteCanvasEdgesFor(workspaceId: WorkspaceId, id: string): void {
+    for (const edge of this.#repository.listCanvasEdges(workspaceId)) {
+      if (edge.source === id || edge.target === id) this.#repository.deleteCanvasEdge(edge.id);
+    }
+  }
+
+  /** Translate durable record → public CanvasNode (position object, kind narrowed). */
+  #mapToCanvasNode(rec: CanvasNodeRecord): CanvasNode {
+    return {
+      id: rec.id,
+      workspaceId: rec.workspaceId,
+      taskId: rec.taskId,
+      label: rec.label,
+      nodeType: rec.nodeType,
+      kind: rec.kind as CanvasNodeKind,
+      harnessId: rec.harnessId,
+      position: { x: rec.positionX, y: rec.positionY },
+      updatedAt: rec.updatedAt,
+    };
+  }
+
+  /** Translate durable record → public CanvasEdge. */
+  #mapToCanvasEdge(rec: CanvasEdgeRecord): CanvasEdge {
+    return {
+      id: rec.id,
+      workspaceId: rec.workspaceId,
+      source: rec.source,
+      target: rec.target,
+      sourceHandle: rec.sourceHandle,
+      targetHandle: rec.targetHandle,
+      updatedAt: rec.updatedAt,
+    };
   }
 
   #isTerminal(task: Task): boolean {
