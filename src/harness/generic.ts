@@ -463,6 +463,13 @@ export class GenericTerminalHarness implements Harness {
     return active.session.sideband.writeContextRefs(contextRefs);
   }
 
+  /** Write a peer message envelope into the session's inbox (message_peer). */
+  async writeMessage(sessionId: string, from: string, text: string): Promise<string> {
+    const active = this.#sessions.get(sessionId);
+    if (!active) throw new Error(`No active session: ${sessionId}`);
+    return active.session.sideband.writeMessage(from, text);
+  }
+
   /** Drain the session's outbox. */
   async readOutbox(sessionId: string): Promise<SidebandEnvelope[]> {
     const active = this.#sessions.get(sessionId);

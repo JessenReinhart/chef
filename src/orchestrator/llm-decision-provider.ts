@@ -378,12 +378,27 @@ Return a Plan with tasks that achieve this goal.`;
 // Factory function
 // ---------------------------------------------------------------------------
 
-export function createLLMDecisionProvider(): DecisionProvider | null {
-	const provider = process.env.CHEF_PROVIDER?.toLowerCase();
-	const apiKey = process.env.ANTHROPIC_API_KEY ?? process.env.OPENAI_API_KEY ?? process.env.CHEF_API_KEY;
+export interface LLMProviderConfig {
+	provider: string | null;
+	apiKey: string | null;
+	model: string;
+	baseUrl?: string;
+	timeoutMs?: number;
+}
+
+/** Read the LLM decision-provider config from env (single source of truth for env var names). */
+export function readLLMProviderConfig(): LLMProviderConfig {
+	const provider = process.env.CHEF_PROVIDER?.toLowerCase() ?? null;
+	const apiKey = process.env.ANTHROPIC_API_KEY ?? process.env.OPENAI_API_KEY ?? process.env.CHEF_API_KEY ?? null;
 	const model = process.env.CHEF_MODEL ?? "claude-3-5-sonnet-20241022";
 	const baseUrl = process.env.CHEF_BASE_URL;
 	const timeoutMs = process.env.CHEF_TIMEOUT_MS ? Number(process.env.CHEF_TIMEOUT_MS) : undefined;
+	return { provider, apiKey, model, baseUrl, timeoutMs };
+}
+
+export function createLLMDecisionProvider(): DecisionProvider | null {
+	const { provider, apiKey, model, baseUrl, timeoutMs } = readLLMProviderConfig();
+
 
 	if (!provider || !apiKey) {
 		return null; // No provider configured → caller uses ScriptedDecisionProvider

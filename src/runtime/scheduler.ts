@@ -45,6 +45,10 @@ export interface HarnessLike {
   resize(sessionId: string, cols: number, rows: number): Promise<void>;
   terminate(sessionId: string): Promise<void>;
   forget(sessionId: string): Promise<void>;
+  /** Write context references into a session's inbox (runtime -> process). */
+  writeContextRefs(sessionId: string, contextRefs: ContextReference[]): Promise<string>;
+  /** Write a peer message envelope into a session's inbox (message_peer). */
+  writeMessage(sessionId: string, from: string, text: string): Promise<string>;
   close(): Promise<void>;
 }
 
@@ -427,6 +431,33 @@ export class Scheduler {
       taskId: tracking.taskId,
       sessionId,
       source: { type: "user", id: "ui" },
+    });
+  }
+
+  /**
+   * Write a peer-to-peer message envelope into a live session's inbox
+   * (October-style message_peer over canvas edges). The harness must be
+   * registered and the session active; the envelope is persisted so the
+   * receiving process can consume it from its sideband inbox. Emits a
+   * session.message event for SSE visibility.
+   */
+  async sendPeerMessage(
+    workspaceId: WorkspaceId,
+    sessionId: SessionId,
+    fromAgentId: AgentId,
+    text: string,
+  ): Promise<void> {
+    const tracking = this.#sessions.get(sessionId);
+    if (!tracking) throw new Error(`No active session: ${sessionId}`);
+    const harness = this.#registry.get(tracking.agentId);
+    if (!harness) throw new Error(`No harness registered for agent ${tracking.agentId}`);
+    await harness.writeMessage(sessionId, fromAgentId, text);
+    this.#appendEvent(workspaceId, {
+      type: "session.message",
+      payload: { from: fromAgentId, text },
+      taskId: tracking.taskId,
+      sessionId,
+      source: { type: "agent", id: fromAgentId },
     });
   }
 

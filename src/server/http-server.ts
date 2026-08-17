@@ -72,6 +72,11 @@ export function createHttpServer(runtime: ChefRuntime): Server {
         return;
       }
 
+      if (req.method === "GET" && path === "/api/llm/status") {
+        sendJson(res, 200, { ok: true, data: runtime.llmStatus });
+        return;
+      }
+
 
       if (req.method === "GET" && path === "/api/events") {
         const typesParam = url.searchParams.get("types");
@@ -186,6 +191,23 @@ export function createHttpServer(runtime: ChefRuntime): Server {
           return;
         }
         await runtime.resizeSession(body.sessionId, body.cols, body.rows);
+        sendJson(res, 200, { ok: true });
+        return;
+      }
+
+      // Peer messaging (message_peer): write a message envelope into the
+      // session's inbox. The body may carry an optional `from` (defaults to
+      // "peer") and a required `text`.
+      const messageMatch = path.match(/^\/api\/sessions\/([^/]+)\/message$/);
+      if (req.method === "POST" && messageMatch) {
+        const [, sessionId] = messageMatch;
+        const body = (await readBody(req)) as { from?: string; text?: string };
+        if (typeof body.text !== "string" || body.text.length === 0) {
+          sendJson(res, 400, { error: "text is required" });
+          return;
+        }
+        const from = typeof body.from === "string" && body.from.length > 0 ? body.from : "peer";
+        await runtime.sendPeerMessage(sessionId, from, body.text);
         sendJson(res, 200, { ok: true });
         return;
       }

@@ -31,7 +31,7 @@ import {
   type OrchestratorHarness,
   type RuntimeAdapter,
 } from "./orchestrator/orchestrator.ts";
-import { createLLMDecisionProvider } from "./orchestrator/llm-decision-provider.ts";
+import { createLLMDecisionProvider, readLLMProviderConfig } from "./orchestrator/llm-decision-provider.ts";
 
 class RuntimeHarnessRegistry implements HarnessRegistry {
   readonly #byAgent = new Map<AgentId, HarnessLike>();
@@ -75,6 +75,7 @@ function asSchedulerHarness(harness: GenericTerminalHarness): HarnessLike {
       return { id: session.id, pid: session.pid };
     },
     writeContextRefs: (sessionId: string, refs: ContextReference[]) => harness.writeContextRefs(sessionId, refs),
+    writeMessage: (sessionId: string, from: string, text: string) => harness.writeMessage(sessionId, from, text),
     events: (sessionId: string) => harness.events(sessionId),
     send: (sessionId: string, input: string) => harness.send(sessionId, input),
     interrupt: (sessionId: string) => harness.interrupt(sessionId),
@@ -83,6 +84,13 @@ function asSchedulerHarness(harness: GenericTerminalHarness): HarnessLike {
     forget: (sessionId: string) => harness.forget(sessionId),
     close: () => harness.close(),
   };
+}
+
+/** Whether the LLM decision provider is active, and what it resolves to. */
+export interface LLMStatus {
+  configured: boolean;
+  provider: string | null;
+  model: string | null;
 }
 
 export interface ChefRuntime {
@@ -95,6 +103,8 @@ export interface ChefRuntime {
   retryTask(taskId: TaskId): Promise<void>;
   /** Send a chat message and stream assistant replies via SSE. */
   sendChatMessage(message: string): Promise<OrchestratorResult>;
+  /** Write a peer message envelope into a live session's inbox (message_peer). */
+  sendPeerMessage(sessionId: string, fromAgentId: string, text: string): Promise<void>;
   /** Ask the scheduler to dispatch any runnable pending tasks (blueprint canvas). */
   dispatchPending(): Promise<number>;
   /** Forward a harness event to the scheduler for task lifecycle updates. */
@@ -103,6 +113,8 @@ export interface ChefRuntime {
   registerHarness(agentId: string, harness: HarnessLike): void;
   /** Apply a durable canvas graph mutation (validate → write → arrange → emit). */
   patchCanvas(workspaceId: WorkspaceId, patch: CanvasPatch): Promise<CanvasPatchResult>;
+  /** LLM decision-provider status (mirrors createLLMDecisionProvider's env resolution). */
+  readonly llmStatus: LLMStatus;
   /** Read the durable canvas graph projection. */
   listCanvas(workspaceId: WorkspaceId): { nodes: CanvasNode[]; edges: CanvasEdge[] };
   /** Phase 8: deterministic tool runner (terminal/filesystem/git + approval gates). */
@@ -199,6 +211,16 @@ export function createChef(options: {
   const orchestratorRegistry = new OrchestratorHarnessRegistry();
   const specializedHarnesses = new SpecializedHarnessRegistry();
 
+  // Surface LLM provider status (same env logic as createLLMDecisionProvider:
+  // a provider is "configured" when it has a provider value AND a resolved key).
+  const llmConfig = readLLMProviderConfig();
+  const llmConfigured = !!(llmConfig.provider && llmConfig.apiKey);
+  const llmStatus: LLMStatus = {
+    configured: llmConfigured,
+    provider: llmConfigured ? llmConfig.provider : null,
+    model: llmConfigured ? llmConfig.model : null,
+  };
+
   // Use LLM provider from env if configured, otherwise use provided or scripted
   const llmProvider = options.decisionProvider ?? createLLMDecisionProvider();
   const scripted = llmProvider ?? new ScriptedDecisionProvider();
@@ -289,6 +311,7 @@ export function createChef(options: {
     repository,
     projectDir: options.projectDir,
     specializedHarnesses,
+    llmStatus,
     toolRunner,
     browserTool,
     mcpRegistry,
@@ -301,6 +324,16 @@ export function createChef(options: {
       // can find them by agent id (task.assignedTo).
       for (const harness of specializedHarnesses.values()) {
         runtimeRegistry.set(harness.id as AgentId, harness);
+      }
+      // Always register a generic PTY harness under the "generic" agent id so
+      // canvas nodes assigned to "generic" (palette advertises it as always
+      // available) can actually dispatch. Command resolved at spawn time via
+      // the harness command surface (node fallback).
+      if (!runtimeRegistry.get("generic")) {
+        runtimeRegistry.set(
+          "generic",
+          asSchedulerHarness(new GenericTerminalHarness({ agentId: "generic", workspaceId, command: "node", cwd: options.projectDir })),
+        );
       }
       try {
         await mcpRegistry.connectAll();
@@ -328,6 +361,9 @@ export function createChef(options: {
     },
     sendInput(sessionId: string, input: string): Promise<void> {
       return scheduler.send(workspaceId, sessionId, input);
+    },
+    sendPeerMessage(sessionId: string, fromAgentId: string, text: string): Promise<void> {
+      return scheduler.sendPeerMessage(workspaceId, sessionId, fromAgentId, text);
     },
     interruptSession(sessionId: string): Promise<void> {
       return scheduler.interrupt(workspaceId, sessionId);
