@@ -4,11 +4,12 @@ import { NodePalette } from "./NodePalette";
 import { ChatPanel } from "./ChatPanel";
 import { api } from "./api";
 import { NODE_LIBRARY, registerHarnesses, subscribeLibrary } from "./nodeCatalog";
-import type { UiTask, HarnessInfo, NodeCatalogEntry } from "./types";
+import type { UiTask, HarnessInfo, NodeCatalogEntry, UiCanvasNode, UiCanvasEdge } from "./types";
 
 export function App() {
   const [tasks, setTasks] = useState<UiTask[]>([]);
-  const [dependencies, setDependencies] = useState<Array<{ source: string; target: string }>>([]);
+  const [canvasNodes, setCanvasNodes] = useState<UiCanvasNode[]>([]);
+  const [canvasEdges, setCanvasEdges] = useState<UiCanvasEdge[]>([]);
   const [selectedTask, setSelectedTask] = useState<UiTask | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isDispatching, setIsDispatching] = useState(false);
@@ -17,11 +18,14 @@ export function App() {
   const [harnesses, setHarnesses] = useState<HarnessInfo[]>([]);
   const pollingRef = useRef<number | null>(null);
   const librarySubRef = useRef<(() => void) | null>(null);
+  const sseRef = useRef<EventSource | null>(null);
 
   const refresh = useCallback(async () => {
     try {
       const snapshot = await api.stateRaw();
       setTasks(snapshot.tasks);
+      setCanvasNodes(snapshot.canvasNodes);
+      setCanvasEdges(snapshot.canvasEdges);
       const pending = snapshot.approvals.filter((a) => a.status === "pending");
       setApprovals(pending);
     } catch (err) {
@@ -37,16 +41,20 @@ export function App() {
     };
   }, [refresh]);
 
+  // SSE /api/events — canvas.patched events trigger an immediate refresh
+  // (no wait for the next poll tick).
   useEffect(() => {
-    const stored = localStorage.getItem("chef:canvas:edges");
-    if (stored) {
-      try {
-        setDependencies(JSON.parse(stored));
-      } catch {
-        // ignore
-      }
-    }
-  }, []);
+    const es = new EventSource("/api/events?types=canvas.*");
+    sseRef.current = es;
+    es.addEventListener("canvas.patched", () => void refresh());
+    es.onerror = () => {
+      // EventSource auto-reconnects; nothing to do here.
+    };
+    return () => {
+      es.close();
+      sseRef.current = null;
+    };
+  }, [refresh]);
 
   // Fetch harnesses on mount
   useEffect(() => {
@@ -68,33 +76,38 @@ export function App() {
     return () => unsub();
   }, []);
 
-  const persistEdges = useCallback((edges: Array<{ source: string; target: string }>) => {
-    setDependencies(edges);
-    localStorage.setItem("chef:canvas:edges", JSON.stringify(edges));
-  }, []);
-
   const handleConnect = useCallback(
     async (source: string, target: string) => {
       try {
-        await api.createEdge(source, target);
-        persistEdges([...dependencies, { source, target }]);
+        const result = await api.patchCanvas({ upsertEdges: [{ source, target }] });
+        if (result.ok) {
+          if (result.nodes) setCanvasNodes(result.nodes);
+          if (result.edges) setCanvasEdges(result.edges);
+        } else if (result.error) {
+          setError(result.error);
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to create edge");
       }
     },
-    [dependencies, persistEdges],
+    [],
   );
 
   const handleDisconnect = useCallback(
     async (source: string, target: string) => {
       try {
-        await api.deleteEdge(source, target);
-        persistEdges(dependencies.filter((d) => !(d.source === source && d.target === target)));
+        const result = await api.patchCanvas({ deleteEdges: [{ source, target }] });
+        if (result.ok) {
+          if (result.nodes) setCanvasNodes(result.nodes);
+          if (result.edges) setCanvasEdges(result.edges);
+        } else if (result.error) {
+          setError(result.error);
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to remove edge");
       }
     },
-    [dependencies, persistEdges],
+    [],
   );
 
   const handleDropNode = useCallback(
@@ -110,9 +123,21 @@ export function App() {
           config: {},
           assignedTo: payload.harnessId,
         });
-        const positions = JSON.parse(localStorage.getItem("chef:canvas:positions") ?? "{}");
-        positions[taskId] = position;
-        localStorage.setItem("chef:canvas:positions", JSON.stringify(positions));
+        // POST /api/nodes creates a task only — persist a canvas node that
+        // references the task (with the dropped position) via patchCanvas.
+        await api.patchCanvas({
+          upsertNodes: [
+            {
+              id: taskId,
+              taskId,
+              label: title,
+              nodeType: "blueprint",
+              kind: entry?.kind === "agent" ? "agent" : "tool",
+              harnessId: payload.harnessId ?? entry?.harnessId ?? null,
+              position,
+            },
+          ],
+        });
         void refresh();
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to create node");
@@ -120,6 +145,19 @@ export function App() {
     },
     [refresh],
   );
+
+  const handleNodeDragStop = useCallback(async (id: string, position: { x: number; y: number }, label: string) => {
+    try {
+      const result = await api.patchCanvas({
+        upsertNodes: [{ id, label, position }],
+      });
+      if (!result.ok && result.error) {
+        setError(result.error);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update position");
+    }
+  }, []);
 
   const handleDispatch = useCallback(async () => {
     if (isDispatching) return;
@@ -255,11 +293,13 @@ export function App() {
           <div className="flex-1 relative min-w-0">
             <BlueprintCanvas
               tasks={tasks}
-              dependencies={dependencies}
+              canvasNodes={canvasNodes}
+              canvasEdges={canvasEdges}
               onConnect={handleConnect}
               onDisconnect={handleDisconnect}
               onSelectNode={setSelectedTask}
               onDropNode={handleDropNode}
+              onNodeDragStop={handleNodeDragStop}
               harnesses={harnesses}
             />
 

@@ -3,8 +3,17 @@
  * All calls go through the Vite proxy → Chef runtime HTTP server (port 4321).
  */
 
-import type { HarnessInfo, Template, UiGraph, ChatMessage, UiTask } from "./types";
-
+import type {
+  CanvasPatch,
+  CanvasPatchResult,
+  HarnessInfo,
+  Template,
+  UiGraph,
+  ChatMessage,
+  UiTask,
+  UiCanvasNode,
+  UiCanvasEdge,
+} from "./types";
 export interface CreateNodeInput {
   type: string;
   title?: string;
@@ -56,12 +65,34 @@ export class Api {
     tasks: UiTask[];
     sessions: unknown[];
     approvals: Array<{ id: string; reason: string; taskId: string; status: string }>;
+    canvasNodes: UiCanvasNode[];
+    canvasEdges: UiCanvasEdge[];
   }> {
     return this.request<{
       tasks: UiTask[];
       sessions: unknown[];
       approvals: Array<{ id: string; reason: string; taskId: string; status: string }>;
+      canvasNodes: UiCanvasNode[];
+      canvasEdges: UiCanvasEdge[];
     }>("/api/state");
+  }
+
+  // ── Canvas graph patch (runtime-owned projection) ───────────────
+  async patchCanvas(patch: CanvasPatch): Promise<CanvasPatchResult> {
+    const res = await fetch(`${this.base}/api/canvas/patch`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(patch),
+    });
+    const body = (await res.json()) as CanvasPatchResult;
+    if (res.status === 422 && body.ok === false) {
+      // Rejected patch — return the result so callers can surface the error.
+      return body;
+    }
+    if (!res.ok) {
+      throw new Error(body.error ?? `HTTP ${res.status}`);
+    }
+    return body;
   }
 
   // ── Nodes ────────────────────────────────────────────────────────
