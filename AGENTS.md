@@ -31,15 +31,15 @@ The intended loop is `human intent → Orchestrator → tasks → harnesses → 
 
 ## Implementation Status (Spec Roadmap)
 - **P0 (in place):** headless runtime (workspace, tasks, event bus, persistence, generic PTY harness, `ScriptedDecisionProvider` stand-in for a real agent), orchestrator loop, structured worker messages, artifact references, restart survival, timeout/cancellation teardown, atomic event sequencing, and CAS-protected lifecycle transitions.
-- **P1 (partially in place):** bounded concurrent dispatch with atomic live-session capacity checks, retries, durable plan history, deterministic workspace snapshots, PTY transcript replay via `session.data` events, and live event subscription. Specialized harness adapters (Pi/OMP/Freebuff/Claude), direct user-to-worker interaction, and approval-gated execution remain.
-- **P2+ (not yet):** visual canvas (XYFlow/React Flow), terminal nodes, context inspector, MCP/tools, approvals/permissions, replay-driven resume, and hierarchical squads.
+- **P1 (in place):** bounded concurrent dispatch with atomic live-session capacity checks, retries, durable plan history, deterministic workspace snapshots, PTY transcript replay via `session.data` events, live event subscription, durable canvas graph (`canvas_nodes`/`canvas_edges` tables + `patchCanvas` API), plan→canvas materialization, and **context sharing via canvas edges** (target task inherits source's latest artifact + task ref as `contextRefs`, October-style). Direct user-to-worker interaction and approval-gated execution remain.
+- **P2+ (not yet):** terminal nodes, context inspector overlay, MCP/tools, approvals/permissions, replay-driven resume, hierarchical squads, agent-to-agent messaging.
 
 ## Spec Divergences
 - Spec suggests Drizzle ORM; the code uses raw `node:sqlite` `DatabaseSync` with a hand-written `schema.sql` and no migrations.
-- Spec defines `nodes`/`edges`/`workflows`/`approvals` tables; `schema.sql` has `workspaces`, `projects`, `agents`, `harnesses`, `sessions`, `tasks`, `task_dependencies`, `messages`, `events`, `artifacts`, `decisions`, and durable `plans` — no workflow-graph or approvals tables yet.
+- Spec defines `nodes`/`edges`/`workflows`/`approvals` tables; `schema.sql` has `workspaces`, `projects`, `agents`, `harnesses`, `sessions`, `tasks`, `task_dependencies`, `messages`, `events`, `artifacts`, `decisions`, durable `plans`, and a canvas graph (`canvas_nodes`/`canvas_edges`) — no workflow-graph or approvals tables yet.
 - `AgentMessage` (spec §7.1) includes `channel`, `replyTo`, and `contextRefs`; check the local `Message`/`AgentMessage` type before assuming parity.
 - Spec `Task.status` includes `"blocked"`/`"cancelled"`; local `TaskMachine` `ALLOWED` transitions define the actual set — consult it before adding statuses.
-- No UI/desktop/web app exists yet; spec UI choices (React/Vite, Zustand, Tauri) do not apply.
+- A Blueprint-style React Flow v12 canvas UI (a disposable projection) lives in `web/` (React/Vite, no Zustand/Tauri); the runtime remains the source of truth.
 
 ## Development Commands
 ```bash
@@ -51,7 +51,10 @@ node --experimental-strip-types scripts/db-repro.ts
 npm run typecheck
 ```
 
-`npm start` runs `src/main.ts`; `npm test` runs the golden-path, timeout-cancellation, seq-concurrency, and cancel-facade regression tests. The README also references `node --experimental-strip-types diag-handles.mjs` (root diagnostic script, present).
+`npm start` runs `src/main.ts`; `npm test` runs 17 suites: golden-path, canvas (`canvas-graph`, `canvas-layout`, `canvas-patcher`, `orchestrator-canvas`, `canvas-context-share`), timeout-cancellation, seq-concurrency, cancel-facade, dispatch-concurrency, plan-persistence, pty-replay, live-events(+failure), direct-worker-interaction, approvals, and http-server. The README also references `node --experimental-strip-types diag-handles.mjs` (root diagnostic script, present).
+
+- `cd web && npx tsc -b && npm run build` — typecheck + build the canvas UI.
+- `npm run server` — headless HTTP/SSE server (port `CHEF_PORT`, default 4321); `cd web && npm run dev` (5173, proxy `/api` → server).
 
 ## Code Conventions & Common Patterns
 - ESM TypeScript executed directly by Node native type stripping; avoid enums, namespaces, and parameter properties.
@@ -75,6 +78,7 @@ Lifecycle invariants:
 - Existing duplicated contracts (`ContextReference`, `HarnessEvent`, `SessionStatus`) require care when changing imports or exported types.
 - Inline property access on a cast is disallowed (`ts-no-inline-cast-access`): use a named const with a one-line reason, or an `in`/`typeof` guard.
 - `ReturnType<typeof fn>` contracts are disallowed (`ts-no-return-type`): export named types at the owning module instead.
+- Canvas edges are context channels, not just dependency gates: `patchCanvasGraph` derives each target task's `contextRefs` from its inbound canvas edges (source's latest artifact + task ref) and re-syncs on edge/node deletion. Keep this write-through in the orchestrator; `Scheduler.#dispatchOne` already materializes `task.contextRefs` into the harness inbox at dispatch.
 
 ## Important Files
 - `src/main.ts` — `createChef()` composition root and lifecycle API (`start`, message handling, state inspection, `close`).
@@ -88,6 +92,9 @@ Lifecycle invariants:
 - `src/persistence/schema.sql` — SQLite tables, foreign keys, and indexes.
 - `handoff.md` — operational bug history and platform-specific constraints.
 - `diag-handles.mjs` — handle-leak diagnostic script at repo root.
+- `src/runtime/layout.ts` — deterministic server-side graph layout (columns by depth).
+- `src/server/http-server.ts` — read-only HTTP/SSE projection (`/api/state`, `/api/canvas/patch`, SSE `canvas.*` events).
+- `web/` — React Flow v12 canvas UI (disposable projection); state loads from `/api/state`, SSE reconciles.
 
 ## Runtime/Tooling Preferences
 - Required runtime: Node.js `>=24.0.0`; native TypeScript stripping is required.
@@ -103,7 +110,7 @@ Lifecycle invariants:
 - `tests/golden-path.ts` is the P0 E2E check: create runtime, send a user message, assert tasks/events/artifacts/sessions, close, reopen, and verify durable counts/state.
 - Tests use real temporary SQLite databases and real `node-pty` harnesses; cleanup runs in `try/finally`.
 - `scripts/smoke-orchestrator.ts` exercises the real Repository/Scheduler/Orchestrator stack and prints snapshots.
-- `scripts/db-repro.ts` isolates SQLite close/unlink behavior. Root debug files (`diag-handles.mjs`, `golden-*.ts/mjs`, `test-out.txt`) diagnose handle leaks and are not additional coverage.
+- `tests/canvas-graph.ts`, `tests/canvas-layout.ts`, `tests/canvas-patcher.ts`, `tests/orchestrator-canvas.ts`, `tests/canvas-context-share.ts` — canvas graph persistence, layout, patch API, plan→canvas materialization, and **context sharing** regressions.
 - There is no coverage configuration or CI gate. Untested or lightly tested surfaces include individual persistence CRUD methods, scheduler transition/retry branches, sideband edge cases, context resolution variants, and external Anthropic integration.
 
 ## Known Operational Issues

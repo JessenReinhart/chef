@@ -30,3 +30,13 @@
 ## Baseline
 - HEAD after wave 4: `189ac01`
 
+
+## Phase 10 — Canvas Graph + Context Sharing (Oct/11 parity)
+- [x] CanvasSmith: durable graph persistence (canvas_nodes/canvas_edges tables) ✅ 6284de0
+- [x] LayoutEngine: deterministic server-side layout (columns by depth) ✅ 74e7943
+- [x] Runtime patchCanvas API + SSE projection ✅ d750ff3
+- [x] Orchestrator materializes plans as canvas graph (spawn + connect + arrange) ✅ 6cee42f
+- [x] UI reads/persists canvas via runtime API + SSE sync ✅ 4a18670
+- [x] Node visibility fix (explicit dimensions) ✅ e07a591
+- [x] Context sharing via canvas edges — target task receives source's latest artifact + task ref ✅ 75a3ad6
+- [x] All canvas tests in npm test (17 suites total) ✅ 4471117
