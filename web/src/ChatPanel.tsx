@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { api } from "./api";
-import type { ChatMessage } from "./types";
+import type { ChatMessage, LlmStatus } from "./types";
 
 interface ChatPanelProps {
   onPlanProposed: (taskIds: string[]) => void;
@@ -39,6 +39,7 @@ export function ChatPanel({ onPlanProposed }: ChatPanelProps) {
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [lastEventSeq, setLastEventSeq] = useState<number | undefined>(undefined);
+  const [llmStatus, setLlmStatus] = useState<LlmStatus | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const onPlanProposedRef = useRef(onPlanProposed);
@@ -52,6 +53,22 @@ export function ChatPanel({ onPlanProposed }: ChatPanelProps) {
   useEffect(() => {
     scrollToBottom();
   }, [messages, scrollToBottom]);
+
+  // Fetch LLM provider status on mount.
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .llmStatus()
+      .then((status) => {
+        if (!cancelled) setLlmStatus(status);
+      })
+      .catch(() => {
+        // LLM status endpoint optional — no-op if unavailable
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Initial history load — dedupes messages already present.
   useEffect(() => {
@@ -311,6 +328,25 @@ export function ChatPanel({ onPlanProposed }: ChatPanelProps) {
           </div>
         ))}
       </div>
+
+      {/* LLM provider status — informational only */}
+      {llmStatus !== null && !llmStatus.configured && (
+        <div className="mx-3 mt-2 px-3 py-2 rounded-lg border border-amber-500/30 bg-amber-500/10 text-xs text-amber-300 shrink-0">
+          <span className="font-semibold">LLM not configured</span> — using scripted planner. Set{" "}
+          <code className="px-1 py-0.5 rounded bg-[#161b22] text-amber-200">CHEF_PROVIDER</code>,{" "}
+          <code className="px-1 py-0.5 rounded bg-[#161b22] text-amber-200">CHEF_API_KEY</code>,{" "}
+          <code className="px-1 py-0.5 rounded bg-[#161b22] text-amber-200">CHEF_MODEL</code> to enable.
+        </div>
+      )}
+      {llmStatus !== null && llmStatus.configured && (
+        <div className="mx-3 mt-2 px-3 py-1.5 rounded-lg border border-green-500/25 bg-green-500/5 text-[11px] text-green-300 shrink-0 flex items-center gap-2">
+          <span className="h-1.5 w-1.5 rounded-full bg-green-400" />
+          <span>
+            LLM: <span className="font-mono">{llmStatus.provider}</span>
+            {llmStatus.model ? <span className="font-mono">/{llmStatus.model}</span> : null}
+          </span>
+        </div>
+      )}
 
       {/* Input */}
       <div className="p-3 border-t border-[#21262d] bg-[#010409]/80 backdrop-blur shrink-0">

@@ -8,6 +8,8 @@ import type {
   WorkspaceSnapshot,
 } from "../../src/core/types.ts";
 import { NodeIcon } from "./nodeCatalog.tsx";
+import { TerminalPanel } from "./TerminalPanel.tsx";
+import { api } from "./api";
 
 interface ChatMessageView {
   role: "user" | "assistant";
@@ -40,8 +42,7 @@ export interface ConsoleMetrics {
   tokens: number | null;
   elapsedMs: number | null;
 }
-
-export type ConsoleTab = "timeline" | "artifacts" | "blockers" | "events" | "chat";
+export type ConsoleTab = "timeline" | "artifacts" | "blockers" | "events" | "chat" | "terminal" | "peers";
 
 const TABS: Array<{ id: ConsoleTab; label: string }> = [
   { id: "timeline", label: "Timeline" },
@@ -49,6 +50,8 @@ const TABS: Array<{ id: ConsoleTab; label: string }> = [
   { id: "blockers", label: "Blockers" },
   { id: "events", label: "Events" },
   { id: "chat", label: "Chat" },
+  { id: "terminal", label: "Terminal" },
+  { id: "peers", label: "Peers" },
 ];
 
 // ---------------------------------------------------------------------------
@@ -213,6 +216,13 @@ export function ConsolePanel({ events, snapshot, metrics }: { events: RuntimeEve
   const [retrying, setRetrying] = useState<Set<string>>(new Set());
   const [approvalBusy, setApprovalBusy] = useState<Set<string>>(new Set());
   const [actionError, setActionError] = useState<string | null>(null);
+  const [peerSessions, setPeerSessions] = useState<Array<{ id: string; taskId: string; status: string; pid: number }>>([]);
+  const [peerSessionId, setPeerSessionId] = useState<string>("");
+  const [peerFrom, setPeerFrom] = useState<string>("peer");
+  const [peerText, setPeerText] = useState<string>("");
+  const [peerLog, setPeerLog] = useState<Array<{ from: string; text: string; at: number; ok: boolean }>>([]);
+  const [peerBusy, setPeerBusy] = useState(false);
+  const [peerError, setPeerError] = useState<string | null>(null);
   const messagesRef = useRef<ChatMessageView[]>([]);
   const streamRef = useRef<EventSource | null>(null);
 
@@ -274,6 +284,17 @@ export function ConsolePanel({ events, snapshot, metrics }: { events: RuntimeEve
       cancelled = true;
     };
   }, [snapshot.snapshot?.artifacts.length]);
+
+  // Load available sessions for peer messaging when snapshot changes.
+  useEffect(() => {
+    const sessionList = snapshot.sessions ?? [];
+    if (sessionList.length > 0) {
+      setPeerSessions(sessionList);
+      if (!peerSessionId && sessionList[0]) {
+        setPeerSessionId(sessionList[0].id);
+      }
+    }
+  }, [snapshot.sessions, peerSessionId]);
 
   // Subscribe to the chat SSE stream; replays from the last seen seq.
   useEffect(() => {
@@ -379,6 +400,27 @@ export function ConsolePanel({ events, snapshot, metrics }: { events: RuntimeEve
   const cancelChat = () => {
     streamRef.current?.close();
     setStreaming(false);
+  };
+  // Peer messaging actions — send a message envelope to a selected session
+  // and reflect the result locally.
+  const sendPeerMessage = async () => {
+    const text = peerText.trim();
+    if (!text || !peerSessionId) return;
+    setPeerBusy(true);
+    setPeerError(null);
+    const pending = { from: peerFrom, text, at: Date.now(), ok: false };
+    setPeerLog((prev) => [...prev, pending]);
+    try {
+      await api.sendPeerMessage(peerSessionId, peerFrom, text);
+      setPeerLog((prev) => prev.map((m) => (m === pending ? { ...pending, ok: true } : m)));
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      setPeerError(detail);
+      setPeerLog((prev) => prev.map((m) => (m === pending ? { ...pending, ok: false } : m)));
+    } finally {
+      setPeerBusy(false);
+      setPeerText("");
+    }
   };
 
   // -------------------------------------------------------------------------
@@ -865,6 +907,103 @@ export function ConsolePanel({ events, snapshot, metrics }: { events: RuntimeEve
                 </button>
               )}
             </form>
+          </div>
+        </div>
+
+        {/* Terminal panel */}
+        <div className={`wb-console__panel ${activeTab === "terminal" ? "wb-console__panel--active" : ""}`} role="tabpanel">
+          <TerminalPanel />
+        </div>
+
+        {/* Peers panel — message_peer over canvas edges */}
+        <div className={`wb-console__panel ${activeTab === "peers" ? "wb-console__panel--active" : ""}`} role="tabpanel">
+          <div className="wb-console__peers">
+            <div className="wb-console__peers-header">
+              <h4>Send peer message</h4>
+              <p className="wb-console__peers-hint">
+                Dispatches an October-style <code>message_peer</code> envelope to the target session's inbox.
+              </p>
+            </div>
+
+            {peerSessions.length === 0 ? (
+              <p className="wb-console__empty">No live sessions. Start a task from the canvas to enable peer messaging.</p>
+            ) : (
+              <>
+                <div className="wb-console__peers-select">
+                  <label className="wb-console__peers-label">Session</label>
+                  <select
+                    className="wb-console__select"
+                    value={peerSessionId}
+                    onChange={(e) => setPeerSessionId(e.target.value)}
+                  >
+                    {peerSessions.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.id.slice(0, 8)}… (task {s.taskId.slice(0, 8)}, {s.status})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="wb-console__peers-select">
+                  <label className="wb-console__peers-label">From (agent id)</label>
+                  <input
+                    className="wb-console__input"
+                    type="text"
+                    value={peerFrom}
+                    onChange={(e) => setPeerFrom(e.target.value)}
+                    placeholder="peer"
+                  />
+                </div>
+
+                <div className="wb-console__peers-textarea">
+                  <label className="wb-console__peers-label">Message</label>
+                  <textarea
+                    className="wb-console__textarea"
+                    value={peerText}
+                    onChange={(e) => setPeerText(e.target.value)}
+                    placeholder="Type a message for the peer…"
+                    rows={4}
+                    disabled={peerBusy}
+                  />
+                </div>
+
+                {peerError && (
+                  <div className="wb-console__peers-error" role="alert">{peerError}</div>
+                )}
+
+                <div className="wb-console__peers-actions">
+                  <button
+                    className="wb-btn wb-btn--primary"
+                    onClick={sendPeerMessage}
+                    disabled={peerBusy || !peerText.trim() || !peerSessionId}
+                  >
+                    {peerBusy ? "Sending…" : "Send Peer Message"}
+                  </button>
+                </div>
+
+                <div className="wb-console__peers-log">
+                  <h4>Sent messages</h4>
+                  {peerLog.length === 0 ? (
+                    <p className="wb-console__empty">No messages sent yet.</p>
+                  ) : (
+                    <ul className="wb-console__peers-list">
+                      {peerLog.slice().reverse().map((entry, idx) => (
+                        <li key={idx} className={`wb-console__peer-entry ${entry.ok ? "ok" : "failed"}`}>
+                          <div className="wb-console__peer-meta">
+                            <span className="wb-console__peer-from">{entry.from}</span>
+                            <span className="wb-console__peer-time">{new Date(entry.at).toLocaleTimeString()}</span>
+                            <span className={`wb-console__peer-status ${entry.ok ? "ok" : "failed"}`}>
+                              {entry.ok ? "sent" : "failed"}
+                            </span>
+                          </div>
+                          <div className="wb-console__peer-text">{entry.text}</div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </>
+            )}
           </div>
         </div>
       </div>
