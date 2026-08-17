@@ -385,6 +385,23 @@ export class Orchestrator {
     } catch (error) {
       return this.#patchFailure(workspaceId, error instanceof Error ? error.message : String(error));
     }
+    // Context sharing: a canvas edge source->target means "the target consumes
+    // the source's context" (October-style connections). Recompute each
+    // affected target task's contextRefs from its incoming edges after the
+    // transactional graph write.
+    const allEdges = this.#repository.listCanvasEdges(workspaceId);
+    const affectedTargets = new Set<string>();
+    for (const ed of [...(patch.upsertEdges ?? []), ...(patch.deleteEdges ?? [])]) {
+      affectedTargets.add(ed.target);
+    }
+    for (const id of patch.deleteNodes ?? []) {
+      for (const edge of allEdges) if (edge.source === id || edge.target === id) affectedTargets.add(edge.target);
+    }
+    for (const targetId of affectedTargets) {
+      const node = this.#repository.listCanvasNodes(workspaceId).find((n) => n.id === targetId);
+      if (!node?.taskId) continue;
+      this.#syncCanvasEdgeContext(workspaceId, targetId, allEdges);
+    }
 
     // Arrange (deterministic server-side layout) when requested.
     if (patch.arrange) {
@@ -408,7 +425,6 @@ export class Orchestrator {
         }
       });
     }
-
     const nodes = this.#repository.listCanvasNodes(workspaceId).map((n) => this.#mapToCanvasNode(n));
     const edges = this.#repository.listCanvasEdges(workspaceId).map((e) => this.#mapToCanvasEdge(e));
     this.#appendEvent(workspaceId, { type: "canvas.patched", payload: { nodes, edges } });
@@ -689,6 +705,33 @@ export class Orchestrator {
     for (const edge of this.#repository.listCanvasEdges(workspaceId)) {
       if (edge.source === id || edge.target === id) this.#repository.deleteCanvasEdge(edge.id);
     }
+  }
+
+  /**
+   * Derive each target task's context refs from its incoming canvas edges
+   * (October-style "connections scope context"): for every edge source->target
+   * the target references the source's latest artifact (falling back to a
+   * task reference when the source has produced none) plus the source task
+   * itself. Recomputes for every candidate target in one pass.
+   */
+  #syncCanvasEdgeContext(workspaceId: WorkspaceId, targetId: string, edges: CanvasEdgeRecord[]): void {
+    const incoming = edges.filter((e) => e.target === targetId);
+    if (incoming.length === 0) {
+      this.#repository.updateTaskContextRefs(targetId, []);
+      return;
+    }
+    const refs: ContextReference[] = [];
+    for (const edge of incoming) {
+      const srcNode = this.#repository.listCanvasNodes(workspaceId).find((n) => n.id === edge.source);
+      if (!srcNode?.taskId) continue;
+      const srcArtifacts = this.#repository.listArtifacts(workspaceId).filter((a) => a.taskId === srcNode.taskId);
+      if (srcArtifacts.length > 0) {
+        const latest = srcArtifacts[srcArtifacts.length - 1];
+        refs.push({ type: "artifact", id: latest.id, relevance: 1 });
+      }
+      refs.push({ type: "task", id: srcNode.taskId, relevance: 1 });
+    }
+    this.#repository.updateTaskContextRefs(targetId, refs);
   }
 
   /** Translate durable record → public CanvasNode (position object, kind narrowed). */
