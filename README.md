@@ -1,95 +1,135 @@
-# Chef AI Engineering OS
+# Chef
 
-**Local-first visual AI engineering workspace.**
+**An AI engineering workspace where one goal can become a whole team of agents working on it.**
 
-A human/CTO directs an Orchestrator/Squad Lead, which plans and dispatches work to multiple AI agents running in native terminal harnesses. The runtime is authoritative; the UI/canvas is a projection only.
+Chef is built around a simple idea: instead of manually driving one AI coding assistant at a time, give a goal to an **Orchestrator** and let it coordinate the work.
 
-## Architecture
+The Orchestrator can break a problem into tasks, delegate those tasks to different AI agents, keep their work connected, and bring the results back together. The agents can run through real terminal-based tools, so Chef is not tied to a single AI model or coding agent.
 
+> **Human intent → Orchestrator → Agents → Shared context → Results → Verification**
+
+Chef is local-first and designed to make complex, multi-agent engineering work feel like one coherent workspace.
+
+## Why Chef?
+
+Today's AI coding tools are great at helping one agent work on one problem. Real engineering work is usually messier:
+
+- one person investigates the problem
+- another implements a fix
+- another runs tests or verifies the result
+- agents need to share context and artifacts
+- work needs to survive restarts
+- someone still needs to coordinate the whole thing
+
+Chef is being built to handle that coordination.
+
+You talk primarily to Chef's **Orchestrator**. It acts more like a technical lead than a chatbot: it plans the work, delegates it, watches what happens, and decides what needs to happen next.
+
+## What it looks like
+
+```text
+                         You
+                          │
+                          ▼
+                  ┌──────────────┐
+                  │ Orchestrator │
+                  │  / Squad Lead│
+                  └──────┬───────┘
+                         │
+              ┌──────────┼──────────┐
+              ▼          ▼          ▼
+          Research     Coding    Verification
+            Agent       Agent        Agent
+              │          │          │
+              └──────────┼──────────┘
+                         ▼
+                    Your project
+                         │
+                         ▼
+                    Verified result
 ```
-Human / CTO
-    │  natural-language instruction
-    ▼
-Orchestrator (Squad Lead)
-    │  plan → tasks (investigator, verifier, …)
-    ▼
-Scheduler (runtime)
-    │  dispatch, retry, lifecycle events
-    ▼
-Agent harnesses (node-pty, winpty on Windows)
-    │  PTY stdout (terminal I/O)  ──────────── separate channel
-    │  sideband inbox/outbox      ──────────── structured events
-    ▼
-Persistence (SQLite, local-first)
-```
 
-- **Runtime is the product** — the UI/canvas is disposable.
-- **Terminal I/O and structured messaging are never mixed.** PTY bytes remain a separate harness channel; structured envelopes arrive via sideband outbox. Runtime lifecycle/events remain durable in SQLite.
-- **Restart survival** — state, artifacts, tasks, sessions, plans, and messages persist across process restarts.
-- **Atomic dispatch** — scheduler concurrency is enforced in the dispatch transaction, so concurrent callers cannot oversubscribe live sessions.
-- **Human approvals & live observability** land on top of the same runtime.
+As Chef grows, this same work can be explored and controlled through a visual workflow canvas. The canvas is a way to see and interact with the work — the underlying runtime remains the source of truth.
 
-## Quick Start
+## What Chef can do today
 
-Requires Node.js ≥ 24 (uses `node:sqlite` and native TypeScript type stripping).
+Chef is still early, but the core runtime is already real.
+
+- Run multi-agent plans through terminal-based agent harnesses
+- Dispatch and track tasks and sessions
+- Persist tasks, sessions, messages, artifacts, and events locally
+- Survive process restarts without losing the workflow state
+- Stream live runtime events
+- Intervene in running terminal sessions
+- Expose runtime state through a small HTTP/SSE API
+- Visualize the current runtime through a minimal dashboard
+
+## Where it's going
+
+The goal is a general-purpose **AI Engineering OS** rather than another chat interface or another coding-agent wrapper.
+
+Planned areas include:
+
+- **Visual workflows** — see and control agents, tasks, and dependencies on a canvas
+- **More harnesses** — use Claude Code, Pi, OMP, Codex CLI, Aider, and other terminal-based agents
+- **Shared context** — let agents exchange the right information without copying entire conversations around
+- **Artifacts** — make files, findings, reports, and other outputs first-class parts of a workflow
+- **Approvals & permissions** — keep humans in control of sensitive actions
+- **Tools & integrations** — connect agents to browsers, MCP capabilities, and other engineering tools
+- **Resume & replay** — recover and continue interrupted work from durable runtime state
+
+The long-term experience should be simple:
+
+> **Tell Chef what you want. Chef figures out who should do what, coordinates the work, and brings you the result.**
+
+## Getting started
+
+Chef currently requires **Node.js 24+**.
 
 ```bash
 npm install
-# Golden path: user message → plan → dispatch → PTY agents → artifacts → close/reopen
+
+# Run the end-to-end golden path
 node --experimental-strip-types tests/golden-path.ts
-# Handle-leak diagnostic
-node --experimental-strip-types diag-handles.mjs
 ```
 
-## Project Layout
-
-```
-src/
-  main.ts                  createChef() wiring, ChefRuntime interface
-  core/types.ts            domain types
-  context/                 context reference system
-  persistence/             Repository (SQLite) + schema
-  runtime/                 Scheduler (dispatch, events, retry)
-  server/http-server.ts   read-only HTTP/SSE projection API
-  server/index.ts         inspector server entrypoint
-tests/
-  golden-path.ts           P0 golden path test
-  timeout-cancellation.ts  plan timeout teardown
-  seq-concurrency.ts       atomic event sequences
-  cancel-facade.ts         terminal-task cancellation guard
-  dispatch-concurrency.ts  maxConcurrency under concurrent dispatch
-  plan-persistence.ts      plan close/reopen durability
-  pty-replay.ts            PTY output replay
-  live-events.ts           live event subscription
-  direct-worker-interaction.ts  send/interrupt/resize regression
-  http-server.ts           projection API smoke test
-web/
-  src/App.tsx              read-only dashboard (tasks, sessions, event stream)
-```
-
-## Inspector & Dashboard
+To run the local inspector dashboard:
 
 ```bash
-npm run server          # projection API on http://127.0.0.1:4321
-cd web && npm install && npm run dev   # dashboard proxying /api to the server
+npm run server
+
+cd web
+npm install
+npm run dev
 ```
+
+## Project structure
+
+The repository is split between the runtime and its current dashboard projection:
+
+```text
+src/    Chef runtime, orchestration, persistence, harnesses, and server
+web/    React/Vite dashboard
+ tests/ End-to-end and runtime regression tests
+```
+
+If you're interested in the implementation details, start with the project documentation and architecture notes rather than treating this README as the technical specification.
+
+## Design principles
+
+A few ideas guide the project:
+
+- **The runtime is the product.** The UI is a projection and control surface.
+- **Agents are replaceable.** Chef should not depend on one model or one coding tool.
+- **State is durable.** Important work should survive process restarts.
+- **Communication is structured.** Terminal I/O and agent-to-agent messages are separate concerns.
+- **Humans stay in control.** Sensitive actions can require approval.
+- **Everything important is observable.** Runtime events are the backbone of the system.
 
 ## Status
 
-**Working:**
-- Golden path end-to-end: user message → 2-agent plan → PTY dispatch → structured sideband delivery → artifact persistence → task completion.
-- Close/reopen cycle: full task, session, artifact, message, event, and plan state survives restart.
-- Concurrent dispatch respects `maxConcurrency`; timeout cancellation and terminal-task cancellation are regression-tested.
-- PTY terminal output is persisted as ordered `session.data` events and survives restart.
-- Live event subscription (`ChefRuntime.subscribeEvents`) delivers the persisted event stream with unsubscribe support.
-- Direct worker controls (`sendInput`, `interruptSession`, `resizeSession`) persist `user.*` intervention events.
-- HTTP/SSE projection API: `src/server/http-server.ts` exposes `/api/state`, `/api/events`, and session-control POST endpoints.
-- Minimal React/Vite dashboard in `web/` consumes state and SSE events and displays tasks, sessions, and the live event stream.
+🚧 **Early development**
 
-**Known gaps:** canvas graph editing, approvals and permissions, workflows, MCP/tool adapters, and replay-driven resume are not implemented yet. See `handoff.md` and `AGENTS.md` for the evolving roadmap.
+The runtime foundation and first multi-agent workflow are working. The visual workflow editor, approvals, broader tool integrations, and several orchestration capabilities are still being built.
 
-## Notes
-
-- Windows: winpty backend (`useConpty: false`) — treat as a temporary compatibility layer.
-- TypeScript native stripping: no enums, namespaces, or parameter properties.
-- SQLite via `node:sqlite` `DatabaseSync` (sync, no migrations).
+Chef is intentionally evolving from the runtime outward: **make the orchestration reliable first, then make it beautiful to operate.**
