@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
-import type { CanvasNode, WorkspaceId } from "../core/types.ts";
+import type { CanvasNode, ContextReference, WorkspaceId } from "../core/types.ts";
 import { materializeContextScope, type ContextScope, type ContextScopeBounds } from "../core/context-scopes.ts";
 
 export interface ContextScopeCreateInput {
@@ -9,13 +9,13 @@ export interface ContextScopeCreateInput {
   workspaceId: WorkspaceId;
   name: string;
   bounds: ContextScopeBounds;
-  contextRefs?: string[];
+  contextRefs?: ContextReference[];
 }
 
 export interface ContextScopeUpdateInput {
   name?: string;
   bounds?: ContextScopeBounds;
-  contextRefs?: string[];
+  contextRefs?: ContextReference[];
 }
 
 type PersistedContextScope = Omit<ContextScope, "memberNodeIds">;
@@ -52,7 +52,7 @@ export class ContextScopeManager {
       workspaceId: input.workspaceId,
       name: input.name.trim() || "Shared Context",
       bounds: { ...input.bounds },
-      contextRefs: [...(input.contextRefs ?? [])],
+      contextRefs: this.#normalizeRefs(input.contextRefs),
     }, nodes);
     this.#scopes.set(id, scope);
     this.#persist();
@@ -69,7 +69,7 @@ export class ContextScopeManager {
       workspaceId: current.workspaceId,
       name: input.name === undefined ? current.name : input.name.trim() || "Shared Context",
       bounds,
-      contextRefs: input.contextRefs === undefined ? [...current.contextRefs] : [...input.contextRefs],
+      contextRefs: input.contextRefs === undefined ? current.contextRefs : this.#normalizeRefs(input.contextRefs),
     }, nodes);
     this.#scopes.set(scopeId, scope);
     this.#persist();
@@ -84,23 +84,32 @@ export class ContextScopeManager {
     return true;
   }
 
-  contextRefsForNode(workspaceId: WorkspaceId, nodeId: string, nodes: CanvasNode[]): string[] {
-    const refs = new Set<string>();
+  contextRefsForNode(workspaceId: WorkspaceId, nodeId: string, nodes: CanvasNode[]): ContextReference[] {
+    const refs = new Map<string, ContextReference>();
     for (const scope of this.list(workspaceId, nodes)) {
       if (!scope.memberNodeIds.includes(nodeId)) continue;
-      for (const ref of scope.contextRefs) refs.add(ref);
+      for (const ref of scope.contextRefs) refs.set(`${ref.type}:${ref.id}`, { ...ref });
     }
-    return [...refs].sort();
+    return [...refs.values()].sort((a, b) => `${a.type}:${a.id}`.localeCompare(`${b.type}:${b.id}`));
   }
 
   snapshot(): ContextScopeStoreSnapshot {
     return {
       scopes: [...this.#scopes.values()].map(({ memberNodeIds: _memberNodeIds, ...scope }) => ({
         ...scope,
-        contextRefs: [...scope.contextRefs],
+        contextRefs: scope.contextRefs.map((ref) => ({ ...ref })),
         bounds: { ...scope.bounds },
       })),
     };
+  }
+
+  #normalizeRefs(refs: ContextReference[] | undefined): ContextReference[] {
+    const unique = new Map<string, ContextReference>();
+    for (const ref of refs ?? []) {
+      if (!ref || typeof ref.id !== "string" || typeof ref.type !== "string") continue;
+      unique.set(`${ref.type}:${ref.id}`, { ...ref });
+    }
+    return [...unique.values()].sort((a, b) => `${a.type}:${a.id}`.localeCompare(`${b.type}:${b.id}`));
   }
 
   #validateBounds(bounds: ContextScopeBounds): void {
@@ -118,7 +127,7 @@ export class ContextScopeManager {
       const parsed = JSON.parse(raw) as ContextScopeStoreSnapshot;
       for (const scope of parsed.scopes ?? []) {
         if (scope?.id && scope.workspaceId && scope.bounds) {
-          this.#scopes.set(scope.id, { ...scope, memberNodeIds: [] });
+          this.#scopes.set(scope.id, { ...scope, memberNodeIds: [], contextRefs: this.#normalizeRefs(scope.contextRefs) });
         }
       }
     } catch (error) {
