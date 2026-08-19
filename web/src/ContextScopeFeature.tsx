@@ -1,27 +1,152 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+
 type Bounds = { x: number; y: number; width: number; height: number };
-type Scope = { id: string; workspaceId: string; name: string; bounds: Bounds; contextRefs: string[]; memberNodeIds: string[] };
+type ContextReference = { type: string; id: string; relevance?: number };
+type Scope = { id: string; workspaceId: string; name: string; bounds: Bounds; contextRefs: ContextReference[]; memberNodeIds: string[] };
 type CanvasNode = { id: string; position: { x: number; y: number } };
+
 const VIEW_KEY = "chef:canvas:view";
-const readViewport = () => { try { const raw = localStorage.getItem(VIEW_KEY); return raw ? JSON.parse(raw) as { x: number; y: number; zoom: number } : { x: 0, y: 0, zoom: 1 }; } catch { return { x: 0, y: 0, zoom: 1 }; } };
-async function request<T>(path: string, init?: RequestInit): Promise<T> { const res = await fetch(path, { headers: { "content-type": "application/json", ...(init?.headers ?? {}) }, ...init }); const body = await res.json() as { data?: T; error?: string }; if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`); return body.data as T; }
+const readViewport = () => {
+  try {
+    const raw = localStorage.getItem(VIEW_KEY);
+    return raw ? JSON.parse(raw) as { x: number; y: number; zoom: number } : { x: 0, y: 0, zoom: 1 };
+  } catch {
+    return { x: 0, y: 0, zoom: 1 };
+  }
+};
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(path, { headers: { "content-type": "application/json", ...(init?.headers ?? {}) }, ...init });
+  const body = await res.json() as { data?: T; error?: string };
+  if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
+  return body.data as T;
+}
+
 export function ContextScopeFeature() {
-  const [host, setHost] = useState<HTMLElement | null>(null); const [scopes, setScopes] = useState<Scope[]>([]); const [nodes, setNodes] = useState<CanvasNode[]>([]); const [viewport, setViewport] = useState(readViewport); const [drawing, setDrawing] = useState(false); const [draft, setDraft] = useState<Bounds | null>(null); const startRef = useRef<{ x: number; y: number } | null>(null);
-  useEffect(() => { const find = () => setHost(document.querySelector(".react-flow") as HTMLElement | null); find(); const observer = new MutationObserver(find); observer.observe(document.body, { childList: true, subtree: true }); return () => observer.disconnect(); }, []);
-  const refresh = useCallback(async () => { try { const [nextScopes, state] = await Promise.all([request<Scope[]>("/api/context-scopes"), request<{ canvasNodes: CanvasNode[] }>("/api/state")]); setScopes(nextScopes); setNodes(state.canvasNodes); } catch {} }, []);
-  useEffect(() => { void refresh(); const timer = window.setInterval(() => { setViewport(readViewport()); void refresh(); }, 1500); return () => window.clearInterval(timer); }, [refresh]);
-  const screenToFlow = useCallback((p: { x: number; y: number }) => ({ x: (p.x - viewport.x) / viewport.zoom, y: (p.y - viewport.y) / viewport.zoom }), [viewport]);
-  const rects = useMemo(() => scopes.map((s) => ({ scope: s, x: s.bounds.x * viewport.zoom + viewport.x, y: s.bounds.y * viewport.zoom + viewport.y, width: s.bounds.width * viewport.zoom, height: s.bounds.height * viewport.zoom })), [scopes, viewport]);
-  const begin = (e: React.PointerEvent) => { if (!drawing || e.button !== 0) return; const p = { x: e.nativeEvent.offsetX, y: e.nativeEvent.offsetY }; startRef.current = p; setDraft({ x: p.x, y: p.y, width: 0, height: 0 }); (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); };
-  const move = (e: React.PointerEvent) => { const s = startRef.current; if (!s) return; const x = e.nativeEvent.offsetX; const y = e.nativeEvent.offsetY; setDraft({ x: Math.min(s.x, x), y: Math.min(s.y, y), width: Math.abs(x - s.x), height: Math.abs(y - s.y) }); };
-  const finish = async (e: React.PointerEvent) => { const s = startRef.current; if (!s) return; const x = e.nativeEvent.offsetX; const y = e.nativeEvent.offsetY; startRef.current = null; setDraft(null); setDrawing(false); const rect = { x: Math.min(s.x, x), y: Math.min(s.y, y), width: Math.abs(x - s.x), height: Math.abs(y - s.y) }; if (rect.width < 40 || rect.height < 40) return; const a = screenToFlow({ x: rect.x, y: rect.y }); const b = screenToFlow({ x: rect.x + rect.width, y: rect.y + rect.height }); const count = nodes.filter((n) => n.position.x >= a.x && n.position.x <= b.x && n.position.y >= a.y && n.position.y <= b.y).length; try { await request("/api/context-scopes", { method: "POST", body: JSON.stringify({ name: `Shared Context${count ? ` (${count} nodes)` : ""}`, bounds: { x: a.x, y: a.y, width: b.x - a.x, height: b.y - a.y }, contextRefs: [] }) }); await refresh(); } catch {} };
-  const remove = async (id: string) => { try { await request(`/api/context-scopes/${id}`, { method: "DELETE" }); await refresh(); } catch {} };
+  const [host, setHost] = useState<HTMLElement | null>(null);
+  const [scopes, setScopes] = useState<Scope[]>([]);
+  const [nodes, setNodes] = useState<CanvasNode[]>([]);
+  const [viewport, setViewport] = useState(readViewport);
+  const [drawing, setDrawing] = useState(false);
+  const [draft, setDraft] = useState<Bounds | null>(null);
+  const startRef = useRef<{ x: number; y: number } | null>(null);
+
+  useEffect(() => {
+    const find = () => setHost(document.querySelector(".react-flow") as HTMLElement | null);
+    find();
+    const observer = new MutationObserver(find);
+    observer.observe(document.body, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, []);
+
+  const refresh = useCallback(async () => {
+    try {
+      const [nextScopes, state] = await Promise.all([
+        request<Scope[]>("/api/context-scopes"),
+        request<{ canvasNodes: CanvasNode[] }>("/api/state"),
+      ]);
+      setScopes(nextScopes);
+      setNodes(state.canvasNodes);
+    } catch {
+      // The feature is additive; the base canvas remains usable if the scope API is unavailable.
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+    const timer = window.setInterval(() => {
+      setViewport(readViewport());
+      void refresh();
+    }, 1500);
+    return () => window.clearInterval(timer);
+  }, [refresh]);
+
+  const screenToFlow = useCallback((p: { x: number; y: number }) => ({
+    x: (p.x - viewport.x) / viewport.zoom,
+    y: (p.y - viewport.y) / viewport.zoom,
+  }), [viewport]);
+
+  const rects = useMemo(() => scopes.map((scope) => ({
+    scope,
+    x: scope.bounds.x * viewport.zoom + viewport.x,
+    y: scope.bounds.y * viewport.zoom + viewport.y,
+    width: scope.bounds.width * viewport.zoom,
+    height: scope.bounds.height * viewport.zoom,
+  })), [scopes, viewport]);
+
+  const begin = (e: React.PointerEvent) => {
+    if (!drawing || e.button !== 0) return;
+    const p = { x: e.nativeEvent.offsetX, y: e.nativeEvent.offsetY };
+    startRef.current = p;
+    setDraft({ x: p.x, y: p.y, width: 0, height: 0 });
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  };
+
+  const move = (e: React.PointerEvent) => {
+    const start = startRef.current;
+    if (!start) return;
+    const x = e.nativeEvent.offsetX;
+    const y = e.nativeEvent.offsetY;
+    setDraft({ x: Math.min(start.x, x), y: Math.min(start.y, y), width: Math.abs(x - start.x), height: Math.abs(y - start.y) });
+  };
+
+  const finish = async (e: React.PointerEvent) => {
+    const start = startRef.current;
+    if (!start) return;
+    const x = e.nativeEvent.offsetX;
+    const y = e.nativeEvent.offsetY;
+    startRef.current = null;
+    setDraft(null);
+    setDrawing(false);
+
+    const rect = { x: Math.min(start.x, x), y: Math.min(start.y, y), width: Math.abs(x - start.x), height: Math.abs(y - start.y) };
+    if (rect.width < 40 || rect.height < 40) return;
+
+    const a = screenToFlow({ x: rect.x, y: rect.y });
+    const b = screenToFlow({ x: rect.x + rect.width, y: rect.y + rect.height });
+    const count = nodes.filter((node) => node.position.x >= a.x && node.position.x <= b.x && node.position.y >= a.y && node.position.y <= b.y).length;
+
+    try {
+      await request("/api/context-scopes", {
+        method: "POST",
+        body: JSON.stringify({
+          name: `Shared Context${count ? ` (${count} nodes)` : ""}`,
+          bounds: { x: a.x, y: a.y, width: b.x - a.x, height: b.y - a.y },
+          contextRefs: [],
+        }),
+      });
+      await refresh();
+    } catch {
+      // Creation errors are surfaced by the runtime; keep the canvas interaction non-blocking.
+    }
+  };
+
+  const remove = async (id: string) => {
+    try {
+      await request(`/api/context-scopes/${id}`, { method: "DELETE" });
+      await refresh();
+    } catch {
+      // Best-effort UI action; the next refresh reconciles the rendered scopes.
+    }
+  };
+
   if (!host) return null;
-  return createPortal(<div className="absolute inset-0 z-[6] pointer-events-none" style={{ overflow: "visible" }}>
-    {rects.map(({ scope, x, y, width, height }) => <div key={scope.id} className="absolute rounded-xl border-2 border-dashed border-cyan-500/50 bg-cyan-500/5 pointer-events-auto" style={{ left: x, top: y, width, height }}><div className="absolute -top-6 left-2 flex items-center gap-2 rounded-t-md bg-[#0d1117]/90 px-2 py-1 text-[10px] text-cyan-300"><span>◈</span><span>{scope.name}</span><span className="text-[#8b949e]">{scope.memberNodeIds.length}</span><button className="text-red-400 hover:text-red-300" onClick={() => void remove(scope.id)}>×</button></div></div>)}
-    {draft && <div className="absolute border-2 border-dashed border-cyan-300 bg-cyan-400/10" style={{ left: draft.x, top: draft.y, width: draft.width, height: draft.height }} />}
-    {drawing && <div className="absolute inset-0 pointer-events-auto cursor-crosshair" onPointerDown={begin} onPointerMove={move} onPointerUp={(e) => void finish(e)} />}
-    {!drawing && <button className="pointer-events-auto absolute top-3 left-3 z-20 rounded-lg border border-cyan-500/30 bg-[#0d1117]/95 px-3 py-2 text-[11px] text-cyan-300 shadow-lg hover:bg-[#161b22]" onClick={() => setDrawing(true)}>＋ Shared Context</button>}
-  </div>, host);
+
+  return createPortal(
+    <div className="absolute inset-0 z-[6] pointer-events-none" style={{ overflow: "visible" }}>
+      {rects.map(({ scope, x, y, width, height }) => (
+        <div key={scope.id} className="absolute rounded-xl border-2 border-dashed border-cyan-500/50 bg-cyan-500/5 pointer-events-auto" style={{ left: x, top: y, width, height }}>
+          <div className="absolute -top-6 left-2 flex items-center gap-2 rounded-t-md bg-[#0d1117]/90 px-2 py-1 text-[10px] text-cyan-300">
+            <span>◈</span><span>{scope.name}</span><span className="text-[#8b949e]">{scope.memberNodeIds.length}</span>
+            <button className="text-red-400 hover:text-red-300" onClick={() => void remove(scope.id)}>×</button>
+          </div>
+        </div>
+      ))}
+      {draft && <div className="absolute border-2 border-dashed border-cyan-300 bg-cyan-400/10" style={{ left: draft.x, top: draft.y, width: draft.width, height: draft.height }} />}
+      {drawing && <div className="absolute inset-0 pointer-events-auto cursor-crosshair" onPointerDown={begin} onPointerMove={move} onPointerUp={(e) => void finish(e)} />}
+      {!drawing && <button className="pointer-events-auto absolute top-3 left-3 z-20 rounded-lg border border-cyan-500/30 bg-[#0d1117]/95 px-3 py-2 text-[11px] text-cyan-300 shadow-lg hover:bg-[#161b22]" onClick={() => setDrawing(true)}>＋ Shared Context</button>}
+    </div>,
+    host,
+  );
 }
