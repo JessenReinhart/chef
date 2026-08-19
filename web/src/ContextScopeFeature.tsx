@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { api } from "./api";
+import type { ContextZone } from "./types";
 
 type Bounds = { x: number; y: number; width: number; height: number };
-type ContextReference = { type: string; id: string; relevance?: number };
-type Scope = { id: string; workspaceId: string; name: string; bounds: Bounds; contextRefs: ContextReference[]; memberNodeIds: string[] };
 type CanvasNode = { id: string; position: { x: number; y: number } };
 
 const VIEW_KEY = "chef:canvas:view";
@@ -16,20 +16,14 @@ const readViewport = () => {
   }
 };
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, { headers: { "content-type": "application/json", ...(init?.headers ?? {}) }, ...init });
-  const body = await res.json() as { data?: T; error?: string };
-  if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
-  return body.data as T;
-}
-
 export function ContextScopeFeature() {
   const [host, setHost] = useState<HTMLElement | null>(null);
-  const [scopes, setScopes] = useState<Scope[]>([]);
+  const [scopes, setScopes] = useState<ContextZone[]>([]);
   const [nodes, setNodes] = useState<CanvasNode[]>([]);
   const [viewport, setViewport] = useState(readViewport);
   const [drawing, setDrawing] = useState(false);
   const [draft, setDraft] = useState<Bounds | null>(null);
+  const [inspectedScopeId, setInspectedScopeId] = useState<string | null>(null);
   const startRef = useRef<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
@@ -43,8 +37,8 @@ export function ContextScopeFeature() {
   const refresh = useCallback(async () => {
     try {
       const [nextScopes, state] = await Promise.all([
-        request<Scope[]>("/api/context-scopes"),
-        request<{ canvasNodes: CanvasNode[] }>("/api/state"),
+        api.contextZones(),
+        api.stateRaw(),
       ]);
       setScopes(nextScopes);
       setNodes(state.canvasNodes);
@@ -105,16 +99,17 @@ export function ContextScopeFeature() {
 
     const a = screenToFlow({ x: rect.x, y: rect.y });
     const b = screenToFlow({ x: rect.x + rect.width, y: rect.y + rect.height });
-    const count = nodes.filter((node) => node.position.x >= a.x && node.position.x <= b.x && node.position.y >= a.y && node.position.y <= b.y).length;
+    const memberNodeIds = nodes
+      .filter((node) => node.position.x >= a.x && node.position.x <= b.x && node.position.y >= a.y && node.position.y <= b.y)
+      .map((node) => node.id)
+      .sort();
 
     try {
-      await request("/api/context-scopes", {
-        method: "POST",
-        body: JSON.stringify({
-          name: `Shared Context${count ? ` (${count} nodes)` : ""}`,
+      await api.createContextZone({
+          name: `Shared Context${memberNodeIds.length ? ` (${memberNodeIds.length} nodes)` : ""}`,
           bounds: { x: a.x, y: a.y, width: b.x - a.x, height: b.y - a.y },
           contextRefs: [],
-        }),
+          memberNodeIds,
       });
       await refresh();
     } catch {
@@ -124,7 +119,7 @@ export function ContextScopeFeature() {
 
   const remove = async (id: string) => {
     try {
-      await request(`/api/context-scopes/${id}`, { method: "DELETE" });
+      await api.deleteContextZone(id);
       await refresh();
     } catch {
       // Best-effort UI action; the next refresh reconciles the rendered scopes.
@@ -138,9 +133,22 @@ export function ContextScopeFeature() {
       {rects.map(({ scope, x, y, width, height }) => (
         <div key={scope.id} className="absolute rounded-xl border-2 border-dashed border-cyan-500/50 bg-cyan-500/5 pointer-events-auto" style={{ left: x, top: y, width, height }}>
           <div className="absolute -top-6 left-2 flex items-center gap-2 rounded-t-md bg-[#0d1117]/90 px-2 py-1 text-[10px] text-cyan-300">
-            <span>◈</span><span>{scope.name}</span><span className="text-[#8b949e]">{scope.memberNodeIds.length}</span>
+            <span>◈</span>
+            <button onClick={() => setInspectedScopeId((current) => current === scope.id ? null : scope.id)} title="Inspect explicit members">
+              {scope.name}
+            </button>
+            <span className="text-[#8b949e]">{scope.memberNodeIds.length} members</span>
             <button className="text-red-400 hover:text-red-300" onClick={() => void remove(scope.id)}>×</button>
           </div>
+          {inspectedScopeId === scope.id && (
+            <div className="context-zone-members">
+              <strong>Context members</strong>
+              {scope.memberNodeIds.length > 0 ? scope.memberNodeIds.map((nodeId) => (
+                <code key={nodeId}>{nodeId}</code>
+              )) : <span>No members yet</span>}
+              <small>Membership is persisted explicitly. Moving the outline does not redefine it.</small>
+            </div>
+          )}
         </div>
       ))}
       {draft && <div className="absolute border-2 border-dashed border-cyan-300 bg-cyan-400/10" style={{ left: draft.x, top: draft.y, width: draft.width, height: draft.height }} />}

@@ -5,11 +5,59 @@ import { ChatPanel } from "./ChatPanel";
 import { api } from "./api";
 import { NODE_LIBRARY, registerHarnesses, subscribeLibrary } from "./nodeCatalog";
 import { TerminalView } from "./TerminalView";
-import type { UiTask, HarnessInfo, NodeCatalogEntry, UiCanvasNode, UiCanvasEdge } from "./types";
+import { BrowserSurface } from "./BrowserSurface";
+import type {
+  UiTask,
+  HarnessInfo,
+  UiCanvasNode,
+  UiCanvasEdge,
+  EdgeRelationship,
+  MissionStatus,
+  ViewMode,
+  UiMission,
+  UiAutomation,
+  UiRuntimeEvent,
+} from "./types";
+
+const RELATIONSHIPS: Array<{ value: EdgeRelationship; simple: string; power: string }> = [
+  { value: "communication", simple: "Talks with", power: "Communication" },
+  { value: "context", simple: "Shares context", power: "Context / data" },
+  { value: "delegation", simple: "Can delegate to", power: "Delegation" },
+  { value: "dependency", simple: "Waits for", power: "Dependency (sequential)" },
+  { value: "control", simple: "Routes to", power: "Control (sequential)" },
+  { value: "error", simple: "Handles failure", power: "Error route" },
+  { value: "approval", simple: "Needs review from", power: "Approval gate" },
+];
+
+function missionStatusFor(tasks: UiTask[], pendingApprovals: number): MissionStatus {
+  if (pendingApprovals > 0) return "waiting_for_approval";
+  if (tasks.some((task) => task.status === "blocked")) return "blocked";
+  if (tasks.some((task) => task.status === "running" || task.status === "assigned" || task.status === "spawning")) return "active";
+  if (tasks.length > 0 && tasks.every((task) => task.status === "completed")) return "completed";
+  if (tasks.some((task) => task.status === "failed")) return "failed";
+  if (tasks.some((task) => task.status === "pending")) return "planning";
+  return "idle";
+}
+
+const MISSION_LABELS: Record<MissionStatus, string> = {
+  idle: "Workspace ready",
+  planning: "Mission planning",
+  active: "Mission active",
+  paused: "Mission paused",
+  waiting_for_approval: "Mission needs approval",
+  blocked: "Mission blocked",
+  verifying: "Mission verifying",
+  completed: "Mission completed",
+  cancelled: "Mission cancelled",
+  failed: "Mission needs attention",
+};
 export function App() {
   const [tasks, setTasks] = useState<UiTask[]>([]);
   const [canvasNodes, setCanvasNodes] = useState<UiCanvasNode[]>([]);
   const [canvasEdges, setCanvasEdges] = useState<UiCanvasEdge[]>([]);
+  const [missions, setMissions] = useState<UiMission[]>([]);
+  const [automations, setAutomations] = useState<UiAutomation[]>([]);
+  const [events, setEvents] = useState<UiRuntimeEvent[]>([]);
   const [selectedTask, setSelectedTask] = useState<UiTask | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Terminal canvas nodes mount a live TerminalView. This state picks which
@@ -22,10 +70,16 @@ export function App() {
   // Live agent sessions snapshot, polled so terminal nodes can resolve a
   // task id → session id and mount a TerminalView against it.
   const [sessions, setSessions] = useState<Array<{ id: string; taskId: string; status: string; pid: number }>>([]);
-  const [isDispatching, setIsDispatching] = useState(false);
+  const [mode, setMode] = useState<ViewMode>(() => localStorage.getItem("chef:view-mode") === "power" ? "power" : "simple");
+  const [relationship, setRelationship] = useState<EdgeRelationship>("communication");
+  const [showAutomation, setShowAutomation] = useState(false);
+  const [showMissionControls, setShowMissionControls] = useState(false);
+  const [redirectGoal, setRedirectGoal] = useState("");
   const [approvals, setApprovals] = useState<Array<{ id: string; reason: string; taskId: string; status: string }>>([]);
   const [showPalette, setShowPalette] = useState(true);
   const [harnesses, setHarnesses] = useState<HarnessInfo[]>([]);
+  const [capabilityPolicies, setCapabilityPolicies] = useState<Record<string, Record<string, "allow" | "deny" | "approval">>>({});
+  const [intervention, setIntervention] = useState("");
   const librarySubRef = useRef<(() => void) | null>(null);
   const sseRef = useRef<EventSource | null>(null);
   const pollingRef = useRef<number | null>(null);
@@ -36,6 +90,9 @@ export function App() {
       setTasks(snapshot.tasks);
       setCanvasNodes(snapshot.canvasNodes);
       setCanvasEdges(snapshot.canvasEdges);
+      setMissions(snapshot.missions ?? []);
+      setAutomations(snapshot.automations ?? []);
+      setEvents(snapshot.events ?? []);
       const pending = snapshot.approvals.filter((a) => a.status === "pending");
       setApprovals(pending);
     } catch (err) {
@@ -95,6 +152,15 @@ export function App() {
     });
   }, []);
 
+  useEffect(() => {
+    Promise.all((["engineer", "orchestrator", "human"] as const).map((role) => api.capabilities(role)))
+      .then((items) => setCapabilityPolicies(Object.fromEntries(items.map((item) => [item.role, item.policy]))))
+      .catch(() => {
+        // Keep the inspector honest when policy projection is unavailable.
+        setCapabilityPolicies({});
+      });
+  }, []);
+
   // Keep palette in sync with NODE_LIBRARY changes
   useEffect(() => {
     const unsub = subscribeLibrary(() => {
@@ -106,9 +172,9 @@ export function App() {
   }, []);
 
   const handleConnect = useCallback(
-    async (source: string, target: string) => {
+    async (source: string, target: string, edgeRelationship: EdgeRelationship) => {
       try {
-        const result = await api.patchCanvas({ upsertEdges: [{ source, target }] });
+        const result = await api.patchCanvas({ upsertEdges: [{ source, target, type: edgeRelationship }] });
         if (result.ok) {
           if (result.nodes) setCanvasNodes(result.nodes);
           if (result.edges) setCanvasEdges(result.edges);
@@ -122,10 +188,18 @@ export function App() {
     [],
   );
 
+  const toggleMode = useCallback(() => {
+    setMode((current) => {
+      const next = current === "simple" ? "power" : "simple";
+      localStorage.setItem("chef:view-mode", next);
+      return next;
+    });
+  }, []);
+
   const handleDisconnect = useCallback(
-    async (source: string, target: string) => {
+    async (source: string, target: string, edgeRelationship: EdgeRelationship) => {
       try {
-        const result = await api.patchCanvas({ deleteEdges: [{ source, target }] });
+        const result = await api.patchCanvas({ deleteEdges: [{ source, target, type: edgeRelationship }] });
         if (result.ok) {
           if (result.nodes) setCanvasNodes(result.nodes);
           if (result.edges) setCanvasEdges(result.edges);
@@ -144,6 +218,8 @@ export function App() {
       try {
         const entry = NODE_LIBRARY.find((n) => n.type === payload.type);
         const title = entry?.label ?? payload.type;
+        const isTaskBackedInteractiveNode = entry?.kind === "agent" || payload.type === "tool.terminal";
+        const isBrowserSurface = payload.type === "tool.browser";
         const { taskId } = await api.createNode({
           type: payload.type,
           title,
@@ -151,6 +227,9 @@ export function App() {
           position,
           config: {},
           assignedTo: payload.harnessId,
+          // Agents and inspectable surfaces join the living workspace now;
+          // they are never held behind a canvas-wide dispatch action.
+          autoDispatch: isTaskBackedInteractiveNode,
         });
         // POST /api/nodes creates a task only — persist a canvas node that
         // references the task (with the dropped position) via patchCanvas.
@@ -167,6 +246,7 @@ export function App() {
             },
           ],
         });
+        if (isBrowserSurface) await api.activateNode(taskId);
         void refresh();
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to create node");
@@ -182,7 +262,21 @@ export function App() {
       });
       if (!result.ok && result.error) {
         setError(result.error);
+        return;
       }
+      const zones = await api.contextZones();
+      await Promise.all(zones.flatMap((zone) => {
+        const inside = position.x >= zone.bounds.x
+          && position.x <= zone.bounds.x + zone.bounds.width
+          && position.y >= zone.bounds.y
+          && position.y <= zone.bounds.y + zone.bounds.height;
+        const wasMember = zone.memberNodeIds.includes(id);
+        if (inside === wasMember) return [];
+        const memberNodeIds = inside
+          ? [...zone.memberNodeIds, id].sort()
+          : zone.memberNodeIds.filter((nodeId) => nodeId !== id);
+        return [api.updateContextZone(zone.id, { memberNodeIds })];
+      }));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to update position");
     }
@@ -200,28 +294,74 @@ export function App() {
     [sessions],
   );
 
-  const handleDispatch = useCallback(async () => {
-    if (isDispatching) return;
-    setIsDispatching(true);
-    try {
-      await api.dispatch();
-      void refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to dispatch");
-    } finally {
-      setIsDispatching(false);
-    }
-  }, [isDispatching, refresh]);
-
-  const handleRunSelected = useCallback(async () => {
+  const handleActivateSelected = useCallback(async () => {
     if (!selectedTask) return;
+    const node = canvasNodes.find((candidate) => candidate.taskId === selectedTask.id || candidate.id === selectedTask.id);
+    if (!node) return;
     try {
-      await api.runNode({ nodeId: selectedTask.id, title: selectedTask.title, workflowNodeId: selectedTask.workflowNodeId });
+      await api.activateNode(node.id);
       void refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to run node");
+      setError(err instanceof Error ? err.message : "Failed to activate node");
     }
-  }, [selectedTask, refresh]);
+  }, [selectedTask, canvasNodes, refresh]);
+
+  const handleInterveneSelected = useCallback(async () => {
+    const text = intervention.trim();
+    if (!selectedTask || !text) return;
+    const node = canvasNodes.find((candidate) => candidate.taskId === selectedTask.id || candidate.id === selectedTask.id);
+    if (!node) return;
+    try {
+      await api.interveneNode(node.id, text);
+      setIntervention("");
+      void refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to send intervention");
+    }
+  }, [intervention, selectedTask, canvasNodes, refresh]);
+
+  const handleInterruptSelected = useCallback(async () => {
+    if (!selectedTask) return;
+    const session = sessions.find((candidate) => candidate.taskId === selectedTask.id);
+    if (!session) return;
+    try {
+      await api.interruptSession(session.id);
+      void refreshSessions();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to interrupt session");
+    }
+  }, [selectedTask, sessions, refreshSessions]);
+
+  const handleAutomationAction = useCallback(async (automation: UiAutomation) => {
+    try {
+      if (automation.status === "running") await api.stopAutomation(automation.id);
+      else await api.runAutomation(automation.id);
+      void refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Automation action failed");
+    }
+  }, [refresh]);
+
+  const handleMissionAction = useCallback(async (mission: UiMission, action: "pause" | "resume" | "cancel") => {
+    try {
+      await api.controlMission(mission.id, action);
+      void refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Mission action failed");
+    }
+  }, [refresh]);
+
+  const handleMissionRedirect = useCallback(async (mission: UiMission) => {
+    const goal = redirectGoal.trim();
+    if (!goal) return;
+    try {
+      await api.redirectMission(mission.id, goal);
+      setRedirectGoal("");
+      void refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Mission redirect failed");
+    }
+  }, [redirectGoal, refresh]);
 
   const handleRetrySelected = useCallback(async () => {
     if (!selectedTask) return;
@@ -264,6 +404,31 @@ export function App() {
   const completedCount = tasks.filter((t) => t.status === "completed").length;
   const failedCount = tasks.filter((t) => t.status === "failed").length;
   const pendingCount = tasks.filter((t) => t.status === "pending").length;
+  const latestMission = [...missions].sort((a, b) => b.updatedAt - a.updatedAt)[0];
+  const missionStatus = latestMission?.status ?? missionStatusFor(tasks, approvals.length);
+  const selectedCanvasNode = selectedTask ? canvasNodes.find((node) => node.taskId === selectedTask.id || node.id === selectedTask.id) : undefined;
+  const selectedIsSurface = selectedCanvasNode?.kind === "tool";
+  const selectedIsAgent = selectedCanvasNode?.kind === "agent";
+  const selectedIsBrowser = selectedTask?.workflowNodeId === "tool.browser";
+  const selectedSession = selectedTask ? sessions.find((session) => session.taskId === selectedTask.id) : undefined;
+  const selectedEvents = selectedTask
+    ? events.filter((event) => event.taskId === selectedTask.id || (selectedSession && event.sessionId === selectedSession.id)).slice(-12).reverse()
+    : [];
+  const selectedPolicyRole = selectedIsAgent ? "engineer" : "human";
+  const configuredPermissions = selectedCanvasNode?.config?.permissions;
+  const selectedPermissionPolicy = configuredPermissions && typeof configuredPermissions === "object" && !Array.isArray(configuredPermissions)
+    ? configuredPermissions as Record<string, unknown>
+    : capabilityPolicies[selectedPolicyRole];
+  const selectedUsage = selectedEvents.reduce<{ tokens?: number; cost?: number }>((usage, event) => {
+    if (!event.payload || typeof event.payload !== "object") return usage;
+    const payload = event.payload as Record<string, unknown>;
+    const tokens = payload.tokens ?? payload.totalTokens ?? payload.tokenCount;
+    const cost = payload.cost ?? payload.costUsd;
+    return {
+      tokens: typeof tokens === "number" ? tokens : usage.tokens,
+      cost: typeof cost === "number" ? cost : usage.cost,
+    };
+  }, {});
 
   return (
     <div className="h-screen w-screen flex flex-col bg-[#010409] text-[#e6edf3] overflow-hidden">
@@ -276,54 +441,106 @@ export function App() {
             <path d="M10 19h4" />
           </svg>
           <span className="font-semibold text-sm tracking-tight">Chef</span>
-          <span className="text-[11px] text-[#8b949e] hidden sm:inline">AI Workflow Studio</span>
+          <span className="text-[11px] text-[#8b949e] hidden sm:inline">Living AI workspace</span>
         </div>
 
-        {/* Status chips */}
+        {/* Mission pulse + presentation controls. Runtime state is shared by both modes. */}
         <div className="flex items-center gap-2 text-[11px]">
+          <button className="mission-pulse" data-status={missionStatus} title={latestMission?.goal ?? `${tasks.length} workspace nodes · ${canvasEdges.length} relationships`} onClick={() => setShowMissionControls((value) => !value)} aria-expanded={showMissionControls}>
+            <span className="mission-pulse__signal" />
+            <span>{MISSION_LABELS[missionStatus]}</span>
+            {runningCount > 0 && <span className="mission-pulse__count">{runningCount}</span>}
+          </button>
           {runningCount > 0 && (
-            <span className="flex items-center gap-1.5 rounded-full bg-green-500/10 border border-green-500/30 px-2.5 py-1 text-green-400">
-              <span className="h-1.5 w-1.5 rounded-full bg-green-400 animate-pulse" />
-              {runningCount} running
-            </span>
+            <span className="hidden xl:inline text-[#8b949e]">{runningCount} working</span>
           )}
-          {pendingCount > 0 && (
+          {mode === "power" && pendingCount > 0 && (
             <span className="rounded-full bg-[#21262d] border border-[#30363d] px-2.5 py-1 text-[#8b949e]">
-              {pendingCount} queued
+              {pendingCount} pending
             </span>
           )}
-          {failedCount > 0 && (
+          {mode === "power" && failedCount > 0 && (
             <span className="rounded-full bg-red-500/10 border border-red-500/30 px-2.5 py-1 text-red-400">
               {failedCount} failed
             </span>
           )}
-          {completedCount > 0 && (
+          {mode === "power" && completedCount > 0 && (
             <span className="rounded-full bg-blue-500/10 border border-blue-500/30 px-2.5 py-1 text-blue-400">
               {completedCount} done
             </span>
           )}
-          <button
-            onClick={handleDispatch}
-            disabled={isDispatching}
-            className="ml-2 px-3 py-1 rounded-full bg-cyan-500 text-[#010409] font-medium hover:bg-cyan-400 disabled:opacity-50 transition-colors"
-          >
-            {isDispatching ? "Dispatching..." : "▶ Run"}
+          <button onClick={() => setShowAutomation((value) => !value)} className="header-quiet-button" aria-expanded={showAutomation}>
+            Automations
+          </button>
+          <button onClick={toggleMode} className="mode-switch" aria-label={`Switch to ${mode === "simple" ? "Power" : "Simple"} mode`}>
+            <span className={mode === "simple" ? "mode-switch__option is-active" : "mode-switch__option"}>Simple</span>
+            <span className={mode === "power" ? "mode-switch__option is-active" : "mode-switch__option"}>Power</span>
           </button>
         </div>
       </header>
+
+      {showMissionControls && latestMission && (
+        <section className="mission-controls" aria-label="Mission controls">
+          <div className="mission-controls__identity">
+            <strong>{latestMission.goal}</strong>
+            <span>{mode === "power"
+              ? `${latestMission.status} · ${latestMission.taskIds.length} tasks`
+              : MISSION_LABELS[latestMission.status]}</span>
+          </div>
+          <div className="mission-controls__actions">
+            {latestMission.status === "paused" ? (
+              <button onClick={() => void handleMissionAction(latestMission, "resume")}>Resume mission</button>
+            ) : !["completed", "cancelled", "failed"].includes(latestMission.status) ? (
+              <button onClick={() => void handleMissionAction(latestMission, "pause")}>Pause mission</button>
+            ) : null}
+            {!["completed", "cancelled", "failed"].includes(latestMission.status) && (
+              <button className="is-danger" onClick={() => void handleMissionAction(latestMission, "cancel")}>Cancel</button>
+            )}
+            {!["completed", "cancelled"].includes(latestMission.status) && (
+              <form onSubmit={(event) => { event.preventDefault(); void handleMissionRedirect(latestMission); }}>
+                <input value={redirectGoal} onChange={(event) => setRedirectGoal(event.target.value)} placeholder="Redirect this mission…" />
+                <button disabled={!redirectGoal.trim()} type="submit">Redirect</button>
+              </form>
+            )}
+          </div>
+        </section>
+      )}
+
+      {showAutomation && (
+        <section className="automation-strip" aria-label="Automation controls">
+          <div>
+            <strong>Repeatable automations</strong>
+            <span>Run and stop belong here—not to the living workspace.</span>
+          </div>
+          {automations.length > 0 ? (
+            <div className="automation-strip__actions">
+              {automations.map((automation) => (
+                <div key={automation.id} className="automation-strip__item">
+                  <span>{automation.name} · {automation.status}</span>
+                  <button className={automation.status === "running" ? "is-stop" : undefined} onClick={() => void handleAutomationAction(automation)}>
+                    {automation.status === "running" ? "Stop automation" : "Run automation"}
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <span className="automation-strip__hint">No automations yet. Repeatable graphs will appear here.</span>
+          )}
+        </section>
+      )}
 
       {/* ── Main area ── */}
       <div className="flex-1 flex overflow-hidden">
         {/* Left: Chat panel (fixed 380px) */}
         <aside className="w-[380px] flex-shrink-0 border-r border-[#30363d] bg-[#0d1117]">
-          <ChatPanel onPlanProposed={handlePlanProposed} />
+          <ChatPanel onPlanProposed={handlePlanProposed} mode={mode} />
         </aside>
 
         {/* Right: Canvas + collapsible palette */}
         <main className="flex-1 flex relative min-w-0">
           {showPalette && (
             <aside className="w-[220px] flex-shrink-0 border-r border-[#21262d] bg-[#0d1117] transition-width duration-200 ease-out">
-              <NodePalette onDragStart={(type, event) => {
+              <NodePalette mode={mode} onDragStart={(type, event) => {
                 const entry = NODE_LIBRARY.find((n) => n.type === type);
                 const payload = entry?.harnessId ? { type, harnessId: entry.harnessId } : { type };
                 event.dataTransfer.setData("application/chef-node", JSON.stringify(payload));
@@ -344,17 +561,30 @@ export function App() {
               harnesses={harnesses}
               sessions={sessions}
               selectedSessionId={terminalSelection.sessionId}
+              relationship={relationship}
+              mode={mode}
             />
+
+            <label className="relationship-picker">
+              <span>{mode === "simple" ? "New connections" : "Edge relationship"}</span>
+              <select value={relationship} onChange={(event) => setRelationship(event.target.value as EdgeRelationship)}>
+                {RELATIONSHIPS.map((item) => (
+                  <option key={item.value} value={item.value}>{mode === "simple" ? item.simple : item.power}</option>
+                ))}
+              </select>
+            </label>
 
             {/* Selected node toolbar */}
             {selectedTask && (
               <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10 flex items-center gap-2 rounded-lg border border-[#30363d] bg-[#0d1117]/95 backdrop-blur px-3 py-2 shadow-lg">
                 <span className="text-xs text-[#8b949e] max-w-[160px] truncate">{selectedTask.title}</span>
-                <span className={`text-[10px] uppercase px-1.5 py-0.5 rounded ${statusPill(selectedTask.status)}`}>{selectedTask.status}</span>
+                <span className={`text-[10px] uppercase px-1.5 py-0.5 rounded ${statusPill(selectedTask.status)}`}>{friendlyTaskStatus(selectedTask.status)}</span>
                 <div className="w-px h-4 bg-[#30363d]" />
-                <button onClick={handleRunSelected} className="text-[11px] px-2 py-1 rounded bg-cyan-500/15 text-cyan-400 hover:bg-cyan-500/25">
-                  Run
-                </button>
+                {(selectedIsSurface || selectedIsAgent) && (
+                  <button onClick={handleActivateSelected} className="text-[11px] px-2 py-1 rounded bg-cyan-500/15 text-cyan-400 hover:bg-cyan-500/25">
+                    {selectedIsSurface ? "Open surface" : "Activate agent"}
+                  </button>
+                )}
                 {selectedTask.status === "failed" && (
                   <button onClick={handleRetrySelected} className="text-[11px] px-2 py-1 rounded bg-amber-500/15 text-amber-400 hover:bg-amber-500/25">
                     Retry
@@ -363,7 +593,113 @@ export function App() {
                 <button onClick={handleDeleteSelected} className="text-[11px] px-2 py-1 rounded bg-red-500/15 text-red-400 hover:bg-red-500/25">
                   Delete
                 </button>
+                {mode === "power" && (
+                  <span
+                    className="border-l border-[#30363d] pl-2 font-mono text-[9px] text-[#6e7681]"
+                    title={`Task ${selectedTask.id}\nSession ${terminalSelection.sessionId ?? "none"}\nOwner ${selectedTask.assignedTo ?? "unassigned"}\nContext refs ${(selectedTask.contextRefs ?? []).map((ref) => `${ref.type}:${ref.id}`).join(", ") || "none"}`}
+                  >
+                    task:{selectedTask.id.slice(0, 8)} {terminalSelection.sessionId ? `· session:${terminalSelection.sessionId.slice(0, 8)}` : "· no session"} · refs:{selectedTask.contextRefs?.length ?? 0} · owner:{selectedTask.assignedTo ?? "—"}
+                  </span>
+                )}
               </div>
+            )}
+
+            {mode === "power" && selectedTask && (
+              <aside className="power-inspector" aria-label="Power runtime inspector">
+                <div className="power-inspector__header">
+                  <div>
+                    <span className="power-inspector__eyebrow">Runtime inspector</span>
+                    <strong>{selectedTask.title}</strong>
+                  </div>
+                  <span className="power-inspector__live" data-status={selectedTask.status ?? selectedCanvasNode?.liveStatus}>
+                    {selectedTask.status ?? selectedCanvasNode?.liveStatus}
+                  </span>
+                </div>
+
+                <section>
+                  <h3>Ownership & session</h3>
+                  <dl className="power-inspector__grid">
+                    <dt>Task</dt><dd>{selectedTask.id}</dd>
+                    <dt>Owner</dt><dd>{selectedTask.assignedTo ?? "unassigned"}</dd>
+                    <dt>Harness</dt><dd>{selectedCanvasNode?.harnessId ?? "none"}</dd>
+                    <dt>Session</dt><dd>{selectedSession ? `${selectedSession.id} · ${selectedSession.status} · pid ${selectedSession.pid}` : "no live session"}</dd>
+                  </dl>
+                  {selectedSession && (selectedSession.status === "running" || selectedSession.status === "spawning") && (
+                    <button className="power-inspector__session-action" onClick={() => void handleInterruptSelected()}>
+                      Interrupt session
+                    </button>
+                  )}
+                </section>
+
+                <section>
+                  <h3>Context refs</h3>
+                  <div className="power-inspector__chips">
+                    {(selectedTask.contextRefs ?? []).length > 0
+                      ? selectedTask.contextRefs?.map((ref) => <code key={`${ref.type}:${ref.id}`}>{ref.type}:{ref.id}</code>)
+                      : <span>None injected</span>}
+                  </div>
+                </section>
+
+                <section>
+                  <h3>Permissions</h3>
+                  <div className="power-inspector__chips">
+                    {selectedPermissionPolicy
+                      ? Object.entries(selectedPermissionPolicy).map(([capability, permission]) => (
+                        <code key={capability}>{capability}: {String(permission)}</code>
+                      ))
+                      : <span>Policy unavailable</span>}
+                  </div>
+                </section>
+
+                <section>
+                  <h3>Usage</h3>
+                  <dl className="power-inspector__grid">
+                    <dt>Tokens</dt><dd>{selectedUsage.tokens?.toLocaleString() ?? "not reported"}</dd>
+                    <dt>Cost</dt><dd>{selectedUsage.cost === undefined ? "not reported" : `$${selectedUsage.cost.toFixed(4)}`}</dd>
+                  </dl>
+                </section>
+
+                {(selectedIsAgent || selectedIsSurface) && (
+                  <section>
+                    <h3>Direct intervention</h3>
+                    <div className="power-inspector__intervene">
+                      <textarea
+                        value={intervention}
+                        onChange={(event) => setIntervention(event.target.value)}
+                        onKeyDown={(event) => {
+                          if ((event.ctrlKey || event.metaKey) && event.key === "Enter") void handleInterveneSelected();
+                        }}
+                        placeholder="Send an instruction to this worker…"
+                      />
+                      <button onClick={() => void handleInterveneSelected()} disabled={!intervention.trim()}>Send</button>
+                    </div>
+                  </section>
+                )}
+
+                <section className="power-inspector__events">
+                  <h3>Event history</h3>
+                  {selectedEvents.length > 0 ? selectedEvents.map((event) => (
+                    <div key={event.id} className="power-inspector__event">
+                      <code>#{event.seq} {event.type}</code>
+                      <time>{new Date(event.timestamp).toLocaleTimeString()}</time>
+                    </div>
+                  )) : <span>No task events yet</span>}
+                </section>
+              </aside>
+            )}
+
+            {selectedIsBrowser && selectedCanvasNode && (
+              <BrowserSurface
+                initialUrl={typeof selectedCanvasNode.config?.url === "string" ? selectedCanvasNode.config.url : "about:blank"}
+                onNavigate={async (url) => {
+                  await api.patchCanvas({ upsertNodes: [{
+                    id: selectedCanvasNode.id,
+                    label: selectedCanvasNode.label,
+                    config: { ...(selectedCanvasNode.config ?? {}), url },
+                  }] });
+                  void refresh();
+                }}
+              />
             )}
 
             {/* Approvals toast */}
@@ -443,4 +779,18 @@ function statusPill(status: string): string {
     default:
       return "bg-[#21262d] text-[#8b949e]";
   }
+}
+
+function friendlyTaskStatus(status: string): string {
+  const labels: Record<string, string> = {
+    pending: "Idle",
+    assigned: "Starting",
+    spawning: "Starting",
+    running: "Working",
+    completed: "Ready",
+    failed: "Failed",
+    blocked: "Blocked",
+    cancelled: "Offline",
+  };
+  return labels[status] ?? status;
 }

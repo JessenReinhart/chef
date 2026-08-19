@@ -25,6 +25,7 @@ try {
       { type: "decision", id: "oauth" },
       { type: "artifact", id: "requirements" },
     ],
+    memberNodeIds: ["agent-b", "agent-a"],
   }, nodes);
   assert.deepEqual(created.memberNodeIds, ["agent-a", "agent-b"]);
   assert.deepEqual(manager.contextRefsForNode("ws", "agent-a", nodes), [
@@ -34,13 +35,15 @@ try {
   assert.deepEqual(manager.contextRefsForNode("ws", "agent-outside", nodes), []);
 
   const persisted = JSON.parse(readFileSync(storagePath, "utf8")) as { scopes: Array<Record<string, unknown>> };
-  assert.equal("memberNodeIds" in persisted.scopes[0], false, "membership must be derived, not persisted");
+  assert.deepEqual(persisted.scopes[0].memberNodeIds, ["agent-a", "agent-b"], "membership must be persisted explicitly");
 
   manager.update("ws", "auth", { bounds: { x: 0, y: 0, width: 1000, height: 1000 } }, nodes);
-  assert.deepEqual(manager.get("ws", "auth", nodes)?.memberNodeIds, ["agent-a", "agent-b", "agent-outside"]);
+  assert.deepEqual(manager.get("ws", "auth", nodes)?.memberNodeIds, ["agent-a", "agent-b"]);
 
   const moved = nodes.map((node) => node.id === "agent-b" ? { ...node, position: { x: 1200, y: 1200 } } : node);
-  assert.deepEqual(manager.get("ws", "auth", moved)?.memberNodeIds, ["agent-a", "agent-outside"]);
+  assert.deepEqual(manager.get("ws", "auth", moved)?.memberNodeIds, ["agent-a", "agent-b"], "geometry must not rewrite membership");
+  manager.update("ws", "auth", { memberNodeIds: ["agent-outside", "agent-a"] }, moved);
+  assert.deepEqual(manager.get("ws", "auth", nodes)?.memberNodeIds, ["agent-a", "agent-outside"]);
 
   assert.throws(() => manager.create({ id: "bad", workspaceId: "ws", name: "Bad", bounds: { x: 0, y: 0, width: -1, height: 10 } }, nodes), /non-negative/);
   assert.throws(() => manager.create({ id: "nan", workspaceId: "ws", name: "Bad", bounds: { x: Number.NaN, y: 0, width: 10, height: 10 } }, nodes), /finite/);
@@ -50,7 +53,7 @@ try {
     { type: "artifact", id: "requirements" },
     { type: "decision", id: "oauth" },
   ]);
-  assert.deepEqual(reloaded.get("ws", "auth", nodes)?.memberNodeIds, ["agent-a", "agent-b", "agent-outside"]);
+  assert.deepEqual(reloaded.get("ws", "auth", nodes)?.memberNodeIds, ["agent-a", "agent-outside"]);
 
   assert.equal(reloaded.delete("ws", "auth"), true);
   assert.equal(reloaded.get("ws", "auth", nodes), undefined);

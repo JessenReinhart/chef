@@ -32,7 +32,11 @@ class CatProvider {
 
 const dir = await mkdtemp(join(tmpdir(), "chef-direct-worker-"));
 const script = join(dir, "cat.mjs");
-await writeFile(script, "process.stdin.setEncoding('utf8'); process.stdin.on('data', (chunk) => process.stdout.write(chunk));", "utf8");
+await writeFile(
+  script,
+  "process.stdin.setEncoding('utf8'); process.stdin.on('data', (chunk) => process.stdout.write(chunk)); process.stdout.write('READY\\n'); setInterval(() => {}, 1_000);",
+  "utf8",
+);
 const chef = createChef({ dbPath: join(dir, "chef.sqlite"), projectDir: dir, decisionProvider: new CatProvider(script) });
 try {
   await chef.start();
@@ -46,20 +50,49 @@ try {
     await promise;
   }
   assert.ok(sessionId, "worker session must become visible");
+  let workerReady = false;
+  for (let attempt = 0; attempt < 100 && !workerReady; attempt++) {
+    const snapshot = await chef.inspectState();
+    workerReady = snapshot.events
+      .filter((event) => event.type === "session.data")
+      .some((event) => JSON.stringify(event.payload).includes("READY"));
+    if (!workerReady) {
+      const { promise, resolve } = Promise.withResolvers<void>();
+      setTimeout(resolve, 10);
+      await promise;
+    }
+  }
+  assert.equal(workerReady, true, "worker must be ready before direct input");
   await chef.sendInput(sessionId, "hello from UI\n");
+  let observedEcho = false;
+  for (let attempt = 0; attempt < 100 && !observedEcho; attempt++) {
+    const snapshot = await chef.inspectState();
+    observedEcho = snapshot.events
+      .filter((event) => event.type === "session.data")
+      .some((event) => JSON.stringify(event.payload).includes("hello from UI"));
+    if (!observedEcho) {
+      const { promise, resolve } = Promise.withResolvers<void>();
+      setTimeout(resolve, 10);
+      await promise;
+    }
+  }
+  assert.equal(observedEcho, true, "PTY must echo direct input before interruption");
   await chef.resizeSession(sessionId, 100, 30);
   await chef.interruptSession(sessionId);
   const result = await execution;
-  assert.equal(result.ok, true, `orchestrator failed: ${result.report}`);
   const snapshot = await chef.inspectState();
+  const task = snapshot.tasks[0];
+  // node-pty reports Ctrl+C differently across PTY backends (graceful exit on
+  // some, signal/non-zero exit on others). It must never become cancellation:
+  // only cancelTask owns that lifecycle transition.
+  assert.ok(task.status === "completed" || task.status === "failed");
+  assert.equal(result.ok, task.status === "completed");
   const userEvents = snapshot.events.filter((event) => event.type.startsWith("user."));
   assert.deepEqual(userEvents.map((event) => event.type), ["user.input", "user.resize", "user.interrupt"]);
   assert.ok(userEvents.every((event) => event.source.type === "user" && event.source.id === "ui"));
   assert.ok(userEvents.every((event) => event.taskId && event.sessionId === sessionId));
-  const output = snapshot.events.filter((event) => event.type === "session.data");
-  assert.ok(output.some((event) => JSON.stringify(event.payload).includes("hello from UI")), "PTY must echo direct input");
-  await chef.close();
   console.log("direct-worker-interaction: ok");
 } finally {
+  await chef.close();
   await rm(dir, { recursive: true, force: true });
 }

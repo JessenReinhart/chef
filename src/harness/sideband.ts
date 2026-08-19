@@ -26,6 +26,10 @@ export interface SidebandEnvelope {
   from: string;
   /** Structured payload. */
   payload: unknown;
+  /** Sending agent for peer-message envelopes. */
+  peerFrom?: string;
+  /** Human-readable body for peer-message envelopes. */
+  text?: string;
   /** Optional reply-to envelope id. */
   replyTo?: string;
   /** Optional context references carried by this envelope. */
@@ -109,7 +113,7 @@ export class SidebandDirectory {
    */
   async writeMessage(from: string, text: string): Promise<string> {
     await this.init();
-    const envelope = {
+    const envelope: SidebandEnvelope = {
       version: 1,
       id: randomUUID(),
       kind: "message",

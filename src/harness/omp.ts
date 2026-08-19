@@ -6,15 +6,19 @@
  */
 
 import { SpecializedCliHarness } from "./specialized.ts";
+import type { SpecializedCliOptions } from "./specialized.ts";
+
+type RuntimeOptions = Pick<SpecializedCliOptions, "workspaceId" | "cwd">;
 
 export class OmpHarness extends SpecializedCliHarness {
-  constructor(binary = "omp") {
+  constructor(binary = "omp", runtime: RuntimeOptions = {}) {
     super({
       id: "omp",
       type: "omp",
       name: "OMP",
       binary,
       flags: ["run"],
+      ...runtime,
     });
   }
 }

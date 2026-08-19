@@ -44,7 +44,11 @@ async function loadPlaywright(): Promise<{ chromium: unknown; errors: { new (mes
     return cachedPlaywright as { chromium: unknown; errors: { new (message: string): Error } };
   }
   try {
-    const mod = await import("playwright");
+    // Keep Playwright genuinely optional: a non-literal specifier prevents the
+    // type checker/bundler from requiring the package at build time, while the
+    // runtime still performs the same native dynamic import when requested.
+    const playwrightPackage = "playwright";
+    const mod = await import(playwrightPackage);
     cachedPlaywright = mod;
     return mod as { chromium: unknown; errors: { new (message: string): Error } };
   } catch {

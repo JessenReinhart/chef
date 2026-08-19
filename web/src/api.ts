@@ -14,6 +14,12 @@ import type {
   UiCanvasNode,
   UiCanvasEdge,
   LlmStatus,
+  ContextZone,
+  ContextZoneInput,
+  UiMission,
+  UiAutomation,
+  UiAutomationRun,
+  UiRuntimeEvent,
 } from "./types";
 export interface CreateNodeInput {
   type: string;
@@ -61,6 +67,11 @@ export class Api {
     return data.data;
   }
 
+  async capabilities(role: "engineer" | "orchestrator" | "human"): Promise<{ role: string; policy: Record<string, "allow" | "deny" | "approval"> }> {
+    const data = await this.request<{ ok: boolean; data: { role: string; policy: Record<string, "allow" | "deny" | "approval"> } }>(`/api/capabilities?role=${role}`);
+    return data.data;
+  }
+
   // ── LLM status ───────────────────────────────────────────────────
   async llmStatus(): Promise<LlmStatus> {
     const data = await this.request<{ ok: boolean; data: LlmStatus }>("/api/llm/status");
@@ -74,6 +85,9 @@ export class Api {
     approvals: Array<{ id: string; reason: string; taskId: string; status: string }>;
     canvasNodes: UiCanvasNode[];
     canvasEdges: UiCanvasEdge[];
+    missions?: UiMission[];
+    automations?: UiAutomation[];
+    events: UiRuntimeEvent[];
   }> {
     return this.request<{
       tasks: UiTask[];
@@ -81,6 +95,9 @@ export class Api {
       approvals: Array<{ id: string; reason: string; taskId: string; status: string }>;
       canvasNodes: UiCanvasNode[];
       canvasEdges: UiCanvasEdge[];
+      missions?: UiMission[];
+      automations?: UiAutomation[];
+      events: UiRuntimeEvent[];
     }>("/api/state");
   }
 
@@ -157,6 +174,72 @@ export class Api {
   async dispatch(): Promise<number> {
     const data = await this.request<{ ok: boolean; data: { dispatched: number } }>("/api/dispatch", { method: "POST" });
     return data.data.dispatched;
+  }
+
+  // ── Living workspace context zones ─────────────────────────────
+  async contextZones(): Promise<ContextZone[]> {
+    const data = await this.request<{ ok: boolean; data: ContextZone[] }>("/api/context-scopes");
+    return data.data;
+  }
+
+  async automations(): Promise<UiAutomation[]> {
+    const data = await this.request<{ ok: boolean; data: UiAutomation[] }>("/api/automations");
+    return data.data;
+  }
+
+  async runAutomation(id: string): Promise<UiAutomationRun> {
+    const data = await this.request<{ ok: boolean; data: UiAutomationRun }>(`/api/automations/${encodeURIComponent(id)}/run`, { method: "POST" });
+    return data.data;
+  }
+
+  async stopAutomation(id: string): Promise<UiAutomationRun> {
+    const data = await this.request<{ ok: boolean; data: UiAutomationRun }>(`/api/automations/${encodeURIComponent(id)}/stop`, { method: "POST" });
+    return data.data;
+  }
+
+  async activateNode(id: string): Promise<UiCanvasNode> {
+    const data = await this.request<{ ok: boolean; data: UiCanvasNode }>(`/api/nodes/${encodeURIComponent(id)}/activate`, { method: "POST" });
+    return data.data;
+  }
+
+  async controlMission(id: string, action: "pause" | "resume" | "cancel"): Promise<UiMission> {
+    const data = await this.request<{ ok: boolean; data: UiMission }>(`/api/missions/${encodeURIComponent(id)}/${action}`, { method: "POST" });
+    return data.data;
+  }
+
+  async redirectMission(id: string, goal: string): Promise<UiMission> {
+    const data = await this.request<{ ok: boolean; data: UiMission }>(`/api/missions/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ goal }),
+    });
+    return data.data;
+  }
+
+  async interveneNode(id: string, text: string): Promise<void> {
+    await this.request(`/api/nodes/${encodeURIComponent(id)}/message`, {
+      method: "POST",
+      body: JSON.stringify({ message: text }),
+    });
+  }
+
+  async createContextZone(input: ContextZoneInput): Promise<ContextZone> {
+    const data = await this.request<{ ok: boolean; data: ContextZone }>("/api/context-scopes", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+    return data.data;
+  }
+
+  async updateContextZone(id: string, input: Partial<ContextZoneInput>): Promise<ContextZone> {
+    const data = await this.request<{ ok: boolean; data: ContextZone }>(`/api/context-scopes/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    });
+    return data.data;
+  }
+
+  async deleteContextZone(id: string): Promise<void> {
+    await this.request(`/api/context-scopes/${encodeURIComponent(id)}`, { method: "DELETE" });
   }
 
   // ── Chat ────────────────────────────────────────────────────────

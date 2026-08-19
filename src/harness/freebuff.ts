@@ -6,15 +6,19 @@
  */
 
 import { SpecializedCliHarness } from "./specialized.ts";
+import type { SpecializedCliOptions } from "./specialized.ts";
+
+type RuntimeOptions = Pick<SpecializedCliOptions, "workspaceId" | "cwd">;
 
 export class FreebuffHarness extends SpecializedCliHarness {
-  constructor(binary = "freebuff") {
+  constructor(binary = "freebuff", runtime: RuntimeOptions = {}) {
     super({
       id: "freebuff",
       type: "freebuff",
       name: "Freebuff",
       binary,
       flags: [],
+      ...runtime,
     });
   }
 }

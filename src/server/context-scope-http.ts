@@ -1,8 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { join } from "node:path";
 import type { ContextReference } from "../core/types.ts";
 import type { ChefRuntime } from "../main.ts";
-import { ContextScopeManager } from "../context/context-scope-manager.ts";
 
 type RequestHandler = (req: IncomingMessage, res: ServerResponse) => void | Promise<void>;
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8" } as const;
@@ -22,29 +20,33 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
 export function createContextScopeServer(runtime: ChefRuntime, baseServer: Server): Server {
   const baseHandler = baseServer.listeners("request")[0] as RequestHandler | undefined;
   if (!baseHandler) throw new Error("base HTTP server has no request handler");
-  const scopes = new ContextScopeManager(join(runtime.projectDir, ".chef", "context-scopes.json"));
   const nodes = () => runtime.listCanvas(runtime.workspaceId).nodes;
+
+  const invalidMembers = (memberNodeIds: string[]): string[] => {
+    const validIds = new Set(nodes().filter((node) => node.workspaceId === runtime.workspaceId).map((node) => node.id));
+    return [...new Set(memberNodeIds)].filter((nodeId) => !validIds.has(nodeId));
+  };
 
   const syncContextRefs = async () => {
     const snapshot = await runtime.inspectState();
     const canvasNodes = nodes();
-    for (const task of snapshot.tasks) {
-      if (task.status !== "pending" && task.status !== "assigned") continue;
-      const canvasNode = canvasNodes.find((n) => n.taskId === task.id || n.id === task.id);
-      if (!canvasNode) continue;
-      const scopedRefs = scopes.contextRefsForNode(runtime.workspaceId, canvasNode.id, canvasNodes);
-      const existingRefs = runtime.repository.getTask(task.id)?.contextRefs ?? [];
-      const merged = new Map(existingRefs.map((ref) => [`${ref.type}:${ref.id}`, ref]));
-      for (const ref of scopedRefs) merged.set(`${ref.type}:${ref.id}`, ref);
-      runtime.repository.updateTask(task.id, { contextRefs: [...merged.values()] });
-    }
+    const scopes = runtime.repository.listContextZones(runtime.workspaceId);
+    const tasksById = new Map(snapshot.tasks.map((task) => [task.id, task]));
+    const nodesById = new Map(canvasNodes.map((node) => [node.id, node]));
+    const assignments = scopes.flatMap((scope) => scope.memberNodeIds.flatMap((nodeId) => {
+      const node = nodesById.get(nodeId);
+      const task = node?.taskId ? tasksById.get(node.taskId) : tasksById.get(nodeId);
+      if (!task || (task.status !== "pending" && task.status !== "assigned")) return [];
+      return [{ zoneId: scope.id, taskId: task.id, contextRefs: scope.contextRefs }];
+    }));
+    runtime.repository.syncContextZoneRefs(runtime.workspaceId, assignments);
   };
 
   return createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
     try {
       if (req.method === "GET" && url.pathname === "/api/context-scopes") {
-        sendJson(res, 200, { ok: true, data: scopes.list(runtime.workspaceId, nodes()) });
+        sendJson(res, 200, { ok: true, data: runtime.repository.listContextZones(runtime.workspaceId) });
         return;
       }
       if (req.method === "POST" && url.pathname === "/api/context-scopes") {
@@ -53,18 +55,28 @@ export function createContextScopeServer(runtime: ChefRuntime, baseServer: Serve
           name?: string;
           bounds?: { x: number; y: number; width: number; height: number };
           contextRefs?: ContextReference[];
+          memberNodeIds?: string[];
+          policy?: Record<string, unknown>;
         };
         if (!body.name || !body.bounds || Object.values(body.bounds).some((v) => typeof v !== "number" || !Number.isFinite(v))) {
           sendJson(res, 400, { error: "name and finite bounds are required" });
           return;
         }
-        const scope = scopes.create({
+        const memberNodeIds = body.memberNodeIds ?? [];
+        const invalid = invalidMembers(memberNodeIds);
+        if (invalid.length > 0) {
+          sendJson(res, 400, { error: `memberNodeIds must reference canvas nodes in this workspace: ${invalid.join(", ")}` });
+          return;
+        }
+        const scope = runtime.repository.upsertContextZone({
           id: body.id,
           workspaceId: runtime.workspaceId,
           name: body.name,
           bounds: body.bounds,
           contextRefs: body.contextRefs ?? [],
-        }, nodes());
+          memberNodeIds,
+          policy: body.policy,
+        });
         await syncContextRefs();
         sendJson(res, 201, { ok: true, data: scope });
         return;
@@ -76,14 +88,29 @@ export function createContextScopeServer(runtime: ChefRuntime, baseServer: Serve
           name?: string;
           bounds?: { x: number; y: number; width: number; height: number };
           contextRefs?: ContextReference[];
+          memberNodeIds?: string[];
+          policy?: Record<string, unknown>;
         };
-        const scope = scopes.update(runtime.workspaceId, match[1], body, nodes());
+        const current = runtime.repository.getContextZone(match[1]);
+        if (!current || current.workspaceId !== runtime.workspaceId) { sendJson(res, 404, { error: "context scope not found" }); return; }
+        const memberNodeIds = body.memberNodeIds ?? current.memberNodeIds;
+        const invalid = invalidMembers(memberNodeIds);
+        if (invalid.length > 0) {
+          sendJson(res, 400, { error: `memberNodeIds must reference canvas nodes in this workspace: ${invalid.join(", ")}` });
+          return;
+        }
+        const scope = runtime.repository.upsertContextZone({
+          id: current.id, workspaceId: current.workspaceId, name: body.name ?? current.name,
+          bounds: body.bounds ?? current.bounds, contextRefs: body.contextRefs ?? current.contextRefs,
+          memberNodeIds, policy: body.policy ?? current.policy,
+        });
         await syncContextRefs();
         sendJson(res, 200, { ok: true, data: scope });
         return;
       }
       if (match && req.method === "DELETE") {
-        if (!scopes.delete(runtime.workspaceId, match[1])) {
+        const current = runtime.repository.getContextZone(match[1]);
+        if (!current || current.workspaceId !== runtime.workspaceId || !runtime.repository.deleteContextZone(match[1])) {
           sendJson(res, 404, { error: "context scope not found" });
           return;
         }

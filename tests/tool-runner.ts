@@ -13,6 +13,7 @@ import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { ToolRunner, PermissionDeniedError, type ToolContext } from "../src/runtime/tool-runner.ts";
 import { GenericTerminalHarness } from "../src/harness/generic.ts";
+import type { HarnessLike } from "../src/runtime/scheduler.ts";
 import { Repository } from "../src/persistence/database.ts";
 
 const dir = mkdtempSync(join(tmpdir(), "chef-tool-runner-"));
@@ -86,18 +87,40 @@ await test("out-of-root read fails with denied status", async () => {
 
 await test("bash tool runs a real command through PTY", async () => {
   const ctx = makeContext();
-  const harness = new GenericTerminalHarness({ agentId: "agent-pty", workspaceId: "ws-tools", command: "sh", args: ["-c", "echo hello-pty"] });
+  const harness = new GenericTerminalHarness({ agentId: "generic", workspaceId: "ws-tools", command: process.execPath, args: ["--version"] });
+  // This fixture always supplies cwd, satisfying the scheduler's concrete launch metadata.
+  const schedulerHarness = harness as unknown as HarnessLike;
+  // A detected specialized CLI may precede generic iteration order. Terminal
+  // tools must still select the generic harness that honors command overrides.
+  const unavailableSpecialized = { id: "claude-code" } as never;
   ctx.harnessRegistry = {
-    get: (id: string) => (id === "agent-pty" ? harness : undefined),
+    get: (id: string) => (id === "generic" ? schedulerHarness : undefined),
     set: () => {},
-    values: () => [harness],
+    values: () => [unavailableSpecialized, schedulerHarness],
   };
   const runnerPty = new ToolRunner(ctx);
-  const result = await runnerPty.execute({ tool: "bash", input: { command: "echo hello-pty", cwd: projectDir } });
-  assert.equal(result.ok, true);
+  const result = await runnerPty.execute({ tool: "bash", input: { command: process.execPath, args: ["--version"], cwd: projectDir } });
+  assert.equal(result.ok, true, JSON.stringify(result.output));
   const stdout = (result.output as { stdout: string }).stdout;
-  assert.match(stdout, /hello-pty/);
+  assert.match(stdout, /v\d+\.\d+\.\d+/);
   await harness.close();
+});
+
+await test("bash tool never substitutes a specialized CLI for generic", async () => {
+  const ctx = makeContext();
+  const specializedOnly = { id: "claude-code" } as never;
+  ctx.harnessRegistry = {
+    get: () => undefined,
+    set: () => {},
+    values: () => [specializedOnly],
+  };
+  const specializedOnlyRunner = new ToolRunner(ctx);
+  const result = await specializedOnlyRunner.execute({
+    tool: "bash",
+    input: { command: process.execPath, args: ["--version"], cwd: projectDir },
+  });
+  assert.equal(result.ok, false);
+  assert.match((result.output as { error: string }).error, /generic command harness not registered/);
 });
 
 // ---------------------------------------------------------------------------

@@ -26,13 +26,25 @@ import type {
   ApprovalStatus,
   Artifact,
   ArtifactType,
+  Automation,
+  AutomationGraphEdge,
+  AutomationId,
+  AutomationRun,
+  AutomationRunId,
+  AutomationRunStatus,
+  AutomationStatus,
   CanvasEdge,
+  CanvasEdgeType,
   CanvasNode,
   ContextReference,
+  ContextZone,
   Decision,
   DecisionStatus,
   EntityId,
   EntityRef,
+  Mission,
+  MissionId,
+  MissionStatus,
   Plan,
   PlanId,
   PlanStatus,
@@ -162,6 +174,9 @@ export interface TaskInput {
   status: TaskStatus;
   assignedTo?: EntityId;
   parentTaskId?: TaskId;
+  missionId?: MissionId;
+  automationId?: AutomationId;
+  automationRunId?: AutomationRunId;
   approvalId?: string;
   dependencies?: TaskId[];
   contextRefs?: ContextReference[];
@@ -247,11 +262,56 @@ export interface PlanInput {
   id?: PlanId;
   workspaceId: WorkspaceId;
   goal: string;
+  missionId?: MissionId;
   status: PlanStatus;
   tasks: PlanTask[];
   taskIds: TaskId[];
   createdAt?: Timestamp;
   updatedAt?: Timestamp;
+}
+
+export interface MissionInput {
+  id?: MissionId;
+  workspaceId: WorkspaceId;
+  goal: string;
+  status?: MissionStatus;
+  taskIds?: TaskId[];
+  planId?: PlanId;
+  createdBy?: EntityId;
+  metadata?: Record<string, unknown>;
+  createdAt?: Timestamp;
+  updatedAt?: Timestamp;
+  completedAt?: Timestamp;
+}
+
+export interface AutomationInput {
+  id?: AutomationId;
+  workspaceId: WorkspaceId;
+  name: string;
+  description?: string;
+  status?: AutomationStatus;
+  nodeIds?: string[];
+  edges?: AutomationGraphEdge[];
+  trigger?: Record<string, unknown>;
+  currentRunId?: AutomationRunId;
+  createdAt?: Timestamp;
+  updatedAt?: Timestamp;
+}
+
+export interface ContextZoneInput {
+  id?: string;
+  workspaceId: WorkspaceId;
+  name: string;
+  bounds: ContextZone["bounds"];
+  contextRefs?: ContextReference[];
+  memberNodeIds?: string[];
+  policy?: Record<string, unknown>;
+}
+
+export interface ContextZoneRefAssignment {
+  zoneId: string;
+  taskId: TaskId;
+  contextRefs: ContextReference[];
 }
 
 // ---------------------------------------------------------------------------
@@ -348,6 +408,9 @@ function mapTask(row: Row): Task {
     status: row.status as TaskStatus,
     assignedTo: (row.assigned_to as string | null) ?? undefined,
     parentTaskId: (row.parent_task_id as string | null) ?? undefined,
+    missionId: (row.mission_id as string | null) ?? undefined,
+    automationId: (row.automation_id as string | null) ?? undefined,
+    automationRunId: (row.automation_run_id as string | null) ?? undefined,
     approvalId: (row.approval_id as string | null) ?? undefined,
     dependencies: [], // resolved relationally by callers (getTask, snapshot)
     contextRefs: readJson(row.context_refs_json as string, [] as ContextReference[]),
@@ -459,11 +522,70 @@ function mapPlan(row: Row): Plan {
     id: row.id as string,
     workspaceId: row.workspace_id as string,
     goal: row.goal as string,
+    missionId: (row.mission_id as string | null) ?? undefined,
     status: row.status as PlanStatus,
     tasks: readJson(row.tasks_json as string, [] as PlanTask[]),
     taskIds: readJson(row.task_ids_json as string, [] as TaskId[]),
     createdAt: row.created_at as number,
     updatedAt: (row.updated_at as number | null) ?? undefined,
+  };
+}
+
+function mapMission(row: Row): Mission {
+  return {
+    id: row.id as string,
+    workspaceId: row.workspace_id as string,
+    goal: row.goal as string,
+    status: row.status as MissionStatus,
+    taskIds: readJson(row.task_ids_json as string, [] as TaskId[]),
+    planId: (row.plan_id as string | null) ?? undefined,
+    createdBy: row.created_by as string,
+    metadata: readJson(row.metadata_json as string, {}),
+    createdAt: row.created_at as number,
+    updatedAt: row.updated_at as number,
+    completedAt: (row.completed_at as number | null) ?? undefined,
+  };
+}
+
+function mapAutomation(row: Row): Automation {
+  return {
+    id: row.id as string,
+    workspaceId: row.workspace_id as string,
+    name: row.name as string,
+    description: row.description as string,
+    status: row.status as AutomationStatus,
+    nodeIds: readJson(row.node_ids_json as string, [] as string[]),
+    edges: readJson(row.edges_json as string, [] as AutomationGraphEdge[]),
+    trigger: readJson(row.trigger_json as string, {}),
+    currentRunId: (row.current_run_id as string | null) ?? undefined,
+    createdAt: row.created_at as number,
+    updatedAt: row.updated_at as number,
+  };
+}
+
+function mapAutomationRun(row: Row): AutomationRun {
+  return {
+    id: row.id as string,
+    workspaceId: row.workspace_id as string,
+    automationId: row.automation_id as string,
+    status: row.status as AutomationRunStatus,
+    taskIds: readJson(row.task_ids_json as string, [] as TaskId[]),
+    startedAt: row.started_at as number,
+    endedAt: (row.ended_at as number | null) ?? undefined,
+    error: (row.error as string | null) ?? undefined,
+  };
+}
+
+function mapContextZone(row: Row, memberNodeIds: string[]): ContextZone {
+  return {
+    id: row.id as string,
+    workspaceId: row.workspace_id as string,
+    name: row.name as string,
+    bounds: readJson(row.bounds_json as string, { x: 0, y: 0, width: 0, height: 0 }),
+    contextRefs: readJson(row.context_refs_json as string, [] as ContextReference[]),
+    memberNodeIds,
+    policy: readJson(row.policy_json as string, {}),
+    updatedAt: row.updated_at as number,
   };
 }
 
@@ -476,6 +598,8 @@ export interface CanvasNodeRecord {
   nodeType: "blueprint" | "proxy";
   kind: string;
   harnessId: string | null;
+  liveStatus: CanvasNode["liveStatus"];
+  config: Record<string, unknown>;
   positionX: number;
   positionY: number;
   updatedAt: Timestamp;
@@ -489,6 +613,7 @@ export interface CanvasEdgeRecord {
   target: string;
   sourceHandle: string | null;
   targetHandle: string | null;
+  type: CanvasEdgeType;
   updatedAt: Timestamp;
 }
 
@@ -501,6 +626,8 @@ function mapCanvasNode(row: Row): CanvasNodeRecord {
     nodeType: row.node_type === "proxy" ? "proxy" : "blueprint",
     kind: String(row.kind),
     harnessId: row.harness_id == null ? null : String(row.harness_id),
+    liveStatus: (row.live_status == null ? "offline" : String(row.live_status)) as CanvasNode["liveStatus"],
+    config: readJson(row.config_json as string | null, {}),
     positionX: Number(row.position_x),
     positionY: Number(row.position_y),
     updatedAt: Number(row.updated_at),
@@ -515,6 +642,7 @@ function mapCanvasEdge(row: Row): CanvasEdgeRecord {
     target: String(row.target),
     sourceHandle: row.source_handle == null ? null : String(row.source_handle),
     targetHandle: row.target_handle == null ? null : String(row.target_handle),
+    type: row.edge_type == null ? "context" : String(row.edge_type) as CanvasEdgeType,
     updatedAt: Number(row.updated_at),
   };
 }
@@ -528,6 +656,8 @@ function mapCanvasNodeRecord(rec: CanvasNodeRecord): CanvasNode {
     nodeType: rec.nodeType,
     kind: rec.kind as CanvasNode["kind"],
     harnessId: rec.harnessId,
+    liveStatus: rec.liveStatus,
+    config: rec.config,
     position: { x: rec.positionX, y: rec.positionY },
     updatedAt: rec.updatedAt,
   };
@@ -541,6 +671,7 @@ function mapCanvasEdgeRecord(rec: CanvasEdgeRecord): CanvasEdge {
     target: rec.target,
     sourceHandle: rec.sourceHandle,
     targetHandle: rec.targetHandle,
+    type: rec.type,
     updatedAt: rec.updatedAt,
   };
 }
@@ -559,7 +690,78 @@ export class Repository {
       mkdirSync(dirname(dbPath), { recursive: true });
     }
     this.db = new DatabaseSync(dbPath);
+    this.db.exec("PRAGMA foreign_keys = ON");
+    this.#prepareLegacySchema();
     this.db.exec(readFileSync(SCHEMA_PATH, "utf8"));
+  }
+
+  /** Add columns needed by the current idempotent schema before its indexes run. */
+  #prepareLegacySchema(): void {
+    const tableExists = (table: string): boolean => Boolean(
+      this.db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?`).get(table),
+    );
+    const hasColumn = (table: string, column: string): boolean => {
+      if (!tableExists(table)) return false;
+      return (this.db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).some((entry) => entry.name === column);
+    };
+    const ensureColumn = (table: string, column: string, definition: string): void => {
+      if (!tableExists(table)) return;
+      if (!hasColumn(table, column)) this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+    };
+    ensureColumn("tasks", "mission_id", "TEXT");
+    ensureColumn("tasks", "automation_id", "TEXT");
+    ensureColumn("tasks", "automation_run_id", "TEXT");
+    ensureColumn("plans", "mission_id", "TEXT");
+    // Recover a database left between the old non-transactional rename/copy/drop
+    // steps. New migrations are transactional, but this repair path makes an
+    // interrupted v0.2 preview database reopenable as well.
+    if (tableExists("canvas_edges_legacy_v01") && !tableExists("canvas_edges")) {
+      this.db.exec("ALTER TABLE canvas_edges_legacy_v01 RENAME TO canvas_edges");
+    }
+    if (tableExists("canvas_edges_legacy_v01") && tableExists("canvas_edges")) {
+      if (!hasColumn("canvas_edges", "edge_type")) {
+        throw new Error("Cannot recover canvas edge migration: both tables use the legacy schema");
+      }
+      this.transaction(() => {
+        this.db.exec(`
+          INSERT OR IGNORE INTO canvas_edges
+            (id, workspace_id, source, target, source_handle, target_handle, edge_type, updated_at)
+          SELECT id, workspace_id, source, target, source_handle, target_handle, 'context', updated_at
+          FROM canvas_edges_legacy_v01;
+          DROP TABLE canvas_edges_legacy_v01;
+        `);
+      });
+    }
+    if (tableExists("canvas_edges") && !hasColumn("canvas_edges", "edge_type")) {
+      // v0.1 constrained one edge per node pair. Rebuild so distinct semantic
+      // relationships can coexist without changing any persisted v0.1 ids.
+      this.transaction(() => {
+        this.db.exec(`
+          DROP INDEX IF EXISTS idx_canvas_edges_workspace;
+          ALTER TABLE canvas_edges RENAME TO canvas_edges_legacy_v01;
+          CREATE TABLE canvas_edges (
+            id TEXT PRIMARY KEY,
+            workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+            source TEXT NOT NULL REFERENCES canvas_nodes(id) ON DELETE CASCADE,
+            target TEXT NOT NULL REFERENCES canvas_nodes(id) ON DELETE CASCADE,
+            source_handle TEXT,
+            target_handle TEXT,
+            edge_type TEXT NOT NULL DEFAULT 'context',
+            updated_at INTEGER NOT NULL,
+            UNIQUE(source, target, edge_type)
+          );
+          INSERT INTO canvas_edges (id, workspace_id, source, target, source_handle, target_handle, edge_type, updated_at)
+            SELECT id, workspace_id, source, target, source_handle, target_handle, 'context', updated_at FROM canvas_edges_legacy_v01;
+          DROP TABLE canvas_edges_legacy_v01;
+          CREATE INDEX idx_canvas_edges_workspace ON canvas_edges(workspace_id);
+        `);
+      });
+    }
+    if (tableExists("canvas_edges")) {
+      this.db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_canvas_edges_typed_unique ON canvas_edges(source, target, edge_type)`);
+    }
+    ensureColumn("canvas_nodes", "live_status", "TEXT NOT NULL DEFAULT 'offline'");
+    ensureColumn("canvas_nodes", "config_json", "TEXT NOT NULL DEFAULT '{}'");
   }
 
   close(): void {
@@ -703,14 +905,15 @@ export class Repository {
     this.db
       .prepare(
         `INSERT INTO plans (
-           id, workspace_id, goal, status, tasks_json, task_ids_json,
+           id, workspace_id, goal, mission_id, status, tasks_json, task_ids_json,
            created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         id,
         input.workspaceId,
         input.goal,
+        input.missionId ?? null,
         input.status,
         toJson(input.tasks),
         toJson(input.taskIds),
@@ -740,7 +943,362 @@ export class Repository {
       .prepare(`UPDATE plans SET status = ?, updated_at = ? WHERE id = ?`)
       .run(status, now(), id);
     return this.getPlan(id)!;
-    return this.getPlan(id)!;
+  }
+
+  // -------------------------------------------------------------------------
+  // Missions & automations (living workspace v0.2)
+  // -------------------------------------------------------------------------
+
+  insertMission(input: MissionInput): Mission {
+    const id = input.id ?? randomUUID();
+    const ts = now();
+    this.db.prepare(
+      `INSERT INTO missions
+       (id, workspace_id, goal, status, task_ids_json, plan_id, created_by, metadata_json, created_at, updated_at, completed_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(id, input.workspaceId, input.goal, input.status ?? "planning", toJson(input.taskIds ?? []),
+      input.planId ?? null, input.createdBy ?? "user", toJson(input.metadata ?? {}), input.createdAt ?? ts,
+      input.updatedAt ?? ts, input.completedAt ?? null);
+    return this.getMission(id)!;
+  }
+
+  getMission(id: MissionId): Mission | null {
+    const row = this.db.prepare(`SELECT * FROM missions WHERE id = ?`).get(id) as Row | undefined;
+    return row ? mapMission(row) : null;
+  }
+
+  listMissions(workspaceId: WorkspaceId): Mission[] {
+    return (this.db.prepare(`SELECT * FROM missions WHERE workspace_id = ? ORDER BY created_at, id`).all(workspaceId) as Row[]).map(mapMission);
+  }
+
+  updateMission(id: MissionId, patch: { goal?: string; status?: MissionStatus; taskIds?: TaskId[]; planId?: PlanId; metadata?: Record<string, unknown> }): Mission {
+    const current = this.getMission(id);
+    if (!current) throw new Error(`Mission not found: ${id}`);
+    const nextStatus = patch.status ?? current.status;
+    const terminalStatuses = new Set<MissionStatus>(["completed", "cancelled", "failed"]);
+    const transitions: Record<MissionStatus, readonly MissionStatus[]> = {
+      planning: ["planning", "active", "paused", "cancelled", "failed"],
+      active: ["active", "planning", "paused", "waiting_for_approval", "blocked", "verifying", "completed", "cancelled", "failed"],
+      paused: ["paused", "planning", "active", "cancelled"],
+      waiting_for_approval: ["waiting_for_approval", "active", "paused", "blocked", "cancelled", "failed"],
+      blocked: ["blocked", "planning", "active", "paused", "cancelled", "failed"],
+      verifying: ["verifying", "active", "paused", "completed", "cancelled", "failed"],
+      completed: ["completed"],
+      cancelled: ["cancelled"],
+      failed: ["failed"],
+    };
+    if (terminalStatuses.has(current.status) && Object.keys(patch).length > 0) {
+      throw new Error(`Mission ${id} is terminal (${current.status})`);
+    }
+    if (!transitions[current.status].includes(nextStatus)) {
+      throw new Error(`Invalid Mission transition: ${current.status} -> ${nextStatus}`);
+    }
+    const terminal = nextStatus === "completed" || nextStatus === "cancelled" || nextStatus === "failed";
+    const result = this.db.prepare(
+      `UPDATE missions SET goal = ?, status = ?, task_ids_json = ?, plan_id = ?, metadata_json = ?, updated_at = ?, completed_at = ?
+       WHERE id = ? AND status = ?`,
+    ).run(patch.goal?.trim() || current.goal, nextStatus, toJson(patch.taskIds ?? current.taskIds), patch.planId ?? current.planId ?? null,
+      toJson(patch.metadata ?? current.metadata), now(), terminal ? now() : null, id, current.status);
+    if (result.changes !== 1) throw new Error(`Mission ${id} changed concurrently`);
+    return this.getMission(id)!;
+  }
+
+  insertAutomation(input: AutomationInput): Automation {
+    const id = input.id ?? randomUUID();
+    const ts = now();
+    const nodes = [...new Set(input.nodeIds ?? [])];
+    for (const edge of input.edges ?? []) {
+      if (!nodes.includes(edge.source) || !nodes.includes(edge.target)) throw new Error(`automation edge references missing node: ${edge.source}->${edge.target}`);
+    }
+    this.db.prepare(
+      `INSERT INTO automations
+       (id, workspace_id, name, description, status, node_ids_json, edges_json, trigger_json, current_run_id, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(id, input.workspaceId, input.name, input.description ?? "", input.status ?? "idle", toJson(nodes),
+      toJson(input.edges ?? []), toJson(input.trigger ?? {}), input.currentRunId ?? null, input.createdAt ?? ts, input.updatedAt ?? ts);
+    return this.getAutomation(id)!;
+  }
+
+  getAutomation(id: AutomationId): Automation | null {
+    const row = this.db.prepare(`SELECT * FROM automations WHERE id = ?`).get(id) as Row | undefined;
+    return row ? mapAutomation(row) : null;
+  }
+
+  listAutomations(workspaceId: WorkspaceId): Automation[] {
+    return (this.db.prepare(`SELECT * FROM automations WHERE workspace_id = ? ORDER BY created_at, id`).all(workspaceId) as Row[]).map(mapAutomation);
+  }
+
+  listAutomationRuns(automationId: AutomationId): AutomationRun[] {
+    return (this.db.prepare(`SELECT * FROM automation_runs WHERE automation_id = ? ORDER BY started_at, id`).all(automationId) as Row[]).map(mapAutomationRun);
+  }
+
+  getAutomationRun(id: AutomationRunId): AutomationRun | null {
+    const row = this.db.prepare(`SELECT * FROM automation_runs WHERE id = ?`).get(id) as Row | undefined;
+    return row ? mapAutomationRun(row) : null;
+  }
+
+  /** Finish a naturally terminal Automation run and release its definition. */
+  finalizeAutomationRun(
+    id: AutomationRunId,
+    status: Extract<AutomationRunStatus, "completed" | "failed">,
+    error?: string,
+  ): AutomationRun {
+    return this.transaction(() => {
+      const current = this.getAutomationRun(id);
+      if (!current) throw new Error(`Automation run not found: ${id}`);
+      if (current.status === "completed" || current.status === "failed" || current.status === "cancelled") return current;
+      const ts = now();
+      this.db.prepare(
+        `UPDATE automation_runs SET status = ?, ended_at = ?, error = ?
+         WHERE id = ? AND status IN ('queued', 'running', 'waiting')`,
+      ).run(status, ts, error ?? null, id);
+      this.db.prepare(
+        `UPDATE automations SET status = 'idle', current_run_id = NULL, updated_at = ?
+         WHERE id = ? AND current_run_id = ?`,
+      ).run(ts, current.automationId, id);
+      return this.getAutomationRun(id)!;
+    });
+  }
+
+  /** Persist a non-terminal Automation run phase without releasing ownership. */
+  updateAutomationRunStatus(
+    id: AutomationRunId,
+    status: Extract<AutomationRunStatus, "queued" | "running" | "waiting">,
+  ): AutomationRun {
+    const current = this.getAutomationRun(id);
+    if (!current) throw new Error(`Automation run not found: ${id}`);
+    if (current.status === "completed" || current.status === "failed" || current.status === "cancelled") return current;
+    if (current.status === status) return current;
+    const result = this.db.prepare(
+      `UPDATE automation_runs SET status = ? WHERE id = ? AND status IN ('queued', 'running', 'waiting')`,
+    ).run(status, id);
+    if (result.changes !== 1) throw new Error(`Automation run ${id} changed concurrently`);
+    return this.getAutomationRun(id)!;
+  }
+
+  runAutomation(id: AutomationId): AutomationRun {
+    return this.transaction(() => {
+      const automation = this.getAutomation(id);
+      if (!automation) throw new Error(`Automation not found: ${id}`);
+      if (automation.status === "disabled") throw new Error(`Automation is disabled: ${id}`);
+      if (automation.status === "running") throw new Error(`Automation is already running: ${id}`);
+      const runId = randomUUID();
+      const ts = now();
+      const taskIdByNode = new Map(automation.nodeIds.map((nodeId) => [nodeId, randomUUID()]));
+      const canvasNodes = new Map(this.listCanvasNodes(automation.workspaceId).map((node) => [node.id, node]));
+      const taskIds: TaskId[] = [];
+      this.db.prepare(
+        `INSERT INTO automation_runs (id, workspace_id, automation_id, status, task_ids_json, started_at)
+         VALUES (?, ?, ?, 'running', '[]', ?)`,
+      ).run(runId, automation.workspaceId, id, ts);
+      for (const nodeId of automation.nodeIds) {
+        const canvasNode = canvasNodes.get(nodeId);
+        const sourceTask = canvasNode?.taskId ? this.getTask(canvasNode.taskId) : null;
+        const inboundEdges = automation.edges.filter((edge) => edge.target === nodeId);
+        const dependencies = inboundEdges
+          .filter((edge) => edge.target === nodeId && (edge.type === "dependency" || edge.type === "control" || edge.type === "approval"))
+          .map((edge) => taskIdByNode.get(edge.source))
+          .filter((taskId) => taskId !== undefined);
+        const taskId = taskIdByNode.get(nodeId)!;
+        const approvalSources = inboundEdges.filter((edge) => edge.type === "approval").map((edge) => edge.source);
+        const approvalId = approvalSources.length > 0 ? randomUUID() : undefined;
+        if (approvalId) {
+          this.insertApproval({
+            id: approvalId,
+            workspaceId: automation.workspaceId,
+            taskId,
+            status: "pending",
+            requester: `automation:${automation.id}`,
+            reason: `Automation ${automation.name} requires approval before ${canvasNode?.label ?? nodeId} (after ${approvalSources.join(", ")})`,
+          });
+        }
+        this.insertTask({
+          id: taskId,
+          workspaceId: automation.workspaceId,
+          title: canvasNode?.label ?? sourceTask?.title ?? nodeId,
+          description: sourceTask?.description ?? `Automation step ${nodeId}`,
+          status: "pending",
+          assignedTo: sourceTask?.assignedTo ?? canvasNode?.harnessId ?? undefined,
+          dependencies,
+          contextRefs: sourceTask?.contextRefs ?? [],
+          priority: sourceTask?.priority ?? 0,
+          workflowNodeId: nodeId,
+          automationId: automation.id,
+          automationRunId: runId,
+          approvalId,
+        });
+        taskIds.push(taskId);
+      }
+      this.db.prepare(`UPDATE automation_runs SET task_ids_json = ? WHERE id = ?`).run(toJson(taskIds), runId);
+      this.db.prepare(`UPDATE automations SET status = 'running', current_run_id = ?, updated_at = ? WHERE id = ?`).run(runId, ts, id);
+      return mapAutomationRun(this.db.prepare(`SELECT * FROM automation_runs WHERE id = ?`).get(runId) as Row);
+    });
+  }
+
+stopAutomation(id: AutomationId): AutomationRun {
+    return this.transaction(() => {
+      const automation = this.getAutomation(id);
+      if (!automation?.currentRunId || automation.status !== "running") throw new Error(`Automation is not running: ${id}`);
+      const ts = now();
+      const run = this.db.prepare(`SELECT * FROM automation_runs WHERE id = ?`).get(automation.currentRunId) as Row;
+      const taskIds = mapAutomationRun(run).taskIds;
+      for (const taskId of taskIds) {
+        this.db.prepare(`UPDATE tasks SET status = 'cancelled', updated_at = ? WHERE id = ? AND status IN ('pending', 'assigned', 'running', 'blocked')`).run(ts, taskId);
+      }
+      // Resolve any pending approval gates owned by the stopped run so the UI
+      // does not surface a stale actionable approval. Re-rejecting an
+      // already-resolved approval is a no-op.
+      const taskParams = taskIds.map(() => "?").join(",");
+      this.db.prepare(
+        `UPDATE approvals SET status = 'rejected', approver = 'automation-stop', resolved_at = ?
+         WHERE task_id IN (${taskParams}) AND status = 'pending'`,
+      ).run(ts, ...taskIds);
+      this.db.prepare(`UPDATE automation_runs SET status = 'cancelled', ended_at = ? WHERE id = ? AND status IN ('queued', 'running', 'waiting')`).run(ts, automation.currentRunId);
+      this.db.prepare(`UPDATE automations SET status = 'stopped', current_run_id = NULL, updated_at = ? WHERE id = ?`).run(ts, id);
+      return mapAutomationRun(this.db.prepare(`SELECT * FROM automation_runs WHERE id = ?`).get(automation.currentRunId) as Row);
+    });
+  }
+
+  upsertContextZone(input: ContextZoneInput): ContextZone {
+    const id = input.id ?? randomUUID();
+    const ts = now();
+    const current = this.getContextZone(id);
+    if (current && current.workspaceId !== input.workspaceId) {
+      throw new Error(`Context zone ${id} belongs to a different workspace`);
+    }
+    const memberNodeIds = input.memberNodeIds === undefined
+      ? undefined
+      : [...new Set(input.memberNodeIds)].sort();
+    for (const nodeId of memberNodeIds ?? []) {
+      const member = this.db.prepare(`SELECT workspace_id FROM canvas_nodes WHERE id = ?`).get(nodeId) as { workspace_id: string } | undefined;
+      if (!member || member.workspace_id !== input.workspaceId) {
+        throw new Error(`Context zone member is not a canvas node in workspace ${input.workspaceId}: ${nodeId}`);
+      }
+    }
+    this.transaction(() => {
+      this.db.prepare(
+        `INSERT INTO context_zones (id, workspace_id, name, bounds_json, context_refs_json, policy_json, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET name = excluded.name, bounds_json = excluded.bounds_json,
+           context_refs_json = excluded.context_refs_json, policy_json = excluded.policy_json, updated_at = excluded.updated_at`,
+      ).run(id, input.workspaceId, input.name, toJson(input.bounds), toJson(input.contextRefs ?? []), toJson(input.policy ?? {}), ts);
+      if (memberNodeIds !== undefined) {
+        this.db.prepare(`DELETE FROM context_zone_members WHERE zone_id = ?`).run(id);
+        const insert = this.db.prepare(`INSERT INTO context_zone_members (zone_id, node_id) VALUES (?, ?)`);
+        for (const nodeId of memberNodeIds) insert.run(id, nodeId);
+      }
+    });
+    return this.getContextZone(id)!;
+  }
+
+  getContextZone(id: string): ContextZone | null {
+    const row = this.db.prepare(`SELECT * FROM context_zones WHERE id = ?`).get(id) as Row | undefined;
+    if (!row) return null;
+    const members = (this.db.prepare(`SELECT node_id FROM context_zone_members WHERE zone_id = ? ORDER BY node_id`).all(id) as Array<{ node_id: string }>).map((entry) => entry.node_id);
+    return mapContextZone(row, members);
+  }
+
+  listContextZones(workspaceId: WorkspaceId): ContextZone[] {
+    const rows = this.db.prepare(`SELECT * FROM context_zones WHERE workspace_id = ? ORDER BY id`).all(workspaceId) as Row[];
+    return rows.map((row) => this.getContextZone(row.id as string)!);
+  }
+
+  deleteContextZone(id: string): boolean {
+    return this.transaction(() => {
+      const owned = this.db.prepare(
+        `SELECT task_id, ref_key FROM context_zone_task_refs WHERE zone_id = ?`,
+      ).all(id) as Array<{ task_id: string; ref_key: string }>;
+      const deleted = this.db.prepare(`DELETE FROM context_zones WHERE id = ?`).run(id).changes > 0;
+      if (!deleted) return false;
+      const keysByTask = new Map<string, Set<string>>();
+      for (const row of owned) {
+        const keys = keysByTask.get(row.task_id) ?? new Set<string>();
+        keys.add(row.ref_key);
+        keysByTask.set(row.task_id, keys);
+      }
+      for (const [taskId, removedKeys] of keysByTask) {
+        const stillOwned = new Set(
+          (this.db.prepare(`SELECT ref_key FROM context_zone_task_refs WHERE task_id = ?`).all(taskId) as Array<{ ref_key: string }>).map((row) => row.ref_key),
+        );
+        const task = this.getTask(taskId);
+        if (!task) continue;
+        const contextRefs = task.contextRefs.filter((ref) => {
+          const key = `${ref.type}:${ref.id}`;
+          return !removedKeys.has(key) || stillOwned.has(key);
+        });
+        this.db.prepare(`UPDATE tasks SET context_refs_json = ?, updated_at = ? WHERE id = ?`).run(toJson(contextRefs), now(), taskId);
+      }
+      return true;
+    });
+  }
+
+  /**
+   * Reconcile Context Zone-derived refs while retaining non-zone task context.
+   * Provenance rows are authoritative: only refs previously inserted by this
+   * method are eligible for removal.
+   */
+  syncContextZoneRefs(workspaceId: WorkspaceId, assignments: ContextZoneRefAssignment[]): void {
+    const zones = new Map(this.listContextZones(workspaceId).map((zone) => [zone.id, zone]));
+    const desiredByTask = new Map<string, Map<string, { ref: ContextReference; zoneIds: Set<string> }>>();
+    for (const assignment of assignments) {
+      if (!zones.has(assignment.zoneId)) throw new Error(`Context zone not found in workspace: ${assignment.zoneId}`);
+      const task = this.getTask(assignment.taskId);
+      if (!task || task.workspaceId !== workspaceId) throw new Error(`Context zone task not found in workspace: ${assignment.taskId}`);
+      const refs = desiredByTask.get(assignment.taskId) ?? new Map<string, { ref: ContextReference; zoneIds: Set<string> }>();
+      for (const ref of assignment.contextRefs) {
+        const key = `${ref.type}:${ref.id}`;
+        const desired = refs.get(key) ?? { ref, zoneIds: new Set<string>() };
+        desired.zoneIds.add(assignment.zoneId);
+        refs.set(key, desired);
+      }
+      desiredByTask.set(assignment.taskId, refs);
+    }
+
+    this.transaction(() => {
+      const priorRows = this.db.prepare(
+        `SELECT p.zone_id, p.task_id, p.ref_key
+         FROM context_zone_task_refs p
+         JOIN tasks t ON t.id = p.task_id
+         WHERE t.workspace_id = ?`,
+      ).all(workspaceId) as Array<{ zone_id: string; task_id: string; ref_key: string }>;
+      const priorKeysByTask = new Map<string, Set<string>>();
+      for (const row of priorRows) {
+        const keys = priorKeysByTask.get(row.task_id) ?? new Set<string>();
+        keys.add(row.ref_key);
+        priorKeysByTask.set(row.task_id, keys);
+      }
+      const affectedTaskIds = new Set([...priorKeysByTask.keys(), ...desiredByTask.keys()]);
+      this.db.prepare(
+        `DELETE FROM context_zone_task_refs
+         WHERE task_id IN (SELECT id FROM tasks WHERE workspace_id = ?)`,
+      ).run(workspaceId);
+      const insertOwnership = this.db.prepare(
+        `INSERT INTO context_zone_task_refs (zone_id, task_id, ref_key, ref_json) VALUES (?, ?, ?, ?)`,
+      );
+
+      for (const taskId of affectedTaskIds) {
+        const task = this.getTask(taskId);
+        if (!task || task.workspaceId !== workspaceId) continue;
+        const priorKeys = priorKeysByTask.get(taskId) ?? new Set<string>();
+        const baseRefs = new Map<string, ContextReference>();
+        for (const ref of task.contextRefs) {
+          const key = `${ref.type}:${ref.id}`;
+          if (!priorKeys.has(key)) baseRefs.set(key, ref);
+        }
+        const desiredRefs = desiredByTask.get(taskId) ?? new Map<string, { ref: ContextReference; zoneIds: Set<string> }>();
+        const nextRefs = new Map(baseRefs);
+        for (const [key, desired] of desiredRefs) {
+          if (!nextRefs.has(key)) {
+            nextRefs.set(key, desired.ref);
+            for (const zoneId of [...desired.zoneIds].sort()) {
+              insertOwnership.run(zoneId, taskId, key, toJson(desired.ref));
+            }
+          }
+        }
+        this.db.prepare(`UPDATE tasks SET context_refs_json = ?, updated_at = ? WHERE id = ?`)
+          .run(toJson([...nextRefs.values()]), now(), taskId);
+      }
+    });
   }
 
   getWorkspaceSnapshot(workspaceId: WorkspaceId): WorkspaceSnapshot {
@@ -767,6 +1325,20 @@ export class Repository {
       const plans = (
         this.db.prepare(`SELECT * FROM plans WHERE workspace_id = ? ORDER BY created_at, id`).all(workspaceId) as Row[]
       ).map(mapPlan);
+      const missions = (
+        this.db.prepare(`SELECT * FROM missions WHERE workspace_id = ? ORDER BY created_at, id`).all(workspaceId) as Row[]
+      ).map(mapMission);
+      const automations = (
+        this.db.prepare(`SELECT * FROM automations WHERE workspace_id = ? ORDER BY created_at, id`).all(workspaceId) as Row[]
+      ).map(mapAutomation);
+      const automationRuns = (
+        this.db.prepare(`SELECT * FROM automation_runs WHERE workspace_id = ? ORDER BY started_at, id`).all(workspaceId) as Row[]
+      ).map(mapAutomationRun);
+      const contextZoneRows = this.db.prepare(`SELECT * FROM context_zones WHERE workspace_id = ? ORDER BY id`).all(workspaceId) as Row[];
+      const contextZones = contextZoneRows.map((row) => {
+        const members = (this.db.prepare(`SELECT node_id FROM context_zone_members WHERE zone_id = ? ORDER BY node_id`).all(row.id as string) as Array<{ node_id: string }>).map((entry) => entry.node_id);
+        return mapContextZone(row, members);
+      });
       const approvals = (
         this.db.prepare(`SELECT * FROM approvals WHERE workspace_id = ? ORDER BY created_at, id`).all(workspaceId) as Row[]
       ).map(mapApproval);
@@ -788,6 +1360,10 @@ export class Repository {
         decisions,
         events,
         plans,
+        missions,
+        automations,
+        automationRuns,
+        contextZones,
         approvals,
         canvasNodes: canvasNodes.map(mapCanvasNodeRecord),
         canvasEdges: canvasEdges.map(mapCanvasEdgeRecord),
@@ -814,9 +1390,9 @@ export class Repository {
       .prepare(
         `INSERT INTO tasks (
            id, workspace_id, title, description, status, assigned_to, parent_task_id,
-           approval_id, context_refs_json, priority, workflow_node_id, retry_count, error,
-           result_summary, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           mission_id, automation_id, automation_run_id, approval_id, context_refs_json, priority,
+           workflow_node_id, retry_count, error, result_summary, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         id,
@@ -826,6 +1402,9 @@ export class Repository {
         input.status,
         input.assignedTo ?? null,
         input.parentTaskId ?? null,
+        input.missionId ?? null,
+        input.automationId ?? null,
+        input.automationRunId ?? null,
         input.approvalId ?? null,
         toJson(input.contextRefs ?? []),
         input.priority ?? 0,
@@ -862,6 +1441,9 @@ export class Repository {
       status: patch.status ?? current.status,
       assignedTo: patch.assignedTo !== undefined ? patch.assignedTo : current.assignedTo,
       parentTaskId: patch.parentTaskId !== undefined ? patch.parentTaskId : current.parentTaskId,
+      missionId: patch.missionId !== undefined ? patch.missionId : current.missionId,
+      automationId: patch.automationId !== undefined ? patch.automationId : current.automationId,
+      automationRunId: patch.automationRunId !== undefined ? patch.automationRunId : current.automationRunId,
       priority: patch.priority ?? current.priority,
       workflowNodeId: patch.workflowNodeId !== undefined ? patch.workflowNodeId : current.workflowNodeId,
       approvalId: patch.approvalId !== undefined ? patch.approvalId : current.approvalId,
@@ -874,7 +1456,8 @@ export class Repository {
     this.db
       .prepare(
         `UPDATE tasks SET
-           title = ?, description = ?, status = ?, assigned_to = ?, parent_task_id = ?, approval_id = ?,
+           title = ?, description = ?, status = ?, assigned_to = ?, parent_task_id = ?,
+           mission_id = ?, automation_id = ?, automation_run_id = ?, approval_id = ?,
            priority = ?, workflow_node_id = ?, retry_count = ?, error = ?,
            result_summary = ?, updated_at = ?
          WHERE id = ?`,
@@ -885,6 +1468,9 @@ export class Repository {
         next.status,
         next.assignedTo ?? null,
         next.parentTaskId ?? null,
+        next.missionId ?? null,
+        next.automationId ?? null,
+        next.automationRunId ?? null,
         next.approvalId ?? null,
         next.priority,
         next.workflowNodeId ?? null,
@@ -915,9 +1501,15 @@ export class Repository {
     if (!current) {
       throw new Error(`Task not found: ${id}`);
     }
-    this.db
-      .prepare(`UPDATE tasks SET context_refs_json = ?, updated_at = ? WHERE id = ?`)
-      .run(toJson(contextRefs), now(), id);
+    this.transaction(() => {
+      // This API is an authoritative write by a non-zone source (currently
+      // canvas-edge context). Relinquish zone ownership first so a later zone
+      // removal can never erase a ref that this source now supplies as well.
+      this.db.prepare(`DELETE FROM context_zone_task_refs WHERE task_id = ?`).run(id);
+      this.db
+        .prepare(`UPDATE tasks SET context_refs_json = ?, updated_at = ? WHERE id = ?`)
+        .run(toJson(contextRefs), now(), id);
+    });
     return this.getTask(id)!;
   }
 
@@ -1299,6 +1891,32 @@ export class Repository {
     ).map(mapArtifact);
   }
 
+  insertDecision(input: Decision): Decision {
+    this.db.prepare(
+      `INSERT INTO decisions (id, workspace_id, type, summary, payload_json, made_by, timestamp, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      input.id,
+      input.workspaceId,
+      input.type,
+      input.summary,
+      toJson(input.payload),
+      input.madeBy,
+      input.timestamp,
+      input.status,
+    );
+    return this.getDecision(input.id)!;
+  }
+
+  getDecision(id: string): Decision | null {
+    const row = this.db.prepare(`SELECT * FROM decisions WHERE id = ?`).get(id) as Row | undefined;
+    return row ? mapDecision(row) : null;
+  }
+
+  listDecisions(workspaceId: WorkspaceId): Decision[] {
+    return (this.db.prepare(`SELECT * FROM decisions WHERE workspace_id = ? ORDER BY timestamp, id`).all(workspaceId) as Row[]).map(mapDecision);
+  }
+
   // -------------------------------------------------------------------------
   // Templates (UI workflow templates)
   // -------------------------------------------------------------------------
@@ -1384,19 +2002,28 @@ export class Repository {
     nodeType?: "blueprint" | "proxy";
     kind?: string;
     harnessId?: string | null;
+    liveStatus?: CanvasNode["liveStatus"];
+    config?: Record<string, unknown>;
     position?: { x: number; y: number };
   }): void {
+    const existingRow = this.db.prepare(`SELECT * FROM canvas_nodes WHERE id = ?`).get(rec.id) as Row | undefined;
+    const existing = existingRow ? mapCanvasNode(existingRow) : null;
+    if (existing && existing.workspaceId !== rec.workspaceId) {
+      throw new Error(`Canvas node ${rec.id} belongs to a different workspace`);
+    }
     this.db
       .prepare(
         `INSERT INTO canvas_nodes
-           (id, workspace_id, task_id, label, node_type, kind, harness_id, position_x, position_y, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           (id, workspace_id, task_id, label, node_type, kind, harness_id, live_status, config_json, position_x, position_y, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            task_id = excluded.task_id,
            label = excluded.label,
            node_type = excluded.node_type,
            kind = excluded.kind,
            harness_id = excluded.harness_id,
+           live_status = excluded.live_status,
+           config_json = excluded.config_json,
            position_x = excluded.position_x,
            position_y = excluded.position_y,
            updated_at = excluded.updated_at`,
@@ -1404,13 +2031,15 @@ export class Repository {
       .run(
         rec.id,
         rec.workspaceId,
-        rec.taskId ?? null,
-        rec.label,
-        rec.nodeType ?? "blueprint",
-        rec.kind ?? "agent",
-        rec.harnessId ?? null,
-        rec.position?.x ?? 0,
-        rec.position?.y ?? 0,
+        rec.taskId !== undefined ? rec.taskId : existing?.taskId ?? null,
+        rec.label ?? existing?.label ?? rec.id,
+        rec.nodeType ?? existing?.nodeType ?? "blueprint",
+        rec.kind ?? existing?.kind ?? "agent",
+        rec.harnessId !== undefined ? rec.harnessId : existing?.harnessId ?? null,
+        rec.liveStatus ?? existing?.liveStatus ?? "offline",
+        toJson(rec.config ?? existing?.config ?? {}),
+        rec.position?.x ?? existing?.positionX ?? 0,
+        rec.position?.y ?? existing?.positionY ?? 0,
         now(),
       );
   }
@@ -1419,26 +2048,28 @@ export class Repository {
     workspaceId: WorkspaceId;
     source: string;
     target: string;
+    type?: CanvasEdgeType;
     sourceHandle?: string | null;
     targetHandle?: string | null;
   }): void {
     this.db
       .prepare(
         `INSERT INTO canvas_edges
-           (id, workspace_id, source, target, source_handle, target_handle, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(source, target) DO UPDATE SET
+           (id, workspace_id, source, target, source_handle, target_handle, edge_type, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(source, target, edge_type) DO UPDATE SET
            source_handle = excluded.source_handle,
            target_handle = excluded.target_handle,
            updated_at = excluded.updated_at`,
       )
       .run(
-        `${rec.source}->${rec.target}`,
+        rec.type && rec.type !== "context" ? `${rec.source}->${rec.target}:${rec.type}` : `${rec.source}->${rec.target}`,
         rec.workspaceId,
         rec.source,
         rec.target,
         rec.sourceHandle ?? null,
         rec.targetHandle ?? null,
+        rec.type ?? "context",
         now(),
       );
   }
@@ -1465,4 +2096,3 @@ export class Repository {
       .map((r) => mapCanvasEdge(r as Row));
   }
 }
-
