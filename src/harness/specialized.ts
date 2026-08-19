@@ -1,29 +1,25 @@
-/**
- * Chef P0 — Specialized CLI harness base (Phase 8)
- *
- * Shared implementation for the Claude Code / Pi / OMP / Freebuff adapters:
- * binary detection + spawn config, running through the generic PTY harness
- * (which owns session tracking, sidebands, and teardown). Every adapter
- * method delegates to an internal GenericTerminalHarness — no duplicated
- * PTY logic.
- */
-
+/** Persistent specialized CLI adapter backed by one GenericTerminalHarness. */
+import { access } from "node:fs/promises";
+import { constants } from "node:fs";
+import { delimiter, isAbsolute, join } from "node:path";
 import { GenericTerminalHarness } from "./generic.ts";
 import type { HarnessEvent, HarnessSession, SpawnOptions } from "./generic.ts";
-import type { SpawnConfig } from "../core/types.ts";
+import type { ContextReference } from "./sideband.ts";
 
 export interface SpecializedCliOptions {
   id: string;
   type: string;
   name: string;
   binary: string;
-  /** Extra CLI flags applied to every spawn. */
   flags?: string[];
-  /** Env merged over process.env for every spawn. */
   env?: Record<string, string | undefined>;
-  /** Default working directory (falls back to process.cwd()). */
   cwd?: string;
+  workspaceId?: string;
+  sidebandRoot?: string;
+  pollIntervalMs?: number;
 }
+
+export type SpecializedSpawnOptions = SpawnOptions;
 
 export class SpecializedCliHarness {
   readonly id: string;
@@ -32,110 +28,83 @@ export class SpecializedCliHarness {
   readonly #binary: string;
   readonly #flags: string[];
   readonly #env: Record<string, string | undefined>;
-  readonly #cwd: string | undefined;
+  readonly #cwd: string;
+  readonly #harness: GenericTerminalHarness;
+  #closePromise: Promise<void> | undefined;
 
   constructor(options: SpecializedCliOptions) {
     this.id = options.id;
     this.type = options.type;
     this.name = options.name;
     this.#binary = options.binary;
-    this.#flags = options.flags ?? [];
-    this.#env = options.env ?? {};
-    this.#cwd = options.cwd;
+    this.#flags = [...(options.flags ?? [])];
+    this.#env = { ...(options.env ?? {}) };
+    this.#cwd = options.cwd ?? process.cwd();
+    this.#harness = new GenericTerminalHarness(
+      {
+        agentId: options.id,
+        workspaceId: options.workspaceId ?? "specialized",
+        command: this.#binary,
+        args: this.#flags,
+        cwd: this.#cwd,
+        env: this.#env,
+      },
+      { sidebandRoot: options.sidebandRoot, pollIntervalMs: options.pollIntervalMs },
+    );
   }
 
-  /** Scheduler-compatible command surface (resolved at spawn time). */
-  get command(): string {
-    return this.#binary;
-  }
-  get args(): string[] {
-    return [...this.#flags];
-  }
-  get cwd(): string {
-    return this.#cwd ?? process.cwd();
-  }
+  get command(): string { return this.#binary; }
+  get args(): string[] { return [...this.#flags]; }
+  get cwd(): string { return this.#cwd; }
 
-  /** Binary availability on PATH (absolute paths pass through). */
   async detect(): Promise<boolean> {
-    const { access } = await import("node:fs/promises");
-    if (this.#binary.includes("/")) {
-      try {
-        await access(this.#binary);
-        return true;
-      } catch {
-        return false;
-      }
+    if (isAbsolute(this.#binary) || this.#binary.includes("/") || this.#binary.includes("\\")) {
+      return this.#canAccess(this.#binary);
     }
-    const { delimiter } = await import("node:path");
+    const extensions = process.platform === "win32"
+      ? ["", ...(process.env.PATHEXT ?? ".EXE;.CMD;.BAT;.COM").split(";").filter(Boolean)]
+      : [""];
     for (const dir of (process.env.PATH ?? "").split(delimiter)) {
-      if (dir === "") continue;
-      try {
-        await access(`${dir}/${this.#binary}`);
-        return true;
-      } catch {
-        // keep walking
+      if (!dir) continue;
+      for (const extension of extensions) {
+        if (await this.#canAccess(join(dir, this.#binary + extension))) return true;
       }
     }
     return false;
   }
 
-  /** Spawn a session through the generic PTY harness. */
-  async spawn(config: SpawnConfig): Promise<HarnessSession> {
-    const cwd = config.cwd ?? this.#cwd ?? process.cwd();
-    const harness = new GenericTerminalHarness({
-      agentId: config.workspaceId,
-      workspaceId: config.workspaceId,
-      command: this.#binary,
-      args: this.#flags,
-      cwd,
-      env: this.#env,
-    });
-    return harness.spawn(this.#spawnOptions(config, cwd));
+  async #canAccess(path: string): Promise<boolean> {
+    try {
+      await access(path, process.platform === "win32" ? constants.F_OK : constants.X_OK);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
-  #spawnOptions(config: SpawnConfig, cwd: string): SpawnOptions {
-    return {
-      sessionId: config.workspaceId,
+  spawn(options: SpecializedSpawnOptions = {}): Promise<HarnessSession> {
+    return this.#harness.spawn({
+      sessionId: options.sessionId,
       command: this.#binary,
       args: this.#flags,
-      cwd,
-      env: this.#env,
-      cols: config.cols ?? 120,
-      rows: config.rows ?? 40,
-    };
-  }
-
-  /** Delegate live-session control to a generic harness for the given session. */
-  #harnessFor(): GenericTerminalHarness {
-    return new GenericTerminalHarness({
-      agentId: "specialized",
-      workspaceId: "specialized",
-      command: this.#binary,
-      args: this.#flags,
-      cwd: this.#cwd,
-      env: this.#env,
+      cwd: options.cwd ?? this.#cwd,
+      env: { ...this.#env, ...options.env },
+      cols: options.cols ?? 120,
+      rows: options.rows ?? 40,
     });
   }
 
-  async send(sessionId: string, input: string): Promise<void> {
-    await this.#harnessFor().send(sessionId, input);
-  }
-  async resize(sessionId: string, cols: number, rows: number): Promise<void> {
-    await this.#harnessFor().resize(sessionId, cols, rows);
-  }
-  async interrupt(sessionId: string): Promise<void> {
-    await this.#harnessFor().interrupt(sessionId);
-  }
-  async terminate(sessionId: string): Promise<void> {
-    await this.#harnessFor().terminate(sessionId);
-  }
-  async kill(sessionId: string): Promise<void> {
-    await this.#harnessFor().kill(sessionId);
-  }
-  events(sessionId: string): AsyncIterable<HarnessEvent> {
-    return this.#harnessFor().events(sessionId);
-  }
-  async close(): Promise<void> {
-    await this.#harnessFor().close();
+  send(sessionId: string, input: string): Promise<void> { return this.#harness.send(sessionId, input); }
+  resize(sessionId: string, cols: number, rows: number): Promise<void> { return this.#harness.resize(sessionId, cols, rows); }
+  interrupt(sessionId: string): Promise<void> { return this.#harness.interrupt(sessionId); }
+  terminate(sessionId: string): Promise<void> { return this.#harness.terminate(sessionId); }
+  kill(sessionId: string): Promise<void> { return this.#harness.kill(sessionId); }
+  events(sessionId: string): AsyncIterable<HarnessEvent> { return this.#harness.events(sessionId); }
+  writeContextRefs(sessionId: string, refs: ContextReference[]): Promise<string> { return this.#harness.writeContextRefs(sessionId, refs); }
+  writeMessage(sessionId: string, from: string, text: string): Promise<string> { return this.#harness.writeMessage(sessionId, from, text); }
+  forget(sessionId: string): Promise<void> { return this.#harness.forget(sessionId); }
+  close(): Promise<void> {
+    this.#closePromise ??= this.#harness.close();
+    return this.#closePromise;
   }
 }

@@ -6,12 +6,14 @@ import type {
   Artifact,
   CanvasEdge,
   CanvasNode,
+  CanvasNodeKind,
   CanvasPatch,
   CanvasPatchResult,
   ContextReference,
   Decision,
   DecisionProvider,
   HarnessEvent,
+  Mission,
   OrchestratorResult,
   Plan,
   PlanProposalContext,
@@ -55,9 +57,10 @@ export interface HarnessRegistry {
 
 /** Runtime surface the orchestrator drives (the scheduler). */
 export interface RuntimeAdapter {
-  dispatchPending(workspaceId: WorkspaceId): Promise<number>;
+  dispatchPending(workspaceId: WorkspaceId, allowedTaskIds?: readonly TaskId[]): Promise<number>;
   handleSessionEvent(workspaceId: WorkspaceId, sessionId: string, event: HarnessEvent): Promise<void>;
   recoverOnStartup(workspaceId: WorkspaceId): Promise<void>;
+  cancelTask(workspaceId: WorkspaceId, taskId: TaskId): Promise<void>;
 }
 
 /** Decision provider that can also supply the harnesses for its agents. */
@@ -181,6 +184,8 @@ export class Orchestrator {
   readonly #onEvent: ((event: RuntimeEvent) => void) | undefined;
   #activePlan: Plan | null = null;
   readonly #terminalEvents = new Map<TaskId, string>();
+  readonly #missionControllers = new Map<string, AbortController>();
+  readonly #missionEpochs = new Map<string, number>();
 
   constructor(options: OrchestratorOptions) {
     this.#repository = options.repository;
@@ -193,6 +198,10 @@ export class Orchestrator {
   }
 
   async handleUserMessage(workspaceId: WorkspaceId, message: string): Promise<OrchestratorResult> {
+    const mission = this.#repository.insertMission({ workspaceId, goal: message, createdBy: "user", status: "planning" });
+    const missionEpoch = 0;
+    this.#missionEpochs.set(mission.id, missionEpoch);
+    this.#appendEvent(workspaceId, { type: "mission.created", payload: { missionId: mission.id, goal: message, status: mission.status } });
     this.#repository.insertMessage({ workspaceId, from: "user", type: "message", payload: { text: message } });
     this.#appendEvent(workspaceId, { type: "orchestrator.user_message", payload: { text: message } });
 
@@ -200,39 +209,60 @@ export class Orchestrator {
     try {
       plan = await this.#decisionProvider.proposePlan({ workspaceId, goal: message });
     } catch (error) {
+      if (this.#ownsPlanningAttempt(mission.id, missionEpoch)) this.#repository.updateMission(mission.id, { status: "failed" });
       this.#appendEvent(workspaceId, { type: "orchestrator.plan.error", payload: { error: error instanceof Error ? error.message : String(error) } });
       return { workspaceId, taskIds: [], report: `Plan proposal failed: ${error instanceof Error ? error.message : String(error)}`, ok: false };
     }
     if (!plan) {
+      if (this.#ownsPlanningAttempt(mission.id, missionEpoch)) this.#repository.updateMission(mission.id, { status: "failed" });
       this.#appendEvent(workspaceId, { type: "orchestrator.plan.none", payload: { goal: message } });
       return { workspaceId, taskIds: [], report: `No plan proposed for: ${message}`, ok: false };
     }
+    const missionBeforeActivation = this.#repository.getMission(mission.id);
+    if (missionBeforeActivation?.status !== "planning" || this.#missionEpochs.get(mission.id) !== missionEpoch) {
+      return { workspaceId, taskIds: [], report: `Mission ${mission.id} was ${missionBeforeActivation?.status ?? "removed"} before execution`, ok: false };
+    }
+    plan.missionId = mission.id;
     this.#repository.insertPlan({
       id: plan.id,
       workspaceId,
       goal: plan.goal,
+      missionId: mission.id,
       status: "proposed",
       tasks: plan.tasks,
       taskIds: plan.taskIds,
       createdAt: plan.createdAt,
     });
+    this.#repository.updateMission(mission.id, { status: "active", planId: plan.id, taskIds: plan.taskIds });
+    this.#appendEvent(workspaceId, { type: "mission.status", payload: { missionId: mission.id, status: "active", planId: plan.id } });
     this.#appendEvent(workspaceId, { type: "orchestrator.plan.proposed", payload: { planId: plan.id, goal: plan.goal, taskIds: plan.taskIds } });
     const controller = new AbortController();
+    this.#missionControllers.set(mission.id, controller);
     let executionError: string | undefined;
     try {
       await this.#withTimeout(this.#executePlan(workspaceId, plan, controller.signal), `plan ${plan.id}`, controller);
     } catch (error) {
       executionError = error instanceof Error ? error.message : String(error);
+    } finally {
+      if (this.#missionControllers.get(mission.id) === controller) this.#missionControllers.delete(mission.id);
     }
     const finalStatus = executionError ? "failed" : "completed";
     plan.status = finalStatus;
     this.#repository.updatePlanStatus(plan.id, finalStatus);
+    const attemptOwner = this.#repository.getMission(mission.id);
+    if (attemptOwner?.status !== "active" || attemptOwner.planId !== plan.id) {
+      const report = `Mission attempt ${plan.id} was interrupted by ${attemptOwner?.status ?? "mission removal"}.`;
+      this.#appendEvent(workspaceId, { type: "orchestrator.plan.interrupted", payload: { missionId: mission.id, planId: plan.id, status: attemptOwner?.status } });
+      return { workspaceId, taskIds: plan.taskIds, report, ok: false };
+    }
 
     const snapshot = this.#repository.getWorkspaceSnapshot(workspaceId);
     const tasks = snapshot.tasks.filter((t) => plan.taskIds.includes(t.id));
     const artifacts = snapshot.artifacts.filter((a) => a.taskId !== undefined && plan.taskIds.includes(a.taskId));
     const failed = tasks.some((t) => t.status === "failed" || t.status === "cancelled");
     const ok = !executionError && !failed;
+    this.#repository.updateMission(mission.id, { status: ok ? "completed" : "failed", taskIds: plan.taskIds });
+    this.#appendEvent(workspaceId, { type: "mission.status", payload: { missionId: mission.id, status: ok ? "completed" : "failed" } });
     const report = this.#buildReport(plan, tasks, artifacts, executionError);
     const artifactIds = artifacts.map((a) => a.id);
 
@@ -253,6 +283,10 @@ export class Orchestrator {
   /** Chat-specific entry: same plan pipeline as handleUserMessage, but with
    *  chat.* SSE events for the Console chat tab. */
   async handleChatMessage(workspaceId: WorkspaceId, message: string): Promise<OrchestratorResult> {
+    const mission = this.#repository.insertMission({ workspaceId, goal: message, createdBy: "user", status: "planning" });
+    const missionEpoch = 0;
+    this.#missionEpochs.set(mission.id, missionEpoch);
+    this.#appendEvent(workspaceId, { type: "mission.created", payload: { missionId: mission.id, goal: message, status: mission.status } });
     this.#repository.insertMessage({
       workspaceId,
       from: "user",
@@ -267,24 +301,35 @@ export class Orchestrator {
     try {
       plan = await this.#decisionProvider.proposePlan({ workspaceId, goal: message });
     } catch (error) {
+      if (this.#ownsPlanningAttempt(mission.id, missionEpoch)) this.#repository.updateMission(mission.id, { status: "failed" });
       const err = error instanceof Error ? error.message : String(error);
       this.#appendEvent(workspaceId, { type: "chat.plan.error", payload: { error: err, goal: message } });
       return { workspaceId, taskIds: [], report: `Plan proposal failed: ${err}`, ok: false };
     }
     if (!plan) {
+      if (this.#ownsPlanningAttempt(mission.id, missionEpoch)) this.#repository.updateMission(mission.id, { status: "failed" });
       this.#appendEvent(workspaceId, { type: "chat.plan.none", payload: { goal: message } });
       return { workspaceId, taskIds: [], report: `No plan proposed for: ${message}`, ok: false };
     }
 
+    const missionBeforeActivation = this.#repository.getMission(mission.id);
+    if (missionBeforeActivation?.status !== "planning" || this.#missionEpochs.get(mission.id) !== missionEpoch) {
+      return { workspaceId, taskIds: [], report: `Mission ${mission.id} was ${missionBeforeActivation?.status ?? "removed"} before execution`, ok: false };
+    }
+
+    plan.missionId = mission.id;
     this.#repository.insertPlan({
       id: plan.id,
       workspaceId,
       goal: plan.goal,
+      missionId: mission.id,
       status: "proposed",
       tasks: plan.tasks,
       taskIds: plan.taskIds,
       createdAt: plan.createdAt,
     });
+    this.#repository.updateMission(mission.id, { status: "active", planId: plan.id, taskIds: plan.taskIds });
+    this.#appendEvent(workspaceId, { type: "mission.status", payload: { missionId: mission.id, status: "active", planId: plan.id } });
     this.#appendEvent(workspaceId, {
       type: "chat.plan.proposed",
       payload: { planId: plan.id, goal: plan.goal, taskIds: plan.taskIds, taskCount: plan.tasks.length },
@@ -294,6 +339,7 @@ export class Orchestrator {
     // before it can be applied (spec §12). Invalid proposals are reported
     // back to the user rather than silently applied.
     const controller = new AbortController();
+    this.#missionControllers.set(mission.id, controller);
     let executionError: string | undefined;
     try {
       await this.#withTimeout(this.#executePlan(workspaceId, plan, controller.signal), `plan ${plan.id}`, controller);
@@ -301,10 +347,18 @@ export class Orchestrator {
     } catch (error) {
       executionError = error instanceof Error ? error.message : String(error);
       this.#appendEvent(workspaceId, { type: "chat.plan.applied", payload: { planId: plan.id, status: "failed", error: executionError } });
+    } finally {
+      if (this.#missionControllers.get(mission.id) === controller) this.#missionControllers.delete(mission.id);
     }
     const finalStatus = executionError ? "failed" : "completed";
     plan.status = finalStatus;
     this.#repository.updatePlanStatus(plan.id, finalStatus);
+    const attemptOwner = this.#repository.getMission(mission.id);
+    if (attemptOwner?.status !== "active" || attemptOwner.planId !== plan.id) {
+      const report = `Mission attempt ${plan.id} was interrupted by ${attemptOwner?.status ?? "mission removal"}.`;
+      this.#appendEvent(workspaceId, { type: "chat.plan.interrupted", payload: { missionId: mission.id, planId: plan.id, status: attemptOwner?.status } });
+      return { workspaceId, taskIds: plan.taskIds, report, ok: false };
+    }
 
     // Materialize the plan as a durable canvas graph (spawn + connect + arrange).
     // Canvas failure is non-fatal: the plan already executed; the canvas
@@ -320,7 +374,7 @@ export class Orchestrator {
           nodeType: "blueprint",
         })),
         upsertEdges: plan.tasks.flatMap((t) =>
-          t.dependencies.map((dep) => ({ source: dep, target: t.id })),
+          t.dependencies.map((dep) => ({ source: dep, target: t.id, type: "dependency" as const })),
         ),
         arrange: { mode: "columns" },
       });
@@ -333,6 +387,8 @@ export class Orchestrator {
     const artifacts = snapshot.artifacts.filter((a) => a.taskId !== undefined && plan.taskIds.includes(a.taskId));
     const failed = tasks.some((t) => t.status === "failed" || t.status === "cancelled");
     const ok = !executionError && !failed;
+    this.#repository.updateMission(mission.id, { status: ok ? "completed" : "failed", taskIds: plan.taskIds });
+    this.#appendEvent(workspaceId, { type: "mission.status", payload: { missionId: mission.id, status: ok ? "completed" : "failed" } });
     const report = this.#buildReport(plan, tasks, artifacts, executionError);
     const artifactIds = artifacts.map((a) => a.id);
 
@@ -355,6 +411,60 @@ export class Orchestrator {
     return this.#repository.getWorkspaceSnapshot(workspaceId);
   }
 
+  async pauseMission(workspaceId: WorkspaceId, missionId: string): Promise<Mission> {
+    const mission = this.#requireMission(workspaceId, missionId);
+    if (mission.status === "completed" || mission.status === "failed" || mission.status === "cancelled") {
+      throw new Error(`Mission ${missionId} is already terminal (${mission.status})`);
+    }
+    this.#bumpMissionEpoch(missionId);
+    const paused = this.#repository.updateMission(missionId, { status: "paused" });
+    this.#appendEvent(workspaceId, { type: "mission.status", payload: { missionId, status: "paused" } });
+    this.#missionControllers.get(missionId)?.abort();
+    await this.#cancelMissionTasks(workspaceId, paused.taskIds);
+    return this.#repository.getMission(missionId)!;
+  }
+
+  resumeMission(workspaceId: WorkspaceId, missionId: string): Mission {
+    const mission = this.#requireMission(workspaceId, missionId);
+    if (mission.status !== "paused") throw new Error(`Mission ${missionId} is not paused`);
+    const missionEpoch = this.#bumpMissionEpoch(missionId);
+    const planning = this.#repository.updateMission(missionId, { status: "planning" });
+    this.#appendEvent(workspaceId, { type: "mission.status", payload: { missionId, status: "planning", resumed: true } });
+    void this.#restartMission(workspaceId, missionId, missionEpoch);
+    return planning;
+  }
+
+  async cancelMission(workspaceId: WorkspaceId, missionId: string): Promise<Mission> {
+    const mission = this.#requireMission(workspaceId, missionId);
+    if (mission.status === "completed" || mission.status === "failed") {
+      throw new Error(`Mission ${missionId} is already terminal (${mission.status})`);
+    }
+    if (mission.status !== "cancelled") {
+      this.#bumpMissionEpoch(missionId);
+      this.#repository.updateMission(missionId, { status: "cancelled" });
+      this.#appendEvent(workspaceId, { type: "mission.status", payload: { missionId, status: "cancelled" } });
+    }
+    this.#missionControllers.get(missionId)?.abort();
+    await this.#cancelMissionTasks(workspaceId, mission.taskIds);
+    return this.#repository.getMission(missionId)!;
+  }
+
+  async redirectMission(workspaceId: WorkspaceId, missionId: string, goal: string): Promise<Mission> {
+    const mission = this.#requireMission(workspaceId, missionId);
+    if (mission.status === "completed" || mission.status === "failed" || mission.status === "cancelled") {
+      throw new Error(`Mission ${missionId} is already terminal (${mission.status})`);
+    }
+    this.#missionControllers.get(missionId)?.abort();
+    const missionEpoch = this.#bumpMissionEpoch(missionId);
+    // Claim the redirected attempt before asynchronous teardown. A subsequent
+    // redirect can then supersede this token while the old tasks are stopping.
+    const redirected = this.#repository.updateMission(missionId, { goal, status: "planning" });
+    this.#appendEvent(workspaceId, { type: "mission.redirected", payload: { missionId, goal } });
+    await this.#cancelMissionTasks(workspaceId, mission.taskIds);
+    void this.#restartMission(workspaceId, missionId, missionEpoch);
+    return redirected;
+  }
+
   async patchCanvasGraph(workspaceId: WorkspaceId, patch: CanvasPatch): Promise<CanvasPatchResult> {
     // Node / edge reference validation — edges must reference nodes that
     // exist AFTER this patch's upserts are applied, and self-loops are rejected.
@@ -366,6 +476,9 @@ export class Orchestrator {
     const ids = new Set(this.#repository.listCanvasNodes(workspaceId).map((n) => n.id));
     for (const node of patch.upsertNodes ?? []) ids.add(node.id);
     for (const ed of patch.upsertEdges ?? []) {
+      if (!["communication", "context", "delegation", "dependency", "control", "error", "approval"].includes(ed.type ?? "context")) {
+        return this.#patchFailure(workspaceId, `invalid edge type ${String(ed.type)}`);
+      }
       if (ed.source === ed.target) return this.#patchFailure(workspaceId, `self-loop edge ${ed.source}->${ed.target}`);
       if (!ids.has(ed.source)) return this.#patchFailure(workspaceId, `edge references missing node ${ed.source}`);
       if (!ids.has(ed.target)) return this.#patchFailure(workspaceId, `edge references missing node ${ed.target}`);
@@ -380,7 +493,10 @@ export class Orchestrator {
           this.#deleteCanvasEdgesFor(workspaceId, id);
           this.#repository.deleteCanvasNode(id);
         }
-        for (const ed of patch.deleteEdges ?? []) this.#repository.deleteCanvasEdge(`${ed.source}->${ed.target}`);
+        for (const ed of patch.deleteEdges ?? []) {
+          const edgeId = ed.type && ed.type !== "context" ? `${ed.source}->${ed.target}:${ed.type}` : `${ed.source}->${ed.target}`;
+          this.#repository.deleteCanvasEdge(edgeId);
+        }
       });
     } catch (error) {
       return this.#patchFailure(workspaceId, error instanceof Error ? error.message : String(error));
@@ -392,7 +508,7 @@ export class Orchestrator {
     const allEdges = this.#repository.listCanvasEdges(workspaceId);
     const affectedTargets = new Set<string>();
     for (const ed of [...(patch.upsertEdges ?? []), ...(patch.deleteEdges ?? [])]) {
-      affectedTargets.add(ed.target);
+      if ((ed.type ?? "context") === "context") affectedTargets.add(ed.target);
     }
     for (const id of patch.deleteNodes ?? []) {
       for (const edge of allEdges) if (edge.source === id || edge.target === id) affectedTargets.add(edge.target);
@@ -420,6 +536,8 @@ export class Orchestrator {
             kind: nd.kind,
             nodeType: nd.nodeType,
             harnessId: nd.harnessId,
+            liveStatus: nd.liveStatus,
+            config: nd.config,
             position,
           });
         }
@@ -436,6 +554,31 @@ export class Orchestrator {
       nodes: this.#repository.listCanvasNodes(workspaceId).map((n) => this.#mapToCanvasNode(n)),
       edges: this.#repository.listCanvasEdges(workspaceId).map((e) => this.#mapToCanvasEdge(e)),
     };
+  }
+
+  activateCanvasNode(workspaceId: WorkspaceId, nodeId: string): CanvasNode {
+    const node = this.#repository.listCanvasNodes(workspaceId).find((candidate) => candidate.id === nodeId);
+    if (!node) throw new Error(`Canvas node not found: ${nodeId}`);
+    this.#repository.upsertCanvasNode({
+      id: node.id, workspaceId, taskId: node.taskId, label: node.label, nodeType: node.nodeType,
+      kind: node.kind, harnessId: node.harnessId, liveStatus: "idle", config: node.config,
+      position: { x: node.positionX, y: node.positionY },
+    });
+    const activated = this.#repository.listCanvasNodes(workspaceId).find((candidate) => candidate.id === nodeId)!;
+    this.#appendEvent(workspaceId, { type: "node.activated", payload: { nodeId, liveStatus: "idle" }, taskId: activated.taskId ?? undefined });
+    return this.#mapToCanvasNode(activated);
+  }
+
+  interveneCanvasNode(workspaceId: WorkspaceId, nodeId: string, message: string): void {
+    const node = this.#repository.listCanvasNodes(workspaceId).find((candidate) => candidate.id === nodeId);
+    if (!node) throw new Error(`Canvas node not found: ${nodeId}`);
+    const task = node.taskId ? this.#repository.getTask(node.taskId) : null;
+    this.#repository.insertMessage({ workspaceId, from: "user", to: nodeId, channel: `node:${nodeId}`, type: "message", payload: { text: message } });
+    this.#appendEvent(workspaceId, {
+      type: "user.intervention",
+      payload: { nodeId, message, missionId: task?.missionId },
+      taskId: node.taskId ?? undefined,
+    });
   }
 
   async proposePlan(input: PlanProposalContext): Promise<Plan | null> {
@@ -461,6 +604,78 @@ export class Orchestrator {
     }
   }
 
+  #requireMission(workspaceId: WorkspaceId, missionId: string): Mission {
+    const mission = this.#repository.getMission(missionId);
+    if (!mission || mission.workspaceId !== workspaceId) throw new Error(`Mission not found: ${missionId}`);
+    return mission;
+  }
+
+  #bumpMissionEpoch(missionId: string): number {
+    const next = (this.#missionEpochs.get(missionId) ?? 0) + 1;
+    this.#missionEpochs.set(missionId, next);
+    return next;
+  }
+
+  #ownsPlanningAttempt(missionId: string, missionEpoch: number): boolean {
+    return this.#missionEpochs.get(missionId) === missionEpoch && this.#repository.getMission(missionId)?.status === "planning";
+  }
+
+  #ownsActiveAttempt(missionId: string, missionEpoch: number, planId: string): boolean {
+    const mission = this.#repository.getMission(missionId);
+    return this.#missionEpochs.get(missionId) === missionEpoch && mission?.status === "active" && mission.planId === planId;
+  }
+
+  async #cancelMissionTasks(workspaceId: WorkspaceId, taskIds: TaskId[]): Promise<void> {
+    const cancellable = taskIds.filter((taskId) => {
+      const task = this.#repository.getTask(taskId);
+      return task && task.status !== "completed" && task.status !== "failed" && task.status !== "cancelled";
+    });
+    await Promise.allSettled(cancellable.map((taskId) => this.#runtime.cancelTask(workspaceId, taskId)));
+  }
+
+  async #restartMission(workspaceId: WorkspaceId, missionId: string, missionEpoch: number): Promise<void> {
+    const mission = this.#requireMission(workspaceId, missionId);
+    if (!this.#ownsPlanningAttempt(missionId, missionEpoch)) return;
+    let plan: Plan | null = null;
+    try {
+      plan = await this.#decisionProvider.proposePlan({ workspaceId, goal: mission.goal });
+      if (!plan) throw new Error(`No plan proposed for: ${mission.goal}`);
+      if (!this.#ownsPlanningAttempt(missionId, missionEpoch)) return;
+      plan.missionId = missionId;
+      this.#repository.insertPlan({
+        id: plan.id, workspaceId, goal: plan.goal, missionId, status: "proposed",
+        tasks: plan.tasks, taskIds: plan.taskIds, createdAt: plan.createdAt,
+      });
+      this.#repository.updateMission(missionId, { status: "active", planId: plan.id, taskIds: plan.taskIds });
+      this.#appendEvent(workspaceId, { type: "mission.status", payload: { missionId, status: "active", planId: plan.id } });
+      const controller = new AbortController();
+      this.#missionControllers.set(missionId, controller);
+      let executionError: string | undefined;
+      try {
+        await this.#withTimeout(this.#executePlan(workspaceId, plan, controller.signal), `plan ${plan.id}`, controller);
+      } catch (error) {
+        executionError = error instanceof Error ? error.message : String(error);
+      } finally {
+        if (this.#missionControllers.get(missionId) === controller) this.#missionControllers.delete(missionId);
+      }
+      plan.status = executionError ? "failed" : "completed";
+      this.#repository.updatePlanStatus(plan.id, plan.status);
+      if (!this.#ownsActiveAttempt(missionId, missionEpoch, plan.id)) return;
+      const tasks = plan.taskIds.map((id) => this.#repository.getTask(id)).filter((task) => task !== null);
+      const ok = !executionError && tasks.every((task) => task.status === "completed");
+      this.#repository.updateMission(missionId, { status: ok ? "completed" : "failed", taskIds: plan.taskIds });
+      this.#appendEvent(workspaceId, { type: "mission.status", payload: { missionId, status: ok ? "completed" : "failed" } });
+    } catch (error) {
+      const sameAttempt = plan
+        ? this.#ownsActiveAttempt(missionId, missionEpoch, plan.id)
+        : this.#ownsPlanningAttempt(missionId, missionEpoch);
+      if (sameAttempt) {
+        this.#repository.updateMission(missionId, { status: "failed" });
+        this.#appendEvent(workspaceId, { type: "mission.status", payload: { missionId, status: "failed", error: error instanceof Error ? error.message : String(error) } });
+      }
+    }
+  }
+
   async #executePlan(workspaceId: WorkspaceId, plan: Plan, signal: AbortSignal): Promise<void> {
     this.#activePlan = plan;
     plan.status = "executing";
@@ -471,7 +686,7 @@ export class Orchestrator {
     let remaining = [...plan.tasks];
     try {
       while (remaining.length > 0) {
-        if (signal.aborted) return;
+        if (signal.aborted) throw new Error(`Mission execution aborted`);
         const batch = remaining.filter((pt) => pt.dependencies.every((dep) => created.has(dep)));
         if (batch.length === 0) {
           throw new Error(`Plan ${plan.id} has unsatisfiable dependencies: ${remaining.map((t) => t.id).join(", ")}`);
@@ -483,11 +698,7 @@ export class Orchestrator {
           created.set(pt.id, task);
         }
         const batchTaskIds = batch.map((pt) => pt.id);
-        const dispatched = await this.#runtime.dispatchPending(workspaceId);
-        if (dispatched > 0) {
-          await this.#materializeContexts(workspaceId, [...created.values()]);
-          await this.#consumeSessions(workspaceId, [...created.keys()], signal);
-        }
+        await this.#driveMissionBatch(workspaceId, plan.taskIds, batchTaskIds, [...created.values()], signal);
         // A batch task still pending/assigned/blocked after dispatch is held
         // behind a human approval gate (spec §11.3): wait for resolution.
         const held = batchTaskIds.filter((id) => {
@@ -495,14 +706,15 @@ export class Orchestrator {
           return task && task.approvalId !== undefined;
         });
         for (const id of held) {
-          await this.#awaitApproval(workspaceId, id, signal);
+          await this.#awaitApproval(workspaceId, id, plan.taskIds, signal);
         }
         for (const id of batchTaskIds) {
-          if (signal.aborted) return;
+          if (signal.aborted) throw new Error(`Mission execution aborted`);
           const task = this.#repository.getTask(id)!;
           if (!this.#isTerminal(task)) throw new Error(`Task ${id} did not reach a terminal state (${task.status})`);
           try {
             const decision = await this.#decisionProvider.evaluate({ taskId: task.id, status: task.status, resultSummary: task.resultSummary });
+            this.#repository.insertDecision({ ...decision, workspaceId });
             this.#appendEvent(workspaceId, { type: "orchestrator.task.evaluated", payload: { taskId: task.id, status: task.status, decision: decision.status, summary: decision.summary }, taskId: task.id });
           } catch (error) {
             this.#appendEvent(workspaceId, { type: "orchestrator.task.evaluated", payload: { taskId: task.id, status: task.status, error: error instanceof Error ? error.message : String(error) }, taskId: task.id });
@@ -511,6 +723,58 @@ export class Orchestrator {
       }
     } finally {
       await this.#cleanupSessions(workspaceId, [...created.values()]);
+    }
+  }
+
+  /**
+   * Drive one dependency-ready Mission batch until every runnable task is
+   * terminal or held by a human gate. Capacity starvation is a queueing state:
+   * unrelated live surfaces and batches wider than maxConcurrency must not
+   * turn valid pending work into an immediate Mission failure.
+   */
+  async #driveMissionBatch(
+    workspaceId: WorkspaceId,
+    planTaskIds: readonly TaskId[],
+    batchTaskIds: readonly TaskId[],
+    createdTasks: Task[],
+    signal: AbortSignal,
+  ): Promise<void> {
+    while (true) {
+      if (signal.aborted) throw new Error(`Mission execution aborted`);
+      // Dispatch also materializes the blocked state/event for a dependency-
+      // ready approval gate, so it must run before classifying held work.
+      const dispatched = await this.#runtime.dispatchPending(workspaceId, planTaskIds);
+      const snapshot = this.#repository.getWorkspaceSnapshot(workspaceId);
+      const approvalsById = new Map(snapshot.approvals.map((approval) => [approval.id, approval]));
+      const batchTasks = batchTaskIds.map((id) => this.#repository.getTask(id)).filter((task) => task !== null);
+      const active = batchTasks.filter((task) => !this.#isTerminal(task));
+      if (active.length === 0) return;
+      const executable = active.filter((task) =>
+        task.approvalId === undefined || approvalsById.get(task.approvalId)?.status !== "pending",
+      );
+      if (executable.length === 0) return;
+
+      if (dispatched > 0) await this.#materializeContexts(workspaceId, createdTasks);
+
+      const liveTaskIds = new Set(batchTaskIds);
+      const hasOwnedSession = this.#repository.getWorkspaceSnapshot(workspaceId).sessions.some((session) =>
+        liveTaskIds.has(session.taskId) && (session.status === "spawning" || session.status === "running"),
+      );
+      if (hasOwnedSession) {
+        await this.#consumeSessions(workspaceId, [...batchTaskIds], signal);
+        continue;
+      }
+
+      const completedIds = new Set(snapshot.tasks.filter((task) => task.status === "completed").map((task) => task.id));
+      const capacityQueued = executable.some((task) =>
+        (task.status === "pending" || task.status === "assigned") && task.assignedTo !== undefined &&
+        task.dependencies.every((dependency) => completedIds.has(dependency)),
+      );
+      if (!capacityQueued) {
+        const summary = executable.map((task) => `${task.id}:${task.status}${task.assignedTo ? "" : ":unassigned"}`).join(", ");
+        throw new Error(`Mission batch cannot make progress (${summary})`);
+      }
+      await this.#sleep(SLEEP_STEP_MS);
     }
   }
 
@@ -555,7 +819,7 @@ export class Orchestrator {
     return refs;
   }
 
-  #createPlanTask(workspaceId: WorkspaceId, _plan: Plan, pt: PlanTask, refs: ContextReference[]): Task {
+  #createPlanTask(workspaceId: WorkspaceId, plan: Plan, pt: PlanTask, refs: ContextReference[]): Task {
     if (pt.assignedTo) this.#ensureWorker(pt.assignedTo, workspaceId);
     return this.#repository.transaction(() => {
       if (pt.approvalId) {
@@ -577,6 +841,7 @@ export class Orchestrator {
         description: pt.description,
         status: "pending",
         assignedTo: pt.assignedTo,
+        missionId: plan.missionId,
         dependencies: pt.dependencies,
         contextRefs: refs,
         priority: pt.priority,
@@ -617,7 +882,7 @@ export class Orchestrator {
    * (spec §11.3), then re-dispatch. Rejection leaves the task cancelled;
    * acceptance resumes execution. Abort propagates on timeout/cancel.
    */
-  async #awaitApproval(workspaceId: WorkspaceId, taskId: TaskId, signal: AbortSignal): Promise<void> {
+  async #awaitApproval(workspaceId: WorkspaceId, taskId: TaskId, planTaskIds: readonly TaskId[], signal: AbortSignal): Promise<void> {
     let task = this.#repository.getTask(taskId)!;
     while (task.status !== "completed" && task.status !== "failed" && task.status !== "cancelled") {
       if (signal.aborted) return;
@@ -628,7 +893,7 @@ export class Orchestrator {
         const snapshot = this.#repository.getWorkspaceSnapshot(workspaceId);
         const approval = snapshot.approvals.find((a) => a.id === task.approvalId);
         if (approval && approval.status !== "pending") {
-          await this.#runtime.dispatchPending(workspaceId);
+          await this.#runtime.dispatchPending(workspaceId, planTaskIds);
         }
       }
       task = this.#repository.getTask(taskId)!;
@@ -715,7 +980,7 @@ export class Orchestrator {
    * itself. Recomputes for every candidate target in one pass.
    */
   #syncCanvasEdgeContext(workspaceId: WorkspaceId, targetId: string, edges: CanvasEdgeRecord[]): void {
-    const incoming = edges.filter((e) => e.target === targetId);
+    const incoming = edges.filter((e) => e.target === targetId && e.type === "context");
     if (incoming.length === 0) {
       this.#repository.updateTaskContextRefs(targetId, []);
       return;
@@ -744,6 +1009,8 @@ export class Orchestrator {
       nodeType: rec.nodeType,
       kind: rec.kind as CanvasNodeKind,
       harnessId: rec.harnessId,
+      liveStatus: rec.liveStatus,
+      config: rec.config,
       position: { x: rec.positionX, y: rec.positionY },
       updatedAt: rec.updatedAt,
     };
@@ -758,6 +1025,7 @@ export class Orchestrator {
       target: rec.target,
       sourceHandle: rec.sourceHandle,
       targetHandle: rec.targetHandle,
+      type: rec.type,
       updatedAt: rec.updatedAt,
     };
   }

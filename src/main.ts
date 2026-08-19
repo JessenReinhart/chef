@@ -7,8 +7,11 @@ import type {
   EntityRef,
   HarnessEvent,
   HarnessId,
+  Mission,
+  AutomationRun,
   OrchestratorResult,
   RuntimeEvent,
+  Session,
   TaskId,
   WorkspaceId,
   WorkspaceSnapshot,
@@ -18,11 +21,13 @@ import type {
   CanvasPatchResult,
 } from "./core/types.ts";
 import { Repository, type TemplateInput } from "./persistence/database.ts";
+import type { ChatMessage } from "./persistence/chat.ts";
 import { GenericTerminalHarness } from "./harness/generic.ts";
 import { Scheduler, type HarnessLike, type HarnessRegistry } from "./runtime/scheduler.ts";
 import { HarnessRegistry as SpecializedHarnessRegistry } from "./runtime/harness-registry.ts";
 import { ToolRunner } from "./runtime/tool-runner.ts";
 import { BrowserTool } from "./runtime/browser-tool.ts";
+import { AutomationRunner } from "./runtime/automation-runner.ts";
 import { McpRegistry } from "./runtime/mcp-client.ts";
 import {
   Orchestrator,
@@ -117,6 +122,23 @@ export interface ChefRuntime {
   readonly llmStatus: LLMStatus;
   /** Read the durable canvas graph projection. */
   listCanvas(workspaceId: WorkspaceId): { nodes: CanvasNode[]; edges: CanvasEdge[] };
+  /** Read one consistent durable workspace snapshot. */
+  inspectState(): Promise<WorkspaceSnapshot>;
+  activateNode(nodeId: string): Promise<CanvasNode>;
+  interveneNode(nodeId: string, message: string): Promise<void>;
+  pauseMission(missionId: string): Promise<Mission>;
+  resumeMission(missionId: string): Mission;
+  cancelMission(missionId: string): Promise<Mission>;
+  redirectMission(missionId: string, goal: string): Promise<Mission>;
+  runAutomation(automationId: string): AutomationRun;
+  stopAutomation(automationId: string): Promise<AutomationRun>;
+  cancelTask(taskId: TaskId): Promise<void>;
+  sendInput(sessionId: string, input: string): Promise<void>;
+  interruptSession(sessionId: string): Promise<void>;
+  resizeSession(sessionId: string, cols: number, rows: number): Promise<void>;
+  resolveApproval(approvalId: string, decision: ApprovalDecision, approver: string): Promise<Approval>;
+  subscribeEvents(listener: (event: RuntimeEvent) => void): () => void;
+  close(): Promise<void>;
   /** Phase 8: deterministic tool runner (terminal/filesystem/git + approval gates). */
   readonly toolRunner: ToolRunner;
   /** Phase 8: browser sessions (Playwright; honest error when absent). */
@@ -209,7 +231,10 @@ export function createChef(options: {
 
   const runtimeRegistry = new RuntimeHarnessRegistry();
   const orchestratorRegistry = new OrchestratorHarnessRegistry();
-  const specializedHarnesses = new SpecializedHarnessRegistry();
+  const specializedHarnesses = new SpecializedHarnessRegistry({
+    workspaceId,
+    cwd: options.projectDir,
+  });
 
   // Surface LLM provider status (same env logic as createLLMDecisionProvider:
   // a provider is "configured" when it has a provider value AND a resolved key).
@@ -258,9 +283,10 @@ export function createChef(options: {
     },
   });
   const runtimeAdapter: RuntimeAdapter = {
-    dispatchPending: (wsId) => scheduler.dispatchPending(wsId),
+    dispatchPending: (wsId, allowedTaskIds) => scheduler.dispatchPending(wsId, allowedTaskIds),
     handleSessionEvent: (wsId, sessionId, event) => scheduler.handleSessionEvent(wsId, sessionId, event),
     recoverOnStartup: (wsId) => scheduler.recoverOnStartup(wsId),
+    cancelTask: (wsId, taskId) => scheduler.cancelTask(wsId, taskId),
   };
   const orchestrator = new Orchestrator({
     repository,
@@ -278,6 +304,47 @@ export function createChef(options: {
       }
     },
   });
+  const automationRunner = new AutomationRunner(repository, scheduler, runtimeRegistry, (event) => {
+    for (const listener of listeners) {
+      try { listener(event); } catch { /* Projections cannot abort execution. */ }
+    }
+  });
+  const standaloneConsumers = new Map<string, Promise<void>>();
+  let runtimeClosing = false;
+
+  // Mission and Automation execution own their session iterators separately.
+  // Public canvas/server dispatches opt into this owner callback so each PTY
+  // has exactly one durable event consumer from spawn through terminal exit.
+  const consumeStandaloneSession = (session: Session): void => {
+    if (standaloneConsumers.has(session.id)) return;
+    const harness = runtimeRegistry.get(session.agentId);
+    if (!harness) return;
+    const consumption = Promise.resolve().then(async () => {
+      try {
+        for await (const event of harness.events(session.id)) {
+          await scheduler.handleSessionEvent(workspaceId, session.id, event);
+        }
+      } catch (error) {
+        const current = repository.listSessions(workspaceId).find((candidate) => candidate.id === session.id);
+        if (current?.status === "spawning" || current?.status === "running") {
+          await scheduler.handleSessionEvent(workspaceId, session.id, { type: "crash", exitCode: 1 });
+        }
+        if (!runtimeClosing) {
+          console.error(`standalone session ${session.id} event consumer failed:`, error);
+        }
+      } finally {
+        try { await harness.forget(session.id); } catch { /* Harness may already be closed. */ }
+      }
+    }).finally(() => {
+      standaloneConsumers.delete(session.id);
+    });
+    standaloneConsumers.set(session.id, consumption);
+  };
+
+  const dispatchStandalone = (allowedTaskIds?: readonly TaskId[]): Promise<number> => {
+    if (runtimeClosing) return Promise.reject(new Error("Chef runtime is closing"));
+    return scheduler.dispatchPending(workspaceId, allowedTaskIds, consumeStandaloneSession);
+  };
 
   const toolRunner = new ToolRunner({
     workspaceId,
@@ -321,9 +388,17 @@ export function createChef(options: {
       // Freebuff) — binary absence is reported, not fatal.
       await specializedHarnesses.initialize();
       // Wire specialized harnesses into the scheduler's registry so dispatch
-      // can find them by agent id (task.assignedTo).
+      // can find them by agent id (task.assignedTo). The orchestrator must
+      // observe the same adapter's event stream; otherwise its provider
+      // fallback would replace this live owner with a generic harness.
       for (const harness of specializedHarnesses.values()) {
         runtimeRegistry.set(harness.id as AgentId, harness);
+        orchestratorRegistry.set(harness.id as AgentId, {
+          id: harness.id,
+          events: (sessionId: string) => harness.events(sessionId),
+          terminate: (sessionId: string) => harness.terminate(sessionId),
+          forget: (sessionId: string) => harness.forget(sessionId),
+        });
       }
       // Always register a generic PTY harness under the "generic" agent id so
       // canvas nodes assigned to "generic" (palette advertises it as always
@@ -335,6 +410,7 @@ export function createChef(options: {
           asSchedulerHarness(new GenericTerminalHarness({ agentId: "generic", workspaceId, command: "node", cwd: options.projectDir })),
         );
       }
+      automationRunner.resumeActive(workspaceId);
       try {
         await mcpRegistry.connectAll();
       } catch {
@@ -355,6 +431,57 @@ export function createChef(options: {
     },
     listCanvas(workspaceId: WorkspaceId): { nodes: CanvasNode[]; edges: CanvasEdge[] } {
       return orchestrator.listCanvasGraph(workspaceId);
+    },
+    async activateNode(nodeId: string): Promise<CanvasNode> {
+      const node = orchestrator.activateCanvasNode(workspaceId, nodeId);
+      if (node.taskId) {
+        const task = repository.getTask(node.taskId);
+        if (task?.assignedTo && (task.status === "pending" || task.status === "assigned")) {
+          await dispatchStandalone([task.id]);
+        }
+      }
+      return node;
+    },
+    async interveneNode(nodeId: string, message: string): Promise<void> {
+      orchestrator.interveneCanvasNode(workspaceId, nodeId, message);
+      const node = orchestrator.listCanvasGraph(workspaceId).nodes.find((candidate) => candidate.id === nodeId);
+      if (!node?.taskId) return;
+      const interventionTask = repository.getTask(node.taskId);
+      if (!interventionTask?.assignedTo) return;
+      // Interventions are durable above; when the node has executable work,
+      // also activate only that task and wait briefly for its PTY inbox.
+      await dispatchStandalone([node.taskId]);
+      const deadline = Date.now() + 1_000;
+      while (Date.now() < deadline) {
+        const session = repository.listSessions(workspaceId).find(
+          (candidate) => candidate.taskId === node.taskId && (candidate.status === "spawning" || candidate.status === "running"),
+        );
+        if (session) {
+          await scheduler.send(workspaceId, session.id, `${message}\n`);
+          return;
+        }
+        const task = repository.getTask(node.taskId);
+        if (!task || task.status === "completed" || task.status === "failed" || task.status === "cancelled") return;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+    },
+    pauseMission(missionId: string): Promise<Mission> {
+      return orchestrator.pauseMission(workspaceId, missionId);
+    },
+    resumeMission(missionId: string): Mission {
+      return orchestrator.resumeMission(workspaceId, missionId);
+    },
+    cancelMission(missionId: string): Promise<Mission> {
+      return orchestrator.cancelMission(workspaceId, missionId);
+    },
+    redirectMission(missionId: string, goal: string): Promise<Mission> {
+      return orchestrator.redirectMission(workspaceId, missionId, goal);
+    },
+    runAutomation(automationId: string): AutomationRun {
+      return automationRunner.run(automationId);
+    },
+    stopAutomation(automationId: string): Promise<AutomationRun> {
+      return automationRunner.stop(automationId);
     },
     cancelTask(taskId: TaskId): Promise<void> {
       return scheduler.cancelTask(workspaceId, taskId);
@@ -384,7 +511,7 @@ export function createChef(options: {
       };
     },
     dispatchPending(): Promise<number> {
-      return scheduler.dispatchPending(workspaceId);
+      return dispatchStandalone();
     },
     handleSessionEvent(sessionId: string, event: HarnessEvent): Promise<void> {
       return scheduler.handleSessionEvent(workspaceId, sessionId, event);
@@ -393,14 +520,19 @@ export function createChef(options: {
       runtimeRegistry.set(agentId as AgentId, harness);
     },
     async close(): Promise<void> {
+      runtimeClosing = true;
+      automationRunner.close();
       // Every harness close is attempted; a rejected harness teardown must not
       // skip the repository close (durable state + DB lock release).
       await Promise.allSettled([
-        ...runtimeRegistry.values().map((harness) => harness.close()),
+        ...[...runtimeRegistry.values()].map((harness) => harness.close()),
         specializedHarnesses.close(),
         browserTool.close(),
         mcpRegistry.close(),
       ]);
+      // Harness close terminates PTYs and closes their event queues. Let every
+      // standalone consumer persist the resulting exit before closing SQLite.
+      await Promise.allSettled([...standaloneConsumers.values()]);
       repository.close();
     },
   };

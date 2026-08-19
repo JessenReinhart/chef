@@ -7,9 +7,12 @@
  */
 
 import { SpecializedCliHarness } from "./specialized.ts";
+import type { SpecializedCliOptions } from "./specialized.ts";
+
+type RuntimeOptions = Pick<SpecializedCliOptions, "workspaceId" | "cwd">;
 
 export class ClaudeCodeHarness extends SpecializedCliHarness {
-  constructor(binary = "claude") {
+  constructor(binary = "claude", runtime: RuntimeOptions = {}) {
     super({
       id: "claude-code",
       type: "claude-code",
@@ -17,6 +20,7 @@ export class ClaudeCodeHarness extends SpecializedCliHarness {
       binary,
       flags: ["--no-telemetry"],
       env: { CLAUDE_CODE_DISABLE_TELEMETRY: "1" },
+      ...runtime,
     });
   }
 }

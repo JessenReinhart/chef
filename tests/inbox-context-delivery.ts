@@ -16,8 +16,10 @@ const repository = new Repository(dbPath);
 const harnessConfig: GenericHarnessConfig = {
   agentId: "agent-1",
   workspaceId: "", // will set after workspace created
-  command: "echo",
-  args: ["hello"],
+  // Keep the fixture alive until teardown. `echo` is a shell built-in on
+  // Windows, and a short-lived child can remove its sideband before inspection.
+  command: process.execPath,
+  args: ["-e", "setInterval(() => {}, 1_000)"],
   cwd: testRoot,
 };
 
@@ -35,7 +37,7 @@ class TestHarnessRegistry implements HarnessRegistry {
   }
 }
 
-let harness: GenericTerminalHarness;
+let harness: GenericTerminalHarness | undefined;
 
 try {
   const workspace = repository.createWorkspace({ name: "inbox-context-test", rootPath: testRoot });
@@ -82,7 +84,7 @@ try {
 
   console.log("inbox-context-delivery: ok — envelope.contextRefs matches task.contextRefs at dispatch");
 } finally {
-  await harness.close();
+  if (harness) await harness.close();
   repository.close();
   await rm(testRoot, { recursive: true, force: true });
 }

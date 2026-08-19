@@ -18,7 +18,8 @@ import type {
 	Timestamp,
 	WorkspaceId,
 } from "../core/types.ts";
-import { nodeRegistry, type NodeDefinition } from "../runtime/node-registry.ts";
+import type { NodeDefinition } from "../core/nodes.ts";
+import { nodeRegistry } from "../runtime/node-registry.ts";
 import { ScriptedDecisionProvider } from "./orchestrator.ts";
 import { Anthropic } from "@anthropic-ai/sdk";
 
@@ -274,7 +275,7 @@ Return a Plan with tasks that achieve this goal.`;
 		try {
 			const message = await this.#client.messages.create({
 				model: this.#config.model,
-				max_tokens: this.#config.maxTokens,
+				max_tokens: this.#config.maxTokens ?? 4096,
 				temperature: this.#config.temperature,
 				system: systemPrompt,
 				messages: [{ role: "user", content: userPrompt }],

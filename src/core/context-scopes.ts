@@ -27,6 +27,8 @@ export interface ContextScopeInput {
   name: string;
   bounds: ContextScopeBounds;
   contextRefs?: ContextReference[];
+  /** Explicit authoritative membership. Geometry is never consulted when set. */
+  memberNodeIds?: string[];
 }
 
 /** Return true when a node's anchor point falls inside a scope rectangle. */
@@ -55,6 +57,8 @@ export function materializeContextScope(input: ContextScopeInput, nodes: CanvasN
     name: input.name,
     bounds: { ...input.bounds },
     contextRefs: input.contextRefs?.map((ref) => ({ ...ref })) ?? [],
-    memberNodeIds: resolveScopeMembers(input.bounds, nodes),
+    memberNodeIds: input.memberNodeIds === undefined
+      ? resolveScopeMembers(input.bounds, nodes)
+      : [...new Set(input.memberNodeIds)].sort(),
   };
 }
