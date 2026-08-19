@@ -1135,15 +1135,24 @@ export class Repository {
     });
   }
 
-  stopAutomation(id: AutomationId): AutomationRun {
+stopAutomation(id: AutomationId): AutomationRun {
     return this.transaction(() => {
       const automation = this.getAutomation(id);
       if (!automation?.currentRunId || automation.status !== "running") throw new Error(`Automation is not running: ${id}`);
       const ts = now();
       const run = this.db.prepare(`SELECT * FROM automation_runs WHERE id = ?`).get(automation.currentRunId) as Row;
-      for (const taskId of mapAutomationRun(run).taskIds) {
+      const taskIds = mapAutomationRun(run).taskIds;
+      for (const taskId of taskIds) {
         this.db.prepare(`UPDATE tasks SET status = 'cancelled', updated_at = ? WHERE id = ? AND status IN ('pending', 'assigned', 'running', 'blocked')`).run(ts, taskId);
       }
+      // Resolve any pending approval gates owned by the stopped run so the UI
+      // does not surface a stale actionable approval. Re-rejecting an
+      // already-resolved approval is a no-op.
+      const taskParams = taskIds.map(() => "?").join(",");
+      this.db.prepare(
+        `UPDATE approvals SET status = 'rejected', approver = 'automation-stop', resolved_at = ?
+         WHERE task_id IN (${taskParams}) AND status = 'pending'`,
+      ).run(ts, ...taskIds);
       this.db.prepare(`UPDATE automation_runs SET status = 'cancelled', ended_at = ? WHERE id = ? AND status IN ('queued', 'running', 'waiting')`).run(ts, automation.currentRunId);
       this.db.prepare(`UPDATE automations SET status = 'stopped', current_run_id = NULL, updated_at = ? WHERE id = ?`).run(ts, id);
       return mapAutomationRun(this.db.prepare(`SELECT * FROM automation_runs WHERE id = ?`).get(automation.currentRunId) as Row);

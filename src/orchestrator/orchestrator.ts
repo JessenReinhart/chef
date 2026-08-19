@@ -1068,7 +1068,8 @@ export class Orchestrator {
   #sleep(ms: number): Promise<void> {
     const { promise, resolve } = Promise.withResolvers<void>();
     const timer = setTimeout(resolve, ms);
-    timer.unref();
+    // Do NOT unref: capacity-starvation polls and deadline waits are
+    // active pending work that must keep the event loop alive.
     return promise;
   }
 }

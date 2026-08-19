@@ -269,7 +269,11 @@ try {
   const cancelledRun = await chef.stopAutomation(approvalAutomation.id);
   assert.equal(cancelledRun.status, "cancelled");
   assert.equal(chef.repository.getTask(cancelledApprovalRun.taskIds[1])?.status, "cancelled");
-
+  const approvalAfterStop = chef.repository.getWorkspaceSnapshot(workspaceId).approvals.find((approval) => approval.taskId === cancelledApprovalRun.taskIds[1]);
+  assert.ok(
+    approvalAfterStop === null || approvalAfterStop.status !== "pending",
+    "approval must not remain pending after stop — UI must not show a stale actionable approval",
+  );
   // An interactive surface can be used without manufacturing a Mission.
   const surfaceHarness = new ControlledHarness("surface-agent", dir);
   chef.registerHarness(surfaceHarness.id, surfaceHarness);
