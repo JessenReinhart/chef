@@ -5,13 +5,15 @@ import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import { createChef } from "../src/main.ts";
 import { createHttpServer } from "../src/server/http-server.ts";
+import { createContextScopeServer } from "../src/server/context-scope-http.ts";
 
 const dir = await mkdtemp(join(tmpdir(), "chef-http-test-"));
 const chef = createChef({ dbPath: join(dir, "chef.sqlite"), projectDir: dir });
 
 try {
   await chef.start();
-  const server = createHttpServer(chef);
+  const baseServer = createHttpServer(chef);
+  const server = createContextScopeServer(chef, baseServer);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address() as AddressInfo;
   const base = `http://127.0.0.1:${address.port}`;
@@ -20,6 +22,29 @@ try {
   assert.equal(stateRes.status, 200, "state endpoint must return 200");
   const snapshot = (await stateRes.json()) as { workspaceId: string; tasks: unknown[] };
   assert.equal(typeof snapshot.workspaceId, "string", "state must include workspaceId");
+
+  const scopesBefore = await fetch(`${base}/api/context-scopes`);
+  assert.equal(scopesBefore.status, 200, "context scopes endpoint must return 200");
+  assert.deepEqual((await scopesBefore.json()).data, [], "new workspace should have no scopes");
+
+  const createScope = await fetch(`${base}/api/context-scopes`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      name: "Authentication",
+      bounds: { x: 0, y: 0, width: 500, height: 300 },
+      contextRefs: ["artifact:requirements"],
+    }),
+  });
+  assert.equal(createScope.status, 201, "creating a context scope must return 201");
+  const createdScope = (await createScope.json()).data as { id: string; memberNodeIds: string[] };
+  assert.ok(createdScope.id, "created scope must have an id");
+
+  const listedScopes = await fetch(`${base}/api/context-scopes`);
+  assert.equal((await listedScopes.json()).data.length, 1, "created scope must be listed");
+
+  const deleteScope = await fetch(`${base}/api/context-scopes/${createdScope.id}`, { method: "DELETE" });
+  assert.equal(deleteScope.status, 200, "deleting a context scope must return 200");
 
   const result = await chef.sendUserMessage("run the http server plan");
   assert.equal(result.ok, true, `orchestration failed: ${result.report}`);
@@ -59,7 +84,7 @@ try {
 
   await new Promise<void>((resolve) => server.close(() => resolve()));
   await chef.close();
-  console.log("http-server: ok — state and SSE projection endpoints live");
+  console.log("http-server: ok — state, SSE projection, and context scope endpoints live");
 } finally {
   await rm(dir, { recursive: true, force: true });
 }
