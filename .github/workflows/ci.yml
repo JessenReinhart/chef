@@ -1,31 +1,42 @@
 name: CI
 
 on:
-  push:
-    branches: [master]
   pull_request:
+  push:
+    branches:
+      - master
+      - feat/context-scopes
 
 jobs:
   test:
+    name: Runtime tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: npm
-      - run: npm ci
-      - run: npm test
+      - name: Install dependencies
+        run: npm install
+      - name: Run runtime tests
+        run: npm test
 
   web-build:
+    name: Web TypeScript build
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: web
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
           node-version: 24
-      - run: npm install --no-package-lock
-      - run: npm run build
+      - name: Install web dependencies
+        working-directory: web
+        run: npm install
+      - name: Build web app
+        working-directory: web
+        run: npm run build
