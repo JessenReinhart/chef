@@ -4,12 +4,16 @@ on:
   push:
     branches:
       - agent/rewrite-pgi-identity
+  pull_request:
+    branches:
+      - master
 
 permissions:
   contents: write
 
 jobs:
   rewrite:
+    if: github.head_ref == 'agent/rewrite-pgi-identity' || github.ref_name == 'agent/rewrite-pgi-identity'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout full history
