@@ -1,128 +1,169 @@
 # Repository Guidelines
 
 ## Project Overview
-Chef is the P0 implementation of the AI Engineering OS spec (`AI_Engineering_OS_Specification_v0.1.pdf`): a local-first, restart-safe multi-agent task runtime. It turns a user message into a dependency-aware plan, runs agent tasks through PTY harnesses, and persists sessions, events, artifacts, and messages in SQLite. Spec mantra: "The UI is disposable. The runtime is the product."
+Chef is a local-first, restart-safe **living AI workspace** built on the AI Engineering OS runtime. The current product/runtime contract is `docs/PRODUCT_RUNTIME_SPEC_V0.2.md`; the original `AI_Engineering_OS_Specification_v0.1.pdf` remains useful historical architecture context.
+
+Chef turns human intent into durable Missions and plans, coordinates dependency-aware Tasks through terminal-based agent harnesses, shares bounded context between nodes, persists runtime state in SQLite, and exposes that state through HTTP/SSE plus a React/Vite canvas UI.
+
+Core mantra: **the UI is disposable; the runtime is the product.** UI state must project authoritative runtime state rather than become a second source of truth.
 
 ## Architecture & Data Flow
 `src/main.ts` assembles the dependency-injected runtime:
 
-1. `Orchestrator` records the user message, asks a `DecisionProvider` for a plan, creates dependency-batched tasks, and coordinates execution.
-2. `Scheduler` finds runnable tasks, persists task/session transitions transactionally, dispatches work, handles structured events, retries, and startup recovery.
-3. `GenericTerminalHarness` runs child processes through `node-pty`; terminal output and structured sideband JSON events remain separate.
-4. `ContextManager` resolves durable references and materializes task inboxes.
-5. `Repository` is the authoritative SQLite writer; event, task, session, artifact, and message state survives restart.
+1. `Orchestrator` records user intent, asks a `DecisionProvider` for structured decisions, creates durable plans/tasks/Missions, and coordinates execution.
+2. `Scheduler` finds runnable Tasks, persists lifecycle transitions transactionally, dispatches harness Sessions, handles structured events, retries, approvals, and startup recovery.
+3. Harnesses run terminal-based agents. `GenericTerminalHarness` uses `node-pty`; specialized adapters live under `src/harness/`.
+4. `ContextManager` resolves durable references and materializes Task inboxes. Canvas relationships and Context Zones scope shared context.
+5. `Repository` is the authoritative SQLite writer for workspace, Mission, Automation, Task, Session, approval, event, artifact, message, canvas, and related state.
+6. `src/server/http-server.ts` exposes runtime projections and mutations over HTTP/SSE. `web/` renders the living workspace but never owns lifecycle truth.
 
-The default path uses `ScriptedDecisionProvider`; no server or UI is present. Async/await and `AsyncIterable` event queues dominate. Dependencies are passed through structural interfaces/registries. IDs use `randomUUID()` and timestamps use epoch milliseconds.
+The default planner is deterministic `ScriptedDecisionProvider`; an LLM-backed provider can be configured. The server and web UI are implemented and supported development surfaces, not future placeholders.
 
-Spec boundaries: runtime owns lifecycle, scheduling, cancellation, retries, permissions, and persistence; harnesses own process/PTY behavior; context selects references; events are immutable history; artifacts are durable references. LLMs may propose structured decisions, but runtime APIs validate and execute them. UI/canvas is a projection, never the source of truth; MCP is a capability layer, not the orchestration protocol.
+Runtime boundaries:
+- runtime owns lifecycle, scheduling, cancellation, retries, permissions, approvals, persistence, and authoritative state;
+- harnesses own process/PTY behavior;
+- context selects references rather than copying whole histories;
+- events are immutable history;
+- artifacts are durable references;
+- LLMs may propose structured decisions, but runtime APIs validate and execute them;
+- MCP/tools are capability layers, not Chef's orchestration protocol.
 
-The intended loop is `human intent → Orchestrator → tasks → harnesses → shared context → artifacts → verification → human outcome`. Preserve this separation when adding modules.
+Intended loop:
+
+`human intent → Mission → Orchestrator → Tasks → live agents/tools → shared context → artifacts → verification → human outcome`
 
 ## Key Directories
-- `src/core/` — shared type contracts and ID/time helpers.
-- `src/orchestrator/` — plan creation and end-to-end task execution.
-- `src/runtime/` — scheduling, recovery, retries, and task-state transitions.
-- `src/harness/` — PTY process lifecycle and sideband envelopes.
-- `src/context/` — reference resolution and inbox materialization.
-- `src/persistence/` — SQLite schema and `Repository` CRUD/transactions.
-- `tests/` — golden path plus timeout, cancellation, and multi-connection event-sequence regressions.
-- `scripts/` — manual smoke and SQLite-handle reproduction scripts.
-- `AI_Engineering_OS_Specification_v0.1.pdf` — the authoritative product spec.
+- `src/core/` — shared domain contracts and ID/time helpers.
+- `src/orchestrator/` — planning, Mission coordination, and end-to-end execution.
+- `src/runtime/` — scheduling, recovery, retries, capabilities, tools, Automations, and runtime projections.
+- `src/harness/` — generic PTY harness plus specialized terminal-agent adapters and sideband protocol.
+- `src/context/` — durable context references, scopes, and inbox materialization.
+- `src/persistence/` — SQLite schema and `Repository` transactions/CRUD.
+- `src/server/` — HTTP/SSE runtime projection and mutation API.
+- `web/` — React/Vite + `@xyflow/react` living-workspace UI.
+- `tests/` — executable Node regression/acceptance suites.
+- `docs/` — current runtime/product specs, audits, context docs, and implementation plans.
+- `scripts/` — manual smoke and diagnostic scripts.
 
-## Implementation Status (Spec Roadmap)
-- **P0 (in place):** headless runtime (workspace, tasks, event bus, persistence, generic PTY harness, `ScriptedDecisionProvider` stand-in for a real agent), orchestrator loop, structured worker messages, artifact references, restart survival, timeout/cancellation teardown, atomic event sequencing, and CAS-protected lifecycle transitions.
-- **P1 (in place):** bounded concurrent dispatch with atomic live-session capacity checks, retries, durable plan history, deterministic workspace snapshots, PTY transcript replay via `session.data` events, live event subscription, durable canvas graph (`canvas_nodes`/`canvas_edges` tables + `patchCanvas` API), plan→canvas materialization, and **context sharing via canvas edges** (target task inherits source's latest artifact + task ref as `contextRefs`, October-style). Direct user-to-worker interaction and approval-gated execution remain.
-- **P2+ (not yet):** terminal nodes, context inspector overlay, MCP/tools, approvals/permissions, replay-driven resume, hierarchical squads, agent-to-agent messaging.
+## Current Implementation Baseline
+Treat `master` as the shipped-state baseline and verify claims against code before selecting work.
 
-## Spec Divergences
-- Spec suggests Drizzle ORM; the code uses raw `node:sqlite` `DatabaseSync` with a hand-written `schema.sql` and no migrations.
-- Spec defines `nodes`/`edges`/`workflows`/`approvals` tables; `schema.sql` has `workspaces`, `projects`, `agents`, `harnesses`, `sessions`, `tasks`, `task_dependencies`, `messages`, `events`, `artifacts`, `decisions`, durable `plans`, and a canvas graph (`canvas_nodes`/`canvas_edges`) — no workflow-graph or approvals tables yet.
-- `AgentMessage` (spec §7.1) includes `channel`, `replyTo`, and `contextRefs`; check the local `Message`/`AgentMessage` type before assuming parity.
-- Spec `Task.status` includes `"blocked"`/`"cancelled"`; local `TaskMachine` `ALLOWED` transitions define the actual set — consult it before adding statuses.
-- A Blueprint-style React Flow v12 canvas UI (a disposable projection) lives in `web/` (React/Vite, no Zustand/Tauri); the runtime remains the source of truth.
+Implemented on `master` includes:
+- restart-safe SQLite runtime with durable Tasks, Sessions, Plans, Missions, Automations/runs, approvals, messages, events, artifacts, templates, and canvas state;
+- bounded concurrent dispatch, retries, cancellation, timeout teardown, deterministic workspace snapshots, and atomic event sequencing;
+- PTY transcript replay and live event subscription;
+- direct worker send/interrupt/resize controls;
+- approval-gated capability execution and fail-closed permission policy;
+- durable typed canvas graph and runtime-owned node positions;
+- `@xyflow/react` canvas UI;
+- terminal nodes with live PTY surfaces;
+- browser/tool runtime surfaces;
+- Context Zones/context scopes and context sharing through typed canvas relationships;
+- peer/agent messaging;
+- HTTP/SSE server and Simple/Power UI modes;
+- CI workflow validating runtime tests and the web build.
+
+Do **not** re-open already-shipped migrations such as "add React Flow", "add terminal nodes", "add approvals", or "add server/UI" without first proving a concrete missing behavior.
+
+Still-deferred or incomplete areas must be verified against current code and open PRs before implementation. Product-level work should follow `docs/PRODUCT_RUNTIME_SPEC_V0.2.md`, `docs/AUDIT.md`, current plans, and any newer accepted product guidance.
+
+## Persistence & Runtime Invariants
+- Persist authoritative mutations through `Repository` transactions. In-memory maps are indexes/session handles, not durable truth.
+- Use `TaskMachine` and its allowed transition table; do not mutate Task lifecycle status ad hoc.
+- Sideband files use structured envelopes separate from PTY stdout/stderr.
+- Event sequence allocation must remain atomic; do not reintroduce separate `MAX(seq)` then insert logic.
+- Dispatch concurrency is enforced inside the dispatch transaction; do not move capacity enforcement to a stale pre-dispatch snapshot.
+- Plans, Missions, Automations, approvals, and canvas mutations must remain write-through durable state.
+- `ChefRuntime.subscribeEvents` is the runtime seam for live projections; do not expose repository internals directly to UI clients.
+- Canvas edges/relationships carry semantics, including context sharing. Do not treat every edge as mere visual decoration or sequencing.
+- Agent identity is durable; a Session is an execution instance, not the identity itself.
+
+## Canvas & UI Rules
+- The web app is a projection over authoritative runtime state.
+- Persist canvas mutations through runtime APIs before treating them as durable.
+- Simple Mode should hide unnecessary runtime/provider jargon; Power Mode may expose detailed execution state.
+- Missions and living workspace interactions do not require a global Run gate. Explicit Run/Stop semantics belong to Automations or other deliberately executable graphs.
+- Terminal/browser surfaces are live runtime-backed nodes; preserve cleanup and lifecycle ownership boundaries.
 
 ## Development Commands
 ```bash
 npm install
 npm start
 npm test
+npm run typecheck
+npm run server
 node --experimental-strip-types scripts/smoke-orchestrator.ts
 node --experimental-strip-types scripts/db-repro.ts
-npm run typecheck
 ```
 
-`npm start` runs `src/main.ts`; `npm test` runs 17 suites: golden-path, canvas (`canvas-graph`, `canvas-layout`, `canvas-patcher`, `orchestrator-canvas`, `canvas-context-share`), timeout-cancellation, seq-concurrency, cancel-facade, dispatch-concurrency, plan-persistence, pty-replay, live-events(+failure), direct-worker-interaction, approvals, and http-server. The README also references `node --experimental-strip-types diag-handles.mjs` (root diagnostic script, present).
+Web validation:
 
-- `cd web && npx tsc -b && npm run build` — typecheck + build the canvas UI.
-- `npm run server` — headless HTTP/SSE server (port `CHEF_PORT`, default 4321); `cd web && npm run dev` (5173, proxy `/api` → server).
+```bash
+cd web
+npm install
+npx tsc -b
+npm run build
+```
 
-## Code Conventions & Common Patterns
-- ESM TypeScript executed directly by Node native type stripping; avoid enums, namespaces, and parameter properties.
+`npm test` is the root gating regression command. Inspect `package.json` for the exact current suite list rather than copying an old suite count into new guidance.
+
+## Code Conventions
+- ESM TypeScript executes directly through Node native type stripping; avoid enums, namespaces, and parameter properties.
 - Prefer `async`/`await`, async event queues, private `#` fields, and small structural DI interfaces.
-- Most operational failures throw. Orchestrator catches plan/execution failures; cleanup paths commonly swallow cleanup errors.
-- Use `TaskMachine` and its `ALLOWED` transition table for task-state validation; do not mutate lifecycle state ad hoc.
-- Persist authoritative mutations through `Repository` transactions. In-memory maps are indexes/session handles, not durable state.
-- Sideband files use atomic temp-file-plus-rename writes and FIFO polling. Do not mix PTY stdout with structured sideband events.
-- JSON columns are used for persisted structured values. Keep task dependencies relational through `task_dependencies`.
-
-Lifecycle invariants:
-- `Orchestrator.#withTimeout` aborts the plan controller; `#executePlan` always runs session cleanup in `finally`.
-- Harness outbox polls are drained before queue/sideband teardown; `finishDrain` and `#closed` prevent late queue resurrection.
-- Scheduler terminal events claim live sessions with a status CAS; cancellation re-reads task state, CASes task/session state, and appends the cancellation event in one transaction.
-- Event sequence allocation is one atomic `INSERT ... SELECT MAX(seq)+1 ... RETURNING` statement; do not reintroduce separate `MAX` then `INSERT` calls.
-- `Repository.getWorkspaceSnapshot` uses one read transaction and deterministic ID tie-breakers for task/session/decision ordering.
-- Dispatch concurrency is enforced inside `#dispatchOne`'s transaction via `countLiveSessions`; `#dispatchOne` re-reads the task fresh and returns null (no-op) for already-terminal or capacity-full tasks. Do not reintroduce pre-dispatch snapshot counting or `listSessions().findLast` session lookup.
-- Plans are durable SQLite records with serialized `PlanTask[]`/task IDs and are exposed in `WorkspaceSnapshot.plans`; lifecycle writes occur at proposal, execution, and final status. Keep this write-through path authoritative rather than relying on `Orchestrator.#activePlan`.
-- PTY chunks are forwarded through the existing harness event channel and persisted as immutable `session.data` runtime events with `{ encoding: "utf8", data }` payloads. Keep these separate from structured sideband artifacts; replay reads events by `sessionId` and sequence.
-- `ChefRuntime.subscribeEvents` delivers every persisted runtime event synchronously after append, for both scheduler and orchestrator sources; an unsubscribe function removes the listener. Wire new runtime surfaces through this seam rather than exposing the repository directly to clients.
-- Existing duplicated contracts (`ContextReference`, `HarnessEvent`, `SessionStatus`) require care when changing imports or exported types.
-- Inline property access on a cast is disallowed (`ts-no-inline-cast-access`): use a named const with a one-line reason, or an `in`/`typeof` guard.
-- `ReturnType<typeof fn>` contracts are disallowed (`ts-no-return-type`): export named types at the owning module instead.
-- Canvas edges are context channels, not just dependency gates: `patchCanvasGraph` derives each target task's `contextRefs` from its inbound canvas edges (source's latest artifact + task ref) and re-syncs on edge/node deletion. Keep this write-through in the orchestrator; `Scheduler.#dispatchOne` already materializes `task.contextRefs` into the harness inbox at dispatch.
+- Operational failures generally throw; cleanup paths may intentionally swallow cleanup-only errors.
+- Keep relational Task dependencies in `task_dependencies`; structured persisted values may use JSON columns where already established.
+- Inline property access on a cast is disallowed (`ts-no-inline-cast-access`): use a named const with a reason or a real type guard.
+- `ReturnType<typeof fn>` contracts are disallowed (`ts-no-return-type`): export named types at the owning module.
+- Existing duplicated contracts such as `ContextReference`, `HarnessEvent`, or `SessionStatus` require care when changing imports/exports.
 
 ## Important Files
-- `src/main.ts` — `createChef()` composition root and lifecycle API (`start`, message handling, state inspection, `close`).
-- `src/orchestrator/orchestrator.ts` — `Orchestrator` and `ScriptedDecisionProvider`.
-- `src/runtime/scheduler.ts` — dispatch, event handling, retries, and recovery.
-- `src/runtime/task-machine.ts` — allowed task transitions.
-- `src/harness/generic.ts` — PTY harness implementation.
-- `src/harness/sideband.ts` — session inbox/outbox protocol.
-- `src/context/context.ts` — durable context resolution/materialization.
-- `src/persistence/database.ts` — `Repository`, snapshots, transactions, and event append.
+- `src/main.ts` — `createChef()` composition root and `ChefRuntime` facade.
+- `src/orchestrator/orchestrator.ts` — Orchestrator and scripted decision flow.
+- `src/orchestrator/llm-decision-provider.ts` — optional LLM-backed structured planning.
+- `src/runtime/scheduler.ts` — dispatch, lifecycle, retries, and recovery.
+- `src/runtime/task-machine.ts` — allowed Task transitions.
+- `src/runtime/capabilities.ts` — capability/permission policy.
+- `src/runtime/tool-runner.ts` — runtime-owned tool execution and approval gates.
+- `src/runtime/browser-tool.ts` — browser capability/runtime surface.
+- `src/runtime/layout.ts` — deterministic graph layout helpers.
+- `src/harness/generic.ts` — generic PTY harness implementation.
+- `src/harness/sideband.ts` — structured session inbox/outbox protocol.
+- `src/context/context.ts` — context resolution/materialization.
+- `src/persistence/database.ts` — authoritative repository and transactions.
 - `src/persistence/schema.sql` — SQLite tables, foreign keys, and indexes.
+- `src/server/http-server.ts` — HTTP/SSE runtime API.
+- `web/` — disposable React Flow living-workspace projection.
 - `handoff.md` — operational bug history and platform-specific constraints.
-- `diag-handles.mjs` — handle-leak diagnostic script at repo root.
-- `src/runtime/layout.ts` — deterministic server-side graph layout (columns by depth).
-- `src/server/http-server.ts` — read-only HTTP/SSE projection (`/api/state`, `/api/canvas/patch`, SSE `canvas.*` events).
-- `web/` — React Flow v12 canvas UI (disposable projection); state loads from `/api/state`, SSE reconciles.
+- `diag-handles.mjs` — PTY/handle diagnostic script.
 
-## Runtime/Tooling Preferences
-- Required runtime: Node.js `>=24.0.0`; native TypeScript stripping is required.
-- Package manager: npm (`package-lock.json`, lockfile version 3). No Bun lockfile, `tsconfig.json`, `.nvmrc`, or CI configuration is present.
-- Dependencies include `node-pty` and `@anthropic-ai/sdk`; the default scripted path does not call an external LLM.
-- Pin `node-pty` to an exact version; it ships native binaries and its winpty backend is a temporary compatibility layer pending ConPTY/native evaluation.
-- SQLite uses Node's `node:sqlite` `DatabaseSync`; there are no migrations.
-- Windows PTY runs require the documented `winpty`/`useConpty:false` handling. Sideband root is under `tmpdir()/chef-sideband`.
-- `package.json`'s `typecheck` command ends with `|| true`; treat it as non-gating and inspect errors rather than assuming success.
+## Runtime / Tooling Preferences
+- Required runtime: Node.js `>=24.0.0`.
+- Package manager: npm with `package-lock.json`.
+- `node-pty` is native-sensitive; preserve Windows-specific handling documented in `handoff.md`.
+- SQLite uses Node's `node:sqlite` `DatabaseSync` with a hand-written schema; there is no ORM migration framework.
+- The repository has GitHub Actions CI. Never claim CI is absent without checking `.github/workflows/`.
+- The root `typecheck` command is intended to be gating; inspect its actual result instead of assuming errors are tolerated.
 
 ## Testing & QA
-- No Jest/Vitest framework. Tests are executable Node scripts using `node:assert`.
-- `tests/golden-path.ts` is the P0 E2E check: create runtime, send a user message, assert tasks/events/artifacts/sessions, close, reopen, and verify durable counts/state.
-- Tests use real temporary SQLite databases and real `node-pty` harnesses; cleanup runs in `try/finally`.
-- `scripts/smoke-orchestrator.ts` exercises the real Repository/Scheduler/Orchestrator stack and prints snapshots.
-- `tests/canvas-graph.ts`, `tests/canvas-layout.ts`, `tests/canvas-patcher.ts`, `tests/orchestrator-canvas.ts`, `tests/canvas-context-share.ts` — canvas graph persistence, layout, patch API, plan→canvas materialization, and **context sharing** regressions.
-- There is no coverage configuration or CI gate. Untested or lightly tested surfaces include individual persistence CRUD methods, scheduler transition/retry branches, sideband edge cases, context resolution variants, and external Anthropic integration.
+- No Jest/Vitest framework; tests are executable Node scripts using `node:assert`.
+- Tests use real temporary SQLite databases and, where appropriate, real PTY harness behavior.
+- `npm test` is the canonical root regression suite and currently covers lifecycle, persistence, concurrency, replay, direct worker interaction, approvals/capabilities, tools, canvas behavior, context delivery/scopes, product-runtime v0.2 behavior, HTTP/server surfaces, and specialized harnesses.
+- Web changes should also pass `cd web && npx tsc -b && npm run build`.
+- CI exists, but a new PR must not be described as green until checks actually report success.
+- Keep tests deterministic and cleanup in `try/finally`; avoid `process.exit()` in shared regression paths.
 
-## Known Operational Issues
-- `src/orchestrator/orchestrator.ts:#consumeSession` must forward every `exit`/`crash` event to `Scheduler.handleSessionEvent`; never restore an exit/crash skip based on already-terminal task status. Scheduler updates session status before its idempotent task guard. See `handoff.md` Bug 1.
-- Windows `EBUSY` cleanup and four persistent winpty handles are documented in `handoff.md` Bugs 2–3. Winpty handle leakage is non-blocking but may cascade into SQLite removal failures; retest after Bug 1 changes.
-- Windows-only PTY settings (`useConpty:false`) do not apply on Linux/macOS; `generic.ts` selects the backend by platform.
+## Known Operational Constraints
+- `src/orchestrator/orchestrator.ts:#consumeSession` must forward every `exit`/`crash` event to `Scheduler.handleSessionEvent`; do not skip terminal events merely because the Task already appears terminal.
+- Windows `EBUSY` cleanup and historical winpty handle leakage are documented in `handoff.md`; treat them as platform-specific evidence and re-test before changing cleanup semantics.
+- Windows-only PTY settings such as `useConpty:false` must not leak into Linux/macOS behavior.
+- Never broadly kill Node processes. Cleanup may terminate only exact child PIDs owned by Chef/harness code.
 
-## Safe Cleanup Rules
-- `tests/golden-path.ts` must not call `process.exit()`; use `try/finally` cleanup and `process.exitCode` for failure reporting.
-- Never broadly kill Node processes. Cleanup may terminate only exact child PIDs owned by the harness, then remove temporary directories with force enabled.
-- Root `golden-debug*.mjs`, `golden-path-{debug,delay,dump,gc,trace}.ts`, `test-out.txt`, and `scripts/{db-repro,smoke-orchestrator}.ts` are debugging/manual artifacts; verify before deleting. Keep `diag-handles.mjs` if handle diagnostics are needed.
-- Follow `handoff.md` for platform-specific cleanup and known-bug retesting; do not treat historical Windows observations as current Linux behavior.
-
-## AI Assistant Verification
-- Verify negative repository claims (for example, a supposedly absent file or config) directly with `find`/`read` before recording them in project guidance; parallel scans can disagree.
+## Autonomous / AI Assistant Verification
+Before implementing unattended work:
+1. Read current `master`, recent commits, open PRs, and relevant docs.
+2. Verify negative claims directly in the repository.
+3. Avoid overlapping files/semantics with active PRs unless the task is explicitly a follow-up.
+4. Prefer one bounded change with an explicit acceptance criterion.
+5. Run relevant tests/build/typecheck and report only evidence actually observed.
+6. Review the final diff from a critic perspective for runtime-authority violations, duplicated sources of truth, lifecycle regressions, speculative architecture, or scope creep.
+7. If no clear safe task exists, no-op rather than inventing work.
