@@ -1,4 +1,4 @@
-import type { CanvasNode, WorkspaceId } from "./types.ts";
+import type { CanvasNode, ContextReference, WorkspaceId } from "./types.ts";
 
 /**
  * A visual context scope is a shared-knowledge boundary, not an execution node.
@@ -17,7 +17,7 @@ export interface ContextScope {
   workspaceId: WorkspaceId;
   name: string;
   bounds: ContextScopeBounds;
-  contextRefs: string[];
+  contextRefs: ContextReference[];
   memberNodeIds: string[];
 }
 
@@ -26,14 +26,11 @@ export interface ContextScopeInput {
   workspaceId: WorkspaceId;
   name: string;
   bounds: ContextScopeBounds;
-  contextRefs?: string[];
+  contextRefs?: ContextReference[];
 }
 
-/** Return true when a node's center point falls inside a scope rectangle. */
+/** Return true when a node's anchor point falls inside a scope rectangle. */
 export function nodeIsInsideScope(node: CanvasNode, scope: ContextScopeBounds): boolean {
-  // Canvas nodes currently expose their anchor position rather than dimensions.
-  // Treating the anchor as the membership point keeps membership deterministic
-  // until node dimensions become part of the durable canvas contract.
   return (
     node.position.x >= scope.x &&
     node.position.x <= scope.x + scope.width &&
@@ -42,10 +39,7 @@ export function nodeIsInsideScope(node: CanvasNode, scope: ContextScopeBounds): 
   );
 }
 
-/**
- * Derive membership from the durable canvas projection instead of persisting a
- * second source of truth in the UI. The returned ids are stable and sorted.
- */
+/** Derive membership from the authoritative canvas projection. */
 export function resolveScopeMembers(scope: ContextScopeBounds, nodes: CanvasNode[]): string[] {
   return nodes
     .filter((node) => nodeIsInsideScope(node, scope))
@@ -53,18 +47,14 @@ export function resolveScopeMembers(scope: ContextScopeBounds, nodes: CanvasNode
     .sort();
 }
 
-/**
- * Build a scope from a rectangle and the current canvas snapshot.
- * Membership is intentionally derived, so moving a node in/out of a scope
- * immediately changes which agents receive its shared context.
- */
+/** Build a scope from a rectangle and the current canvas snapshot. */
 export function materializeContextScope(input: ContextScopeInput, nodes: CanvasNode[]): ContextScope {
   return {
     id: input.id,
     workspaceId: input.workspaceId,
     name: input.name,
     bounds: { ...input.bounds },
-    contextRefs: [...(input.contextRefs ?? [])],
+    contextRefs: input.contextRefs?.map((ref) => ({ ...ref })) ?? [],
     memberNodeIds: resolveScopeMembers(input.bounds, nodes),
   };
 }
