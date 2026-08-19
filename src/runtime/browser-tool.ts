@@ -9,7 +9,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type {
   Artifact,
@@ -137,7 +137,7 @@ export class BrowserTool {
       const typedPage = page as { screenshot: (opts: { fullPage?: boolean }) => Promise<Buffer> };
       const buffer = await typedPage.screenshot({ fullPage: true });
       const artifact = await this.#persistScreenshot(ctx, session.id, buffer);
-      result = { type: "screenshot", value: `sideband://browser/${session.id}/${artifact.id}}` };
+      result = { type: "screenshot", value: `sideband://browser/${session.id}/${artifact.id}` };
       return { output: result, artifact, sessionId: session.id };
     } else {
       throw new Error(`browser: unknown action '${params.action}'`);
@@ -168,7 +168,9 @@ export class BrowserTool {
 
   async #persistScreenshot(ctx: ToolContext, sessionId: string, buffer: Buffer): Promise<Artifact> {
     const id = randomUUID();
-    const path = join(ctx.projectDir, ".chef-browser-screenshots", `${id}.png`);
+    const directory = join(ctx.projectDir, ".chef-browser-screenshots");
+    const path = join(directory, `${id}.png`);
+    await mkdir(directory, { recursive: true });
     await writeFile(path, buffer);
     return {
       id,
