@@ -22,7 +22,16 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { catalogEntry, KIND_COLORS, STATUS_COLORS } from "./nodeCatalog";
-import type { UiTask, NodeKind, NodeCatalogEntry, HarnessInfo, UiCanvasNode, UiCanvasEdge } from "./types";
+import type {
+  UiTask,
+  NodeKind,
+  NodeCatalogEntry,
+  HarnessInfo,
+  UiCanvasNode,
+  UiCanvasEdge,
+  EdgeRelationship,
+  ViewMode,
+} from "./types";
 import { TerminalView } from "./TerminalView";
 
 /** Light session projection passed down for terminal nodes (see api.sessions()). */
@@ -41,6 +50,7 @@ export interface CanvasNodeData {
   entry: NodeCatalogEntry | undefined;
   /** Live session id for terminal nodes (session.taskId === taskId). */
   sessionId?: string;
+  mode: ViewMode;
   [key: string]: unknown;
 }
 
@@ -73,14 +83,57 @@ interface BlueprintCanvasProps {
   tasks: UiTask[];
   canvasNodes: UiCanvasNode[];
   canvasEdges: UiCanvasEdge[];
-  onConnect: (source: string, target: string) => void;
-  onDisconnect: (source: string, target: string) => void;
+  onConnect: (source: string, target: string, relationship: EdgeRelationship) => void;
+  onDisconnect: (source: string, target: string, relationship: EdgeRelationship) => void;
   onSelectNode: (task: UiTask | null) => void;
   onDropNode: (payload: { type: string; harnessId?: string }, position: { x: number; y: number }) => void;
   onNodeDragStop?: (id: string, position: { x: number; y: number }, label: string) => void;
   harnesses: HarnessInfo[];
   sessions: TerminalSession[];
   selectedSessionId: string | null;
+  relationship: EdgeRelationship;
+  mode: ViewMode;
+}
+
+const EDGE_STYLE: Record<EdgeRelationship, { color: string; dash?: string; label: string }> = {
+  communication: { color: "#22d3ee", label: "Talks with" },
+  context: { color: "#a78bfa", dash: "7 5", label: "Shares context" },
+  delegation: { color: "#38bdf8", dash: "10 4", label: "Can delegate" },
+  dependency: { color: "#f59e0b", label: "Waits for" },
+  control: { color: "#fb7185", label: "Control flow" },
+  error: { color: "#ef4444", dash: "3 4", label: "On failure" },
+  approval: { color: "#f472b6", dash: "5 4", label: "Needs approval" },
+};
+
+const relationshipEdgeId = (source: string, target: string, relationship: EdgeRelationship) =>
+  `${source}->${target}:${relationship}`;
+
+function friendlyStatus(status: string, kind: NodeKind): string {
+  if (kind === "tool") {
+    if (status === "running" || status === "working") return "Busy";
+    if (status === "spawning" || status === "assigned" || status === "starting") return "Starting";
+    if (status === "failed") return "Disconnected";
+    if (status === "offline" || status === "cancelled") return "Closed";
+    if (status === "pending" || status === "completed" || status === "idle") return "Connected";
+    if (status === "waiting") return "Connected";
+  }
+  const labels: Record<string, string> = {
+    pending: "Idle",
+    assigned: "Starting",
+    spawning: "Starting",
+    running: "Working",
+    completed: "Idle",
+    failed: "Failed",
+    blocked: "Blocked",
+    cancelled: "Offline",
+    offline: "Offline",
+    starting: "Starting",
+    idle: "Idle",
+    working: "Working",
+    waiting: "Waiting",
+    needs_input: "Needs input",
+  };
+  return labels[status] ?? status;
 }
 
 function HarnessHandle({ color }: { color: string }) {
@@ -145,7 +198,7 @@ const nodeTypes: NodeTypes = {
           <div className="truncate text-[13px] font-medium text-[#e6edf3]">{data.label}</div>
           <div className="mt-0.5 flex items-center gap-1.5">
             <span className="text-[10px] uppercase tracking-wide" style={{ color: statusColor }}>
-              {data.status}
+            {friendlyStatus(data.status, data.kind)}{data.mode === "power" ? ` · ${data.status}` : ""}
             </span>
           </div>
         </div>
@@ -192,9 +245,9 @@ const nodeTypes: NodeTypes = {
           <div className="truncate text-[13px] font-medium text-[#e6edf3]">{data.label}</div>
           <div className="mt-0.5 flex items-center gap-1.5">
             <span className="text-[10px] uppercase tracking-wide" style={{ color: statusColor }}>
-              {data.status}
+              {friendlyStatus(data.status, data.kind)}{data.mode === "power" ? ` · ${data.status}` : ""}
             </span>
-            {sessionId && (
+            {data.mode === "power" && sessionId && (
               <span className="truncate text-[10px] text-[#8b949e]">{sessionId}</span>
             )}
           </div>
@@ -219,6 +272,8 @@ export function BlueprintCanvas({
   harnesses,
   sessions,
   selectedSessionId,
+  relationship,
+  mode,
 }: BlueprintCanvasProps) {
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const flowRef = useRef<HTMLDivElement | null>(null);
@@ -247,7 +302,10 @@ export function BlueprintCanvas({
         // Preserve a live in-progress drag position; otherwise use the server position.
         const position = prev?.position ?? node.position;
         const task = node.taskId ? taskById.get(node.taskId) : undefined;
-        const status = task?.status ?? "pending";
+        // Task/session state is authoritative for task-backed nodes. The
+        // persisted liveStatus is an identity/restoration hint for standalone
+        // nodes and must not mask running/completed/failed execution.
+        const status = task?.status ?? node.liveStatus ?? "pending";
 
         // Determine if this is a terminal node (by kind or label)
         const isTerminalNode = node.kind === "tool" && (node.label === "Terminal" || node.label === "tool.terminal");
@@ -279,32 +337,43 @@ export function BlueprintCanvas({
             type: node.id,
             entry,
             sessionId,
+            mode,
           },
         });
       }
       return merged;
     });
-  }, [canvasNodes, taskById, sessions, setRfNodes]);
+  }, [canvasNodes, taskById, sessions, mode, setRfNodes]);
 
   // ── Reconcile runtime canvas edges ──
   useEffect(() => {
     setRfEdges(
       canvasEdges.map((e) => {
+        const edgeRelationship = e.type ?? "communication";
+        const appearance = EDGE_STYLE[edgeRelationship];
         const sourceTask = e.source ? taskById.get(e.source) : undefined;
         const isRunning =
           sourceTask && (sourceTask.status === "running" || sourceTask.status === "spawning" || sourceTask.status === "assigned");
         return {
-          id: `${e.source}->${e.target}`,
+          id: relationshipEdgeId(e.source, e.target, edgeRelationship),
           source: e.source,
           target: e.target,
           type: "smoothstep",
-          style: { stroke: isRunning ? "#06b6d4" : "#58a6ff", strokeWidth: isRunning ? 3 : 2 },
+          label: mode === "power" ? appearance.label : undefined,
+          labelStyle: { fill: appearance.color, fontSize: 10, fontWeight: 600 },
+          labelBgStyle: { fill: "#0d1117", fillOpacity: 0.92 },
+          style: {
+            stroke: appearance.color,
+            strokeWidth: isRunning ? 3 : 2,
+            strokeDasharray: appearance.dash,
+          },
           animated: isRunning,
-          markerEnd: { type: "arrowclosed", color: isRunning ? "#06b6d4" : "#58a6ff" },
+          markerEnd: { type: "arrowclosed", color: appearance.color },
+          data: { relationship: edgeRelationship },
         };
       }),
     );
-  }, [canvasEdges, taskById, setRfEdges]);
+  }, [canvasEdges, mode, taskById, setRfEdges]);
 
   // Track selected node so the parent can show the toolbar
   const handleNodeClick: NodeMouseHandler = useCallback(
@@ -332,34 +401,38 @@ export function BlueprintCanvas({
     (changes) => {
       for (const c of changes) {
         if (c.type === "remove") {
-          const [source, target] = c.id.split("->");
-          if (source && target) onDisconnect(source, target);
+          const edge = canvasEdges.find((candidate) => relationshipEdgeId(candidate.source, candidate.target, candidate.type ?? "communication") === c.id);
+          if (edge) onDisconnect(edge.source, edge.target, edge.type ?? "communication");
         }
       }
       setRfEdges((eds) => applyEdgeChanges(changes, eds));
     },
-    [setRfEdges, onDisconnect],
+    [canvasEdges, setRfEdges, onDisconnect],
   );
 
   // Optimistic connect (same as React Flow's addEdge) so the line renders instantly.
   const handleConnect = useCallback(
     (connection: Connection) => {
       if (!connection.source || !connection.target || connection.source === connection.target) return;
+      const appearance = EDGE_STYLE[relationship];
       setRfEdges((eds) =>
         addEdge(
           {
-            id: `${connection.source}->${connection.target}`,
+            id: relationshipEdgeId(connection.source, connection.target, relationship),
             source: connection.source,
             target: connection.target,
             type: "smoothstep",
-            style: { stroke: "#58a6ff", strokeWidth: 2 },
+            label: mode === "power" ? appearance.label : undefined,
+            style: { stroke: appearance.color, strokeWidth: 2, strokeDasharray: appearance.dash },
+            markerEnd: { type: "arrowclosed", color: appearance.color },
+            data: { relationship },
           },
           eds,
         ),
       );
-      onConnect(connection.source, connection.target);
+      onConnect(connection.source, connection.target, relationship);
     },
-    [setRfEdges, onConnect],
+    [setRfEdges, onConnect, relationship, mode],
   );
 
   // Persist drag-end position via patchCanvas (debounced 500ms to coalesce).

@@ -31,6 +31,9 @@ export type ArtifactId = string;
 export type MessageId = string;
 export type EventId = string;
 export type PlanId = string;
+export type MissionId = string;
+export type AutomationId = string;
+export type AutomationRunId = string;
 export type ChannelId = string;
 
 export type HarnessId = string;
@@ -131,6 +134,11 @@ export interface Task {
   status: TaskStatus;
   assignedTo?: AgentId;
   parentTaskId?: TaskId;
+  /** Owning goal-oriented mission, when this task was created from human intent. */
+  missionId?: MissionId;
+  /** Owning reusable automation definition/run, when automation-created. */
+  automationId?: AutomationId;
+  automationRunId?: AutomationRunId;
   dependencies: TaskId[];
   contextRefs: ContextReference[];
   priority: number;
@@ -309,11 +317,77 @@ export interface Plan {
   id: PlanId;
   workspaceId: WorkspaceId;
   goal: string;
+  missionId?: MissionId;
   status: PlanStatus;
   tasks: PlanTask[];
   taskIds: TaskId[];
   createdAt: Timestamp;
   updatedAt?: Timestamp;
+}
+
+// ---------------------------------------------------------------------------
+// Missions & Automations (product/runtime spec v0.2)
+// ---------------------------------------------------------------------------
+
+export type MissionStatus =
+  | "planning"
+  | "active"
+  | "paused"
+  | "waiting_for_approval"
+  | "blocked"
+  | "verifying"
+  | "completed"
+  | "cancelled"
+  | "failed";
+
+/** Durable goal-oriented work created from human intent. */
+export interface Mission {
+  id: MissionId;
+  workspaceId: WorkspaceId;
+  goal: string;
+  status: MissionStatus;
+  taskIds: TaskId[];
+  planId?: PlanId;
+  createdBy: EntityId;
+  metadata: Record<string, unknown>;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+  completedAt?: Timestamp;
+}
+
+export type AutomationStatus = "idle" | "running" | "stopped" | "disabled";
+export type AutomationRunStatus = "queued" | "running" | "waiting" | "completed" | "failed" | "cancelled";
+
+export interface AutomationGraphEdge {
+  source: string;
+  target: string;
+  type: "dependency" | "control" | "error" | "approval";
+}
+
+/** Reusable executable graph. Run/Stop is scoped to this object, never the workspace. */
+export interface Automation {
+  id: AutomationId;
+  workspaceId: WorkspaceId;
+  name: string;
+  description: string;
+  status: AutomationStatus;
+  nodeIds: string[];
+  edges: AutomationGraphEdge[];
+  trigger: Record<string, unknown>;
+  currentRunId?: AutomationRunId;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
+export interface AutomationRun {
+  id: AutomationRunId;
+  workspaceId: WorkspaceId;
+  automationId: AutomationId;
+  status: AutomationRunStatus;
+  taskIds: TaskId[];
+  startedAt: Timestamp;
+  endedAt?: Timestamp;
+  error?: string;
 }
 
 export interface OrchestratorResult {
@@ -329,6 +403,15 @@ export interface OrchestratorResult {
 
 export type CanvasNodeType = "blueprint" | "proxy";
 export type CanvasNodeKind = "agent" | "tool" | "data" | "approval" | "system";
+export type CanvasNodeLiveStatus = "offline" | "starting" | "idle" | "working" | "waiting" | "blocked" | "needs_input" | "failed";
+export type CanvasEdgeType =
+  | "communication"
+  | "context"
+  | "delegation"
+  | "dependency"
+  | "control"
+  | "error"
+  | "approval";
 
 /** Durable blueprint canvas node exposed via runtime API. */
 export interface CanvasNode {
@@ -339,6 +422,8 @@ export interface CanvasNode {
   nodeType: CanvasNodeType;
   kind: CanvasNodeKind;
   harnessId: string | null;
+  liveStatus: CanvasNodeLiveStatus;
+  config: Record<string, unknown>;
   position: { x: number; y: number };
   updatedAt: Timestamp;
 }
@@ -351,6 +436,8 @@ export interface CanvasEdge {
   target: string;
   sourceHandle: string | null;
   targetHandle: string | null;
+  /** Only dependency/control/approval edges imply ordering. */
+  type: CanvasEdgeType;
   updatedAt: Timestamp;
 }
 
@@ -361,13 +448,15 @@ export interface CanvasNodeInput {
   nodeType?: CanvasNodeType;
   kind?: CanvasNodeKind;
   harnessId?: string | null;
+  liveStatus?: CanvasNodeLiveStatus;
+  config?: Record<string, unknown>;
   position?: { x: number; y: number };
 }
 
 export interface CanvasPatch {
   upsertNodes?: CanvasNodeInput[];
-  upsertEdges?: Array<{ source: string; target: string; sourceHandle?: string | null; targetHandle?: string | null }>;
-  deleteEdges?: Array<{ source: string; target: string }>;
+  upsertEdges?: Array<{ source: string; target: string; type?: CanvasEdgeType; sourceHandle?: string | null; targetHandle?: string | null }>;
+  deleteEdges?: Array<{ source: string; target: string; type?: CanvasEdgeType }>;
   deleteNodes?: string[];
   arrange?: { mode: "columns" | "snake" | "radial" };
 }
@@ -377,6 +466,19 @@ export interface CanvasPatchResult {
   error?: string;
   nodes?: CanvasNode[];
   edges?: CanvasEdge[];
+}
+
+export interface ContextZoneBounds { x: number; y: number; width: number; height: number; }
+export interface ContextZone {
+  id: string;
+  workspaceId: WorkspaceId;
+  name: string;
+  bounds: ContextZoneBounds;
+  contextRefs: ContextReference[];
+  /** Explicit persisted membership; moving geometry never mutates this list. */
+  memberNodeIds: string[];
+  policy: Record<string, unknown>;
+  updatedAt: Timestamp;
 }
 
 // ---------------------------------------------------------------------------
@@ -391,8 +493,12 @@ export interface WorkspaceSnapshot {
   decisions: Decision[];
   events: RuntimeEvent[];
   plans: Plan[];
+  missions: Mission[];
+  automations: Automation[];
+  automationRuns: AutomationRun[];
   approvals: Approval[];
   canvasNodes: CanvasNode[];
   canvasEdges: CanvasEdge[];
+  contextZones: ContextZone[];
   generatedAt: Timestamp;
 }

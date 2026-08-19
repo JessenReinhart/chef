@@ -1,8 +1,10 @@
 import { createServer } from "node:http";
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import type { ChefRuntime } from "../main.ts";
-import type { RuntimeEvent, PlanTask, PlanStatus, CanvasPatch } from "../core/types.ts";
+import type { ApprovalDecision, RuntimeEvent, PlanTask, PlanStatus, CanvasPatch, CanvasEdgeType } from "../core/types.ts";
 import { buildPlanGraph } from "../core/graph.ts";
+import { capabilityRegistry, type Role } from "../runtime/capabilities.ts";
+import type { Repository } from "../persistence/database.ts";
 
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8" } as const;
 const SSE_HEADERS = {
@@ -46,6 +48,59 @@ export function createHttpServer(runtime: ChefRuntime): Server {
         return;
       }
 
+      if (req.method === "GET" && path === "/api/missions") {
+        sendJson(res, 200, { ok: true, data: runtime.repository.listMissions(runtime.workspaceId) });
+        return;
+      }
+
+      const missionAction = path.match(/^\/api\/missions\/([^/]+)\/(pause|resume|cancel)$/);
+      if (req.method === "POST" && missionAction) {
+        const [, missionId, action] = missionAction;
+        const current = runtime.repository.getMission(missionId);
+        if (!current || current.workspaceId !== runtime.workspaceId) { sendJson(res, 404, { error: `mission not found: ${missionId}` }); return; }
+        const mission = action === "pause"
+          ? await runtime.pauseMission(missionId)
+          : action === "resume"
+            ? runtime.resumeMission(missionId)
+            : await runtime.cancelMission(missionId);
+        sendJson(res, 200, { ok: true, data: mission });
+        return;
+      }
+
+      const missionIdRoute = path.match(/^\/api\/missions\/([^/]+)$/);
+      if (req.method === "PATCH" && missionIdRoute) {
+        const missionId = missionIdRoute[1];
+        const current = runtime.repository.getMission(missionId);
+        if (!current || current.workspaceId !== runtime.workspaceId) { sendJson(res, 404, { error: `mission not found: ${missionId}` }); return; }
+        const body = (await readBody(req)) as { goal?: string };
+        if (!body.goal?.trim()) { sendJson(res, 400, { error: "goal is required" }); return; }
+        const mission = await runtime.redirectMission(missionId, body.goal);
+        sendJson(res, 200, { ok: true, data: mission });
+        return;
+      }
+
+      if (req.method === "GET" && path === "/api/automations") {
+        sendJson(res, 200, { ok: true, data: runtime.repository.listAutomations(runtime.workspaceId) });
+        return;
+      }
+
+      if (req.method === "POST" && path === "/api/automations") {
+        const body = (await readBody(req)) as { name?: string; description?: string; nodeIds?: string[]; edges?: Array<{ source: string; target: string; type: "dependency" | "control" | "error" | "approval" }>; trigger?: Record<string, unknown> };
+        if (!body.name) { sendJson(res, 400, { error: "name is required" }); return; }
+        const automation = runtime.repository.insertAutomation({ workspaceId: runtime.workspaceId, name: body.name, description: body.description, nodeIds: body.nodeIds, edges: body.edges, trigger: body.trigger });
+        runtime.repository.appendEvent({ workspaceId: runtime.workspaceId, source: { type: "automation", id: automation.id }, type: "automation.created", payload: { automationId: automation.id } });
+        sendJson(res, 201, { ok: true, data: automation });
+        return;
+      }
+
+      const automationAction = path.match(/^\/api\/automations\/([^/]+)\/(run|stop)$/);
+      if (req.method === "POST" && automationAction) {
+        const [, automationId, action] = automationAction;
+        const run = action === "run" ? runtime.runAutomation(automationId) : await runtime.stopAutomation(automationId);
+        sendJson(res, 200, { ok: true, data: run });
+        return;
+      }
+
       if (req.method === "GET" && path === "/api/graph") {
         const snapshot = await runtime.inspectState();
         sendJson(res, 200, buildPlanGraph(snapshot));
@@ -74,6 +129,18 @@ export function createHttpServer(runtime: ChefRuntime): Server {
 
       if (req.method === "GET" && path === "/api/llm/status") {
         sendJson(res, 200, { ok: true, data: runtime.llmStatus });
+        return;
+      }
+
+      if (req.method === "GET" && path === "/api/capabilities") {
+        const requestedRole = url.searchParams.get("role") ?? "engineer";
+        const roles: Role[] = ["engineer", "orchestrator", "human"];
+        if (!roles.includes(requestedRole as Role)) {
+          sendJson(res, 400, { error: "role must be one of: engineer, orchestrator, human" });
+          return;
+        }
+        const role = requestedRole as Role;
+        sendJson(res, 200, { ok: true, data: { role, policy: capabilityRegistry.getPolicy(role) } });
         return;
       }
 
@@ -216,7 +283,7 @@ export function createHttpServer(runtime: ChefRuntime): Server {
         const [, approvalId, decision] = approvalMatch;
         const body = (await readBody(req)) as { approver?: string };
         const approver = typeof body.approver === "string" && body.approver.length > 0 ? body.approver : "ui";
-        await runtime.resolveApproval(approvalId, decision, approver);
+        await runtime.resolveApproval(approvalId, decision as ApprovalDecision, approver);
         sendJson(res, 200, { ok: true });
         return;
       }
@@ -332,6 +399,12 @@ export function createHttpServer(runtime: ChefRuntime): Server {
           sendJson(res, 400, { error: "type is required" });
           return;
         }
+        const inferredHarness = body.type.startsWith("harness.")
+          ? body.type.slice("harness.".length)
+          : body.type === "tool.terminal"
+            ? "generic"
+            : undefined;
+        const assignedTo = body.assignedTo ?? inferredHarness;
         const task = runtime.repository.createTask({
           workspaceId: runtime.workspaceId,
           title: body.title ?? `Node ${body.type}`,
@@ -340,17 +413,48 @@ export function createHttpServer(runtime: ChefRuntime): Server {
           workflowNodeId: body.type,
           contextRefs: [],
           dependencies: body.dependencies,
-          assignedTo: body.assignedTo,
+          assignedTo,
         });
-        // If user wants immediate execution, trigger dispatch
-        if (body.autoDispatch) {
-          void runtime.dispatchPending().catch((err) => console.error("dispatch error:", err));
+        await runtime.patchCanvas(runtime.workspaceId, { upsertNodes: [{
+          id: task.id,
+          taskId: task.id,
+          label: task.title,
+          kind: body.kind === "terminal" ? "tool" : (body.kind as "agent" | "tool" | "data" | "approval" | "system" | undefined),
+          liveStatus: "offline",
+          config: body.config ?? {},
+          position: body.position,
+        }] });
+        let execution: { status: "started" | "configuration_required"; reason?: string } | undefined;
+        if (body.autoDispatch && assignedTo) {
+          await runtime.activateNode(task.id);
+          execution = { status: "started" };
+        } else if (body.autoDispatch) {
+          execution = {
+            status: "configuration_required",
+            reason: body.type === "tool.browser"
+              ? "Browser nodes require a browser action and URL; use /api/browser/:sessionId/action when configured"
+              : `Node type ${body.type} has no executable harness`,
+          };
         }
-        sendJson(res, 201, { ok: true, data: { taskId: task.id, workflowNodeId: task.workflowNodeId } });
+        sendJson(res, 201, { ok: true, data: { taskId: task.id, workflowNodeId: task.workflowNodeId, assignedTo, execution } });
         return;
       }
 
       const nodeIdMatch = path.match(/^\/api\/nodes\/([^/]+)$/);
+      const nodeActivateMatch = path.match(/^\/api\/nodes\/([^/]+)\/activate$/);
+      if (req.method === "POST" && nodeActivateMatch) {
+        const node = await runtime.activateNode(nodeActivateMatch[1]);
+        sendJson(res, 200, { ok: true, data: node });
+        return;
+      }
+      const nodeMessageMatch = path.match(/^\/api\/nodes\/([^/]+)\/message$/);
+      if (req.method === "POST" && nodeMessageMatch) {
+        const body = (await readBody(req)) as { message?: string };
+        if (!body.message) { sendJson(res, 400, { error: "message is required" }); return; }
+        await runtime.interveneNode(nodeMessageMatch[1], body.message);
+        sendJson(res, 202, { ok: true });
+        return;
+      }
       if (req.method === "PATCH" && nodeIdMatch) {
         const [, taskId] = nodeIdMatch;
         const body = (await readBody(req)) as {
@@ -390,9 +494,9 @@ export function createHttpServer(runtime: ChefRuntime): Server {
         return;
       }
 
-      // Edges: create task dependency
+      // Typed relationships: only dependency edges affect task readiness.
       if (req.method === "POST" && path === "/api/edges") {
-        const body = (await readBody(req)) as { source?: string; target?: string; kind?: string };
+        const body = (await readBody(req)) as { source?: string; target?: string; type?: "communication" | "context" | "delegation" | "dependency" | "control" | "error" | "approval" };
         if (typeof body.source !== "string" || typeof body.target !== "string") {
           sendJson(res, 400, { error: "source and target required" });
           return;
@@ -404,29 +508,65 @@ export function createHttpServer(runtime: ChefRuntime): Server {
           sendJson(res, 404, { error: "source or target task not found" });
           return;
         }
-        // Add dependency: target depends on source
-        runtime.repository.updateTask(body.target, { dependencies: [...(tgt.dependencies ?? []), body.source] });
-        sendJson(res, 201, { ok: true, data: { source: body.source, target: body.target } });
+        const type = body.type ?? "dependency";
+        const result = await runtime.patchCanvas(runtime.workspaceId, { upsertEdges: [{ source: body.source, target: body.target, type }] });
+        if (!result.ok) { sendJson(res, 422, result); return; }
+        // Ordering is explicit: relationship edges never mutate task dependencies.
+        // Persist it only after the canvas relationship was accepted.
+        if (type === "dependency") {
+          runtime.repository.updateTask(body.target, { dependencies: [...new Set([...(tgt.dependencies ?? []), body.source])] });
+        }
+        sendJson(res, 201, { ok: true, data: result.edges?.find((edge) => edge.source === body.source && edge.target === body.target && edge.type === type) });
         return;
       }
 
       const edgeIdMatch = path.match(/^\/api\/edges\/([^/]+)$/);
       if (req.method === "DELETE" && edgeIdMatch) {
-        // edgeId format: "source->target" (browser encodes `>` as %3E on the wire)
+        // edgeId format: source->target[:type]. `?type=` is also accepted to
+        // avoid ambiguity for callers whose node ids contain colons.
         const [, edgeIdRaw] = edgeIdMatch;
         const edgeId = decodeURIComponent(edgeIdRaw);
-        const [source, target] = edgeId.split("->");
-        if (!source || !target) {
-          sendJson(res, 400, { error: "invalid edge id format (use source->target)" });
+        const arrow = edgeId.lastIndexOf("->");
+        if (arrow <= 0 || arrow === edgeId.length - 2) {
+          sendJson(res, 400, { error: "invalid edge id format (use source->target[:type])" });
           return;
         }
+        const source = edgeId.slice(0, arrow);
+        let target = edgeId.slice(arrow + 2);
+        const allowedTypes: CanvasEdgeType[] = ["communication", "context", "delegation", "dependency", "control", "error", "approval"];
+        let typeRaw = url.searchParams.get("type") ?? undefined;
+        if (!typeRaw) {
+          const suffix = target.lastIndexOf(":");
+          const candidate = suffix > 0 ? target.slice(suffix + 1) : "";
+          if (allowedTypes.includes(candidate as CanvasEdgeType)) {
+            typeRaw = candidate;
+            target = target.slice(0, suffix);
+          }
+        }
+        const type = typeRaw ?? "dependency";
+        if (!allowedTypes.includes(type as CanvasEdgeType)) {
+          sendJson(res, 400, { error: `invalid edge type: ${type}` });
+          return;
+        }
+        const edgeType = type as CanvasEdgeType;
         const tgt = runtime.repository.getTask(target);
         if (!tgt) {
           sendJson(res, 404, { error: `target task not found: ${target}` });
           return;
         }
-        const deps = (tgt.dependencies ?? []).filter((d) => d !== source);
-        runtime.repository.updateTask(target, { dependencies: deps });
+        const edge = runtime.listCanvas(runtime.workspaceId).edges.find(
+          (candidate) => candidate.source === source && candidate.target === target && candidate.type === edgeType,
+        );
+        if (!edge) {
+          sendJson(res, 404, { error: `edge not found: ${source}->${target}:${edgeType}` });
+          return;
+        }
+        const result = await runtime.patchCanvas(runtime.workspaceId, { deleteEdges: [{ source, target, type: edgeType }] });
+        if (!result.ok) { sendJson(res, 422, result); return; }
+        if (edgeType === "dependency") {
+          const deps = (tgt.dependencies ?? []).filter((dependency) => dependency !== source);
+          runtime.repository.updateTask(target, { dependencies: deps });
+        }
         sendJson(res, 200, { ok: true });
         return;
       }

@@ -1,12 +1,12 @@
 # Chef
 
-**An AI engineering workspace where one goal can become a whole team of agents working on it.**
+**A living AI workspace where people, agents, tools, and context collaborate in real time.**
 
-Chef is built around a simple idea: instead of manually driving one AI coding assistant at a time, give a goal to an **Orchestrator** and let it coordinate the work.
+Chef is built around a simple idea: open a persistent workspace, bring in useful agents and tools, and give the **Orchestrator** a goal when you want a coordinated outcome.
 
 The Orchestrator can break a problem into tasks, delegate those tasks to different AI agents, keep their work connected, and bring the results back together. The agents can run through real terminal-based tools, so Chef is not tied to a single AI model or coding agent.
 
-> **Human intent → Orchestrator → Agents → Shared context → Results → Verification**
+> **Human intent → Mission → Orchestrator → live agents and tools → artifacts → verified outcome**
 
 Chef is local-first and designed to make complex, multi-agent engineering work feel like one coherent workspace.
 
@@ -51,7 +51,7 @@ You talk primarily to Chef's **Orchestrator**. It acts more like a technical lea
 
  - **Runtime is the product** — the UI/canvas is disposable.
  - **Terminal I/O and structured messaging are never mixed.** PTY bytes remain a separate harness channel; structured envelopes arrive via sideband outbox. Runtime lifecycle/events remain durable in SQLite.
- - **Restart survival** — state, artifacts, tasks, sessions, plans, and messages persist across process restarts.
+ - **Restart survival** — workspace relationships, context zones, missions, automations, tasks, artifacts, sessions, and messages persist across process restarts.
  - **Atomic dispatch** — scheduler concurrency is enforced in the dispatch transaction, so concurrent callers cannot oversubscribe live sessions.
  - **Human approvals, live observability, workflow nodes, tools, and chat** land on top of the same runtime.
 
@@ -59,10 +59,10 @@ You talk primarily to Chef's **Orchestrator**. It acts more like a technical lea
 
 Chef is still early, but the core runtime is already real.
 
-- Run multi-agent plans through terminal-based agent harnesses
+- Create Missions from user intent and coordinate multi-agent plans through terminal-based agent harnesses
 - Dispatch and track tasks and sessions
 - Persist tasks, sessions, messages, artifacts, and events locally
-- Survive process restarts without losing the workflow state
+- Survive process restarts without losing living workspace state
 - Stream live runtime events
 - Intervene in running terminal sessions
 - Expose runtime state through a small HTTP/SSE API
@@ -74,10 +74,11 @@ The goal is a general-purpose **AI Engineering OS** rather than another chat int
 
 Planned areas include:
 
-- **Visual workflows** — see and control agents, tasks, and dependencies on a canvas
+- **Living canvas** — see and directly use agents, tools, context zones, missions, and artifacts without a global Run gate
+- **Automations** — build repeatable jobs with explicit triggers, dependencies, Run/Stop, retries, and history
 - **More harnesses** — use Claude Code, Pi, OMP, Codex CLI, Aider, and other terminal-based agents
 - **Shared context** — let agents exchange the right information without copying entire conversations around
-- **Artifacts** — make files, findings, reports, and other outputs first-class parts of a workflow
+- **Artifacts** — make files, findings, reports, and other outputs first-class parts of the workspace
 - **Approvals & permissions** — keep humans in control of sensitive actions
 - **Tools & integrations** — connect agents to browsers, MCP capabilities, and other engineering tools
 - **Resume & replay** — recover and continue interrupted work from durable runtime state
@@ -95,15 +96,17 @@ npm install
 
 # Run the end-to-end golden path
 node --experimental-strip-types tests/golden-path.ts
-<<<<<<< HEAD
 ```
 
 To run the local inspector dashboard:
- # Full regression suite
- npm test
- # Handle-leak diagnostic
- node --experimental-strip-types diag-handles.mjs
- ```
+
+```bash
+# Full regression suite
+npm test
+
+# Handle-leak diagnostic
+node --experimental-strip-types diag-handles.mjs
+```
 
  ## Web UI
 
@@ -116,8 +119,9 @@ To run the local inspector dashboard:
 
  - **Simple Mode** — template gallery (Monthly Financial Report, Cash Flow Analysis, Budget vs Actual, Developer Fix/Verify), guided setup wizard, friendly inspector fields, plain-language statuses. No runtime/model terminology.
  - **Power Mode** — full node graph, live logs with filters, interactive terminal panes, context bus inspector, wide node inspector (model/temperature/tokens), session controls.
- - **Canvas** — pan/zoom/select/minimap projection of the workflow graph; approval accept/reject on human nodes.
- - **Chat with Chef** — streaming assistant over SSE; can propose validated workflow plans via the LLM decision provider.
+ - **Canvas** — persistent live projection of agents, tools, typed relationships, and Context Zones.
+ - **Chat with Chef** — streaming Mission surface over SSE; user intent becomes coordinated, durable work.
+ - **Automations** — repeatable executable graphs are the only surface where Run/Stop is a primary control.
  - **Execution console** — node status timeline, artifacts with preview/download, approval queue, metrics strip.
 
  ## Runtime API

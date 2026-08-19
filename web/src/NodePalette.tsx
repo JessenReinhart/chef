@@ -1,8 +1,10 @@
 import { useState, useCallback, useMemo, useEffect } from "react";
 import { NODE_LIBRARY, catalogEntry, type NodeCatalogEntry, subscribeLibrary } from "./nodeCatalog";
+import type { ViewMode } from "./types";
 
 interface PaletteProps {
   onDragStart: (type: string, event: React.DragEvent) => void;
+  mode: ViewMode;
 }
 
 const CATEGORIES = ["All", "Agents", "Tools", "Flow", "Data", "Human"] as const;
@@ -25,7 +27,16 @@ const CATEGORY_DOT: Record<string, string> = {
   Human: "#f43f5e",
 };
 
-export function NodePalette({ onDragStart }: PaletteProps) {
+const SIMPLE_CATEGORY_LABELS: Record<(typeof CATEGORIES)[number], string> = {
+  All: "All",
+  Agents: "Teammates",
+  Tools: "Apps",
+  Flow: "Choices",
+  Data: "Files & data",
+  Human: "People",
+};
+
+export function NodePalette({ onDragStart, mode }: PaletteProps) {
   const [category, setCategory] = useState<(typeof CATEGORIES)[number]>("All");
   const [search, setSearch] = useState("");
   const [library, setLibrary] = useState<NodeCatalogEntry[]>(NODE_LIBRARY);
@@ -73,7 +84,7 @@ export function NodePalette({ onDragStart }: PaletteProps) {
       {/* Header + search */}
       <div className="px-3 pt-3 pb-2 border-b border-[#21262d] shrink-0">
         <div className="flex items-center justify-between mb-2">
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-[#8b949e]">Nodes</h2>
+          <h2 className="text-xs font-semibold uppercase tracking-wider text-[#8b949e]">{mode === "simple" ? "Add to workspace" : "Nodes"}</h2>
           <span className="text-[10px] text-[#484f58]">{filtered.length}</span>
         </div>
         <input
@@ -97,7 +108,7 @@ export function NodePalette({ onDragStart }: PaletteProps) {
                 : "text-[#8b949e] hover:text-[#e6edf3] hover:bg-[#161b22]"
             } ${CATEGORY_ACCENT[cat]}`}
           >
-            {cat}
+            {mode === "simple" ? SIMPLE_CATEGORY_LABELS[cat] : cat}
           </button>
         ))}
       </div>
@@ -115,11 +126,13 @@ export function NodePalette({ onDragStart }: PaletteProps) {
             <div className="flex items-center gap-2">
               <span className="h-2 w-2 rounded-full shrink-0" style={{ background: CATEGORY_DOT[entry.category] ?? "#6b7280" }} />
               <span className="text-xs font-semibold truncate">{entry.label}</span>
-              {entry.harnessId && (
+              {mode === "power" && entry.harnessId && (
                 <span className="ml-auto h-1.5 w-1.5 rounded-full bg-green-400/60" title={`Harness: ${entry.harnessId}`} />
               )}
             </div>
-            <p className="text-[10px] text-[#8b949e] mt-0.5 leading-tight">{entry.description}</p>
+            <p className="text-[10px] text-[#8b949e] mt-0.5 leading-tight">
+              {mode === "simple" ? entry.description.replace(/\s*\([^)]*\)\s*$/, "") : entry.description}
+            </p>
           </div>
         ))}
         {filtered.length > 0 && (

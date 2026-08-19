@@ -29,6 +29,7 @@ import {
   type Capability,
   type CapabilityContext,
   type CapabilityPolicy,
+  type CapabilityRegistry,
   capabilityRegistry,
 } from "./capabilities.ts";
 import type { HarnessRegistry } from "../runtime/scheduler.ts";
@@ -61,6 +62,8 @@ export interface ToolResult {
   durationMs: number;
   approvalId?: string;
 }
+
+type CapabilityRegistryLike = Pick<CapabilityRegistry, "checkPermission">;
 
 
 /**
@@ -120,6 +123,7 @@ export interface TerminalToolResult {
 
 /** Resolve a shell command against PATH (like the harness does). */
 export function resolveExecutablePath(command: string): string {
+  if (isAbsolute(command)) return command;
   const binary = command.split(/\s+/, 1)[0] ?? command;
   if (isAbsolute(binary)) return binary;
   const dirs = (process.env.PATH ?? "").split(delimiter);
@@ -186,10 +190,9 @@ export async function executeTerminal(
 }
 
 function selectHarness(registry: HarnessRegistry): HarnessLike {
-  for (const harness of registry.values()) {
-    return harness;
-  }
-  throw new CapabilityUnavailableError("terminal tool: no harness registered");
+  const generic = registry.get("generic");
+  if (generic) return generic;
+  throw new CapabilityUnavailableError("terminal tool: generic command harness not registered");
 }
 
 // ---------------------------------------------------------------------------
@@ -292,6 +295,10 @@ export interface GitToolConfig {
 const GIT_ALLOWED_OPERATIONS: readonly GitToolConfig["operation"][] = [
   "status", "diff", "commit", "branch", "log", "push",
 ];
+
+function isGitOperation(value: string): value is GitToolConfig["operation"] {
+  return GIT_ALLOWED_OPERATIONS.some((operation) => operation === value);
+}
 
 /**
  * Git tool — spawns `git` directly (not via PTY) with `--no-pager` and
@@ -478,10 +485,11 @@ export class ToolRunner {
       if (mode === "deny") throw new PermissionDeniedError("terminal", caps.agentId);
       const command = String(input.command ?? "");
       if (command === "") throw new Error("bash: command is required");
-      const parts = command.trim().split(/\s+/);
+      const absoluteCommand = isAbsolute(command);
+      const parts = absoluteCommand ? [command] : command.trim().split(/\s+/);
       const config: TerminalToolConfig = {
         command: parts[0] ?? "",
-        args: parts.slice(1),
+        args: Array.isArray(input.args) ? asStringArray(input.args) : parts.slice(1),
         cwd: typeof input.cwd === "string" ? input.cwd : undefined,
         env: typeof input.env === "object" && input.env !== null ? (input.env as Record<string, string>) : undefined,
         timeoutMs: typeof input.timeoutMs === "number" ? input.timeoutMs : undefined,
@@ -522,7 +530,7 @@ export class ToolRunner {
       const mode = this.#registry.checkPermission(caps, "git");
       if (mode === "deny") throw new PermissionDeniedError("git", caps.agentId);
       const operation = String(input.operation ?? "");
-      if (!["status", "diff", "commit", "branch", "log", "push"].includes(operation)) {
+      if (!isGitOperation(operation)) {
         throw new Error(`git: operation must be one of status|diff|commit|branch|log|push, got '${operation}'`);
       }
       if (operation === "push") {
@@ -594,7 +602,7 @@ export class ToolRunner {
         workspaceId: this.#context.workspaceId,
         taskId: "tool-runner",
         status: "pending",
-        requester: this.#context.agentId,
+        requester: this.#context.capabilities.agentId,
         reason,
         createdAt: Date.now(),
       });
@@ -647,4 +655,3 @@ export function createToolContextForChef(runtime: {
   };
   return ctx;
 }
-

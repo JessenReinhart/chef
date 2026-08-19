@@ -14,7 +14,7 @@ import type {
   ApprovalDecision,
 } from "../core/types.ts";
 import type { Repository, SessionInput } from "../persistence/database.ts";
-import type { HarnessEvent } from "../harness/generic.ts";
+import type { HarnessEvent, SpawnOptions } from "../harness/generic.ts";
 import type { SidebandEnvelope } from "../harness/sideband.ts";
 import { TaskMachine } from "./task-machine.ts";
 
@@ -40,6 +40,8 @@ export interface HarnessLike {
   readonly command: string;
   readonly args: string[];
   readonly cwd: string;
+  spawn(options?: SpawnOptions): Promise<{ id: string; pid?: number }>;
+  events(sessionId: string): AsyncIterable<HarnessEvent>;
   send(sessionId: string, input: string): Promise<void>;
   interrupt(sessionId: string): Promise<void>;
   resize(sessionId: string, cols: number, rows: number): Promise<void>;
@@ -61,6 +63,9 @@ export interface HarnessRegistry {
   set(agentId: AgentId, harness: HarnessLike): void;
   values(): Iterable<HarnessLike>;
 }
+
+/** Receives each successfully spawned session before dispatch scans again. */
+export type SessionDispatchOwner = (session: Session) => void;
 
 // ---------------------------------------------------------------------------
 // Scheduler
@@ -136,8 +141,13 @@ export class Scheduler {
    * Scan for runnable tasks and dispatch up to maxConcurrency.
    * Returns the number of tasks dispatched.
    */
-  async dispatchPending(workspaceId: WorkspaceId): Promise<number> {
+  async dispatchPending(
+    workspaceId: WorkspaceId,
+    allowedTaskIds?: readonly TaskId[],
+    onSessionDispatched?: SessionDispatchOwner,
+  ): Promise<number> {
     let dispatched = 0;
+    const allowed = allowedTaskIds ? new Set(allowedTaskIds) : null;
 
     while (true) {
       const snapshot = this.#repo.getWorkspaceSnapshot(workspaceId);
@@ -154,11 +164,14 @@ export class Scheduler {
 
       // Request outstanding human gates first so pending-approval tasks hold
       // at blocked and emit approval.requested (spec §11.3).
-      for (const held of snapshot.tasks.filter(t => gateHeld(t))) {
+      for (const held of snapshot.tasks.filter(t =>
+        (!allowed || allowed.has(t.id)) && gateHeld(t) && t.dependencies.every(dep => completedIds.has(dep)),
+      )) {
         await this.#requestApproval(workspaceId, held);
       }
 
       const runnable = snapshot.tasks
+        .filter(t => !allowed || allowed.has(t.id))
         .filter(t => (t.status === "pending" || t.status === "assigned") && t.assignedTo != null)
         .filter(t => !gateHeld(t))
         .filter(t => t.dependencies.every(dep => completedIds.has(dep)))
@@ -167,6 +180,7 @@ export class Scheduler {
 
       const session = await this.#dispatchOne(workspaceId, runnable[0]);
       if (!session) break;
+      onSessionDispatched?.(session);
       dispatched++;
     }
 
@@ -368,7 +382,6 @@ export class Scheduler {
           this.#appendEvent(workspaceId, failEvt);
         }
       });
-
       this.#sessions.delete(sessionId);
     }
   }
@@ -559,14 +572,15 @@ export class Scheduler {
         });
       }
 
-      if (current.status === "pending") {
-        TaskMachine.validateTransition(current.status, "blocked");
-        const { event } = TaskMachine.transition(current, "blocked", {
-          error: "awaiting human approval",
-        });
-        this.#repo.updateTask(task.id, { status: "blocked", error: "awaiting human approval" });
-        this.#appendEvent(workspaceId, event);
-      }
+      // Once blocked, this durable gate has already been announced. Repeated
+      // Automation polling must not duplicate approval.requested history.
+      if (current.status !== "pending") return;
+      TaskMachine.validateTransition(current.status, "blocked");
+      const { event } = TaskMachine.transition(current, "blocked", {
+        error: "awaiting human approval",
+      });
+      this.#repo.updateTask(task.id, { status: "blocked", error: "awaiting human approval" });
+      this.#appendEvent(workspaceId, event);
 
       this.#appendEvent(workspaceId, {
         type: "approval.requested",

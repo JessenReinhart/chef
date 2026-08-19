@@ -5,8 +5,8 @@ export type { NodeCatalogEntry };
 /**
  * Static tool entries (always available).
  */
-const STATIC_TOOLS: Omit<NodeCatalogEntry, "harnessId">[] = [
-  { type: "tool.terminal", label: "Terminal", description: "Run a shell command", category: "Tools", kind: "tool", accent: "green", icon: ">_" },
+const STATIC_TOOLS: NodeCatalogEntry[] = [
+  { type: "tool.terminal", label: "Terminal", description: "Run a shell command", category: "Tools", kind: "tool", accent: "green", harnessId: "generic", icon: ">_" },
   { type: "tool.browser", label: "Browser", description: "Web research & interaction", category: "Tools", kind: "tool", accent: "green", icon: "🌐" },
   { type: "tool.file", label: "File", description: "Read or write a data file", category: "Data", kind: "tool", accent: "green", icon: "📄" },
   { type: "tool.transform", label: "Transform", description: "Clean, map, or aggregate data", category: "Data", kind: "tool", accent: "green", icon: "⟳" },
@@ -101,6 +101,12 @@ export const STATUS_COLORS: Record<string, string> = {
   blocked: "#f59e0b",
   cancelled: "#9ca3af",
   spawning: "#eab308",
+  offline: "#6b7280",
+  starting: "#eab308",
+  idle: "#60a5fa",
+  working: "#22c55e",
+  waiting: "#f59e0b",
+  needs_input: "#f472b6",
 };
 
 /**

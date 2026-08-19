@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { api } from "./api";
-import type { ChatMessage, LlmStatus } from "./types";
+import type { ChatMessage, LlmStatus, ViewMode } from "./types";
 
 interface ChatPanelProps {
   onPlanProposed: (taskIds: string[]) => void;
+  mode: ViewMode;
 }
 
 interface SSEChatEvent {
@@ -22,9 +23,9 @@ interface SSEChatEvent {
 }
 
 const QUICK_PROMPTS = [
-  "Create a monthly financial report with CFO approval",
-  "Build a data pipeline: fetch, transform, store",
-  "Design a release workflow with a code-review gate",
+  "Prepare this month's report and flag anything unusual",
+  "Investigate and fix this bug",
+  "Research the options and leave me a recommendation",
 ];
 
 /** Assistant system message kind — colors the bubble without abusing `type`. */
@@ -34,7 +35,7 @@ interface BubbleMessage extends ChatMessage {
   bubbleKind?: BubbleKind;
 }
 
-export function ChatPanel({ onPlanProposed }: ChatPanelProps) {
+export function ChatPanel({ onPlanProposed, mode }: ChatPanelProps) {
   const [messages, setMessages] = useState<BubbleMessage[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
@@ -141,7 +142,9 @@ export function ChatPanel({ onPlanProposed }: ChatPanelProps) {
                 ...prev,
                 {
                   role: "assistant",
-                  content: `Spawning ${count} node${count !== 1 ? "s" : ""} on canvas…`,
+                  content: mode === "simple"
+                    ? `Mission started with ${count} teammate${count !== 1 ? "s" : ""}.`
+                    : `Mission plan materialized ${count} runtime node${count !== 1 ? "s" : ""}.`,
                   timestamp: Date.now(),
                   bubbleKind: "plan.proposed",
                 },
@@ -206,7 +209,7 @@ export function ChatPanel({ onPlanProposed }: ChatPanelProps) {
       // auto-reconnect handled by the browser
     };
     return () => es.close();
-  }, [lastEventSeq]);
+  }, [lastEventSeq, mode]);
 
   const send = useCallback(async () => {
     if (!input.trim() || streaming) return;
@@ -255,8 +258,8 @@ export function ChatPanel({ onPlanProposed }: ChatPanelProps) {
             </svg>
           </span>
           <div className="leading-tight">
-            <span className="text-sm font-semibold text-[#e6edf3]">Chat with Chef</span>
-            <span className="block text-[10px] text-[#8b949e]">Orchestrator</span>
+            <span className="text-sm font-semibold text-[#e6edf3]">Give Chef a goal</span>
+            <span className="block text-[10px] text-[#8b949e]">{mode === "simple" ? "Mission desk" : "Orchestrator · mission control"}</span>
           </div>
         </div>
         {streaming && (
@@ -277,8 +280,8 @@ export function ChatPanel({ onPlanProposed }: ChatPanelProps) {
               </svg>
             </div>
             <div>
-              <p className="text-sm text-[#e6edf3]">Ask Chef to build a workflow</p>
-              <p className="text-xs mt-1">Chef plans the steps and spawns them as nodes on your canvas.</p>
+              <p className="text-sm text-[#e6edf3]">What should the workspace accomplish?</p>
+              <p className="text-xs mt-1">Chef coordinates the people and tools already here, then keeps you updated.</p>
             </div>
             <div className="flex flex-col items-center gap-2">
               {QUICK_PROMPTS.map((p, i) => (
@@ -330,7 +333,7 @@ export function ChatPanel({ onPlanProposed }: ChatPanelProps) {
       </div>
 
       {/* LLM provider status — informational only */}
-      {llmStatus !== null && !llmStatus.configured && (
+      {mode === "power" && llmStatus !== null && !llmStatus.configured && (
         <div className="mx-3 mt-2 px-3 py-2 rounded-lg border border-amber-500/30 bg-amber-500/10 text-xs text-amber-300 shrink-0">
           <span className="font-semibold">LLM not configured</span> — using scripted planner. Set{" "}
           <code className="px-1 py-0.5 rounded bg-[#161b22] text-amber-200">CHEF_PROVIDER</code>,{" "}
@@ -338,7 +341,7 @@ export function ChatPanel({ onPlanProposed }: ChatPanelProps) {
           <code className="px-1 py-0.5 rounded bg-[#161b22] text-amber-200">CHEF_MODEL</code> to enable.
         </div>
       )}
-      {llmStatus !== null && llmStatus.configured && (
+      {mode === "power" && llmStatus !== null && llmStatus.configured && (
         <div className="mx-3 mt-2 px-3 py-1.5 rounded-lg border border-green-500/25 bg-green-500/5 text-[11px] text-green-300 shrink-0 flex items-center gap-2">
           <span className="h-1.5 w-1.5 rounded-full bg-green-400" />
           <span>
@@ -357,7 +360,7 @@ export function ChatPanel({ onPlanProposed }: ChatPanelProps) {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Describe what you want to build…"
+            placeholder="Describe the outcome you want…"
             disabled={streaming}
             className="flex-1 bg-[#161b22] border border-[#30363d] rounded-lg px-3 py-2 text-sm text-[#e6edf3] placeholder-[#8b949e] focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500 disabled:opacity-50 transition-colors"
             autoFocus

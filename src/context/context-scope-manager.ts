@@ -10,15 +10,17 @@ export interface ContextScopeCreateInput {
   name: string;
   bounds: ContextScopeBounds;
   contextRefs?: ContextReference[];
+  memberNodeIds?: string[];
 }
 
 export interface ContextScopeUpdateInput {
   name?: string;
   bounds?: ContextScopeBounds;
   contextRefs?: ContextReference[];
+  memberNodeIds?: string[];
 }
 
-type PersistedContextScope = Omit<ContextScope, "memberNodeIds">;
+type PersistedContextScope = ContextScope;
 export interface ContextScopeStoreSnapshot { scopes: PersistedContextScope[]; }
 
 export class ContextScopeManager {
@@ -31,46 +33,51 @@ export class ContextScopeManager {
   }
 
   list(workspaceId: WorkspaceId, nodes: CanvasNode[] = []): ContextScope[] {
+    void nodes;
     return [...this.#scopes.values()]
       .filter((scope) => scope.workspaceId === workspaceId)
-      .map((scope) => materializeContextScope(scope, nodes))
+      .map((scope) => this.#cloneScope(scope))
       .sort((a, b) => a.id.localeCompare(b.id));
   }
 
   get(workspaceId: WorkspaceId, scopeId: string, nodes: CanvasNode[] = []): ContextScope | undefined {
+    void nodes;
     const scope = this.#scopes.get(scopeId);
     if (!scope || scope.workspaceId !== workspaceId) return undefined;
-    return materializeContextScope(scope, nodes);
+    return this.#cloneScope(scope);
   }
 
   create(input: ContextScopeCreateInput, nodes: CanvasNode[] = []): ContextScope {
     const id = input.id ?? randomUUID();
     if (this.#scopes.has(id)) throw new Error(`context scope already exists: ${id}`);
     this.#validateBounds(input.bounds);
-    const scope = materializeContextScope({
+    const proposed = materializeContextScope({
       id,
       workspaceId: input.workspaceId,
       name: input.name.trim() || "Shared Context",
       bounds: { ...input.bounds },
       contextRefs: this.#normalizeRefs(input.contextRefs),
     }, nodes);
+    const scope = { ...proposed, memberNodeIds: this.#normalizeMemberIds(input.memberNodeIds ?? proposed.memberNodeIds) };
     this.#scopes.set(id, scope);
     this.#persist();
     return scope;
   }
 
   update(workspaceId: WorkspaceId, scopeId: string, input: ContextScopeUpdateInput, nodes: CanvasNode[] = []): ContextScope {
+    void nodes;
     const current = this.#scopes.get(scopeId);
     if (!current || current.workspaceId !== workspaceId) throw new Error(`context scope not found: ${scopeId}`);
     const bounds = input.bounds ? { ...input.bounds } : { ...current.bounds };
     this.#validateBounds(bounds);
-    const scope = materializeContextScope({
+    const scope: ContextScope = {
       id: current.id,
       workspaceId: current.workspaceId,
       name: input.name === undefined ? current.name : input.name.trim() || "Shared Context",
       bounds,
       contextRefs: input.contextRefs === undefined ? current.contextRefs : this.#normalizeRefs(input.contextRefs),
-    }, nodes);
+      memberNodeIds: input.memberNodeIds === undefined ? [...current.memberNodeIds] : this.#normalizeMemberIds(input.memberNodeIds),
+    };
     this.#scopes.set(scopeId, scope);
     this.#persist();
     return scope;
@@ -95,11 +102,7 @@ export class ContextScopeManager {
 
   snapshot(): ContextScopeStoreSnapshot {
     return {
-      scopes: [...this.#scopes.values()].map(({ memberNodeIds: _memberNodeIds, ...scope }) => ({
-        ...scope,
-        contextRefs: scope.contextRefs.map((ref) => ({ ...ref })),
-        bounds: { ...scope.bounds },
-      })),
+      scopes: [...this.#scopes.values()].map((scope) => this.#cloneScope(scope)),
     };
   }
 
@@ -110,6 +113,19 @@ export class ContextScopeManager {
       unique.set(`${ref.type}:${ref.id}`, { ...ref });
     }
     return [...unique.values()].sort((a, b) => `${a.type}:${a.id}`.localeCompare(`${b.type}:${b.id}`));
+  }
+
+  #normalizeMemberIds(ids: string[]): string[] {
+    return [...new Set(ids.filter((id) => typeof id === "string" && id.length > 0))].sort();
+  }
+
+  #cloneScope(scope: ContextScope): ContextScope {
+    return {
+      ...scope,
+      bounds: { ...scope.bounds },
+      contextRefs: scope.contextRefs.map((ref) => ({ ...ref })),
+      memberNodeIds: [...scope.memberNodeIds],
+    };
   }
 
   #validateBounds(bounds: ContextScopeBounds): void {
@@ -127,7 +143,12 @@ export class ContextScopeManager {
       const parsed = JSON.parse(raw) as ContextScopeStoreSnapshot;
       for (const scope of parsed.scopes ?? []) {
         if (scope?.id && scope.workspaceId && scope.bounds) {
-          this.#scopes.set(scope.id, { ...scope, memberNodeIds: [], contextRefs: this.#normalizeRefs(scope.contextRefs) });
+          this.#scopes.set(scope.id, {
+            ...scope,
+            bounds: { ...scope.bounds },
+            memberNodeIds: this.#normalizeMemberIds(scope.memberNodeIds ?? []),
+            contextRefs: this.#normalizeRefs(scope.contextRefs),
+          });
         }
       }
     } catch (error) {

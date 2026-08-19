@@ -69,6 +69,9 @@ CREATE TABLE IF NOT EXISTS tasks (
   status TEXT NOT NULL,
   assigned_to TEXT,
   parent_task_id TEXT,
+  mission_id TEXT REFERENCES missions(id) ON DELETE SET NULL,
+  automation_id TEXT REFERENCES automations(id) ON DELETE SET NULL,
+  automation_run_id TEXT REFERENCES automation_runs(id) ON DELETE SET NULL,
   approval_id TEXT REFERENCES approvals(id) ON DELETE SET NULL,
   context_refs_json TEXT NOT NULL DEFAULT '[]',
   priority INTEGER NOT NULL DEFAULT 0,
@@ -80,6 +83,8 @@ CREATE TABLE IF NOT EXISTS tasks (
   updated_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_tasks_workspace ON tasks(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_mission ON tasks(mission_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_automation_run ON tasks(automation_run_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_approval ON tasks(approval_id);
 
 CREATE TABLE IF NOT EXISTS approvals (
@@ -164,6 +169,7 @@ CREATE TABLE IF NOT EXISTS plans (
   id TEXT PRIMARY KEY,
   workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
   goal TEXT NOT NULL,
+  mission_id TEXT REFERENCES missions(id) ON DELETE SET NULL,
   status TEXT NOT NULL,
   tasks_json TEXT NOT NULL DEFAULT '[]',
   task_ids_json TEXT NOT NULL DEFAULT '[]',
@@ -171,6 +177,48 @@ CREATE TABLE IF NOT EXISTS plans (
   updated_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_plans_workspace ON plans(workspace_id);
+
+CREATE TABLE IF NOT EXISTS missions (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  goal TEXT NOT NULL,
+  status TEXT NOT NULL,
+  task_ids_json TEXT NOT NULL DEFAULT '[]',
+  plan_id TEXT,
+  created_by TEXT NOT NULL,
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  completed_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_missions_workspace ON missions(workspace_id, created_at);
+
+CREATE TABLE IF NOT EXISTS automations (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'idle',
+  node_ids_json TEXT NOT NULL DEFAULT '[]',
+  edges_json TEXT NOT NULL DEFAULT '[]',
+  trigger_json TEXT NOT NULL DEFAULT '{}',
+  current_run_id TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_automations_workspace ON automations(workspace_id, created_at);
+
+CREATE TABLE IF NOT EXISTS automation_runs (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  automation_id TEXT NOT NULL REFERENCES automations(id) ON DELETE CASCADE,
+  status TEXT NOT NULL,
+  task_ids_json TEXT NOT NULL DEFAULT '[]',
+  started_at INTEGER NOT NULL,
+  ended_at INTEGER,
+  error TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_automation_runs_automation ON automation_runs(automation_id, started_at);
 CREATE TABLE IF NOT EXISTS templates (
   id TEXT PRIMARY KEY,
   workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -192,6 +240,8 @@ CREATE TABLE IF NOT EXISTS canvas_nodes (
   node_type TEXT NOT NULL DEFAULT 'blueprint',
   kind TEXT NOT NULL DEFAULT 'agent',
   harness_id TEXT,
+  live_status TEXT NOT NULL DEFAULT 'offline',
+  config_json TEXT NOT NULL DEFAULT '{}',
   position_x REAL NOT NULL DEFAULT 0,
   position_y REAL NOT NULL DEFAULT 0,
   updated_at INTEGER NOT NULL
@@ -205,7 +255,38 @@ CREATE TABLE IF NOT EXISTS canvas_edges (
   target TEXT NOT NULL REFERENCES canvas_nodes(id) ON DELETE CASCADE,
   source_handle TEXT,
   target_handle TEXT,
+  edge_type TEXT NOT NULL DEFAULT 'context',
   updated_at INTEGER NOT NULL,
-  UNIQUE(source, target)
+  UNIQUE(source, target, edge_type)
 );
 CREATE INDEX IF NOT EXISTS idx_canvas_edges_workspace ON canvas_edges(workspace_id);
+
+CREATE TABLE IF NOT EXISTS context_zones (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  bounds_json TEXT NOT NULL,
+  context_refs_json TEXT NOT NULL DEFAULT '[]',
+  policy_json TEXT NOT NULL DEFAULT '{}',
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_context_zones_workspace ON context_zones(workspace_id);
+
+-- Membership is explicit runtime state. Canvas geometry is presentation only.
+CREATE TABLE IF NOT EXISTS context_zone_members (
+  zone_id TEXT NOT NULL REFERENCES context_zones(id) ON DELETE CASCADE,
+  node_id TEXT NOT NULL REFERENCES canvas_nodes(id) ON DELETE CASCADE,
+  PRIMARY KEY (zone_id, node_id)
+);
+
+-- Tracks only references that Context Zones added to a task. This provenance
+-- lets reconciliation remove stale zone-owned refs without disturbing refs
+-- supplied by plans, canvas edges, or users.
+CREATE TABLE IF NOT EXISTS context_zone_task_refs (
+  zone_id TEXT NOT NULL REFERENCES context_zones(id) ON DELETE CASCADE,
+  task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  ref_key TEXT NOT NULL,
+  ref_json TEXT NOT NULL,
+  PRIMARY KEY (zone_id, task_id, ref_key)
+);
+CREATE INDEX IF NOT EXISTS idx_context_zone_task_refs_task ON context_zone_task_refs(task_id);

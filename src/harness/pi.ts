@@ -6,15 +6,19 @@
  */
 
 import { SpecializedCliHarness } from "./specialized.ts";
+import type { SpecializedCliOptions } from "./specialized.ts";
+
+type RuntimeOptions = Pick<SpecializedCliOptions, "workspaceId" | "cwd">;
 
 export class PiHarness extends SpecializedCliHarness {
-  constructor(binary = "pi") {
+  constructor(binary = "pi", runtime: RuntimeOptions = {}) {
     super({
       id: "pi",
       type: "pi",
       name: "Pi",
       binary,
       flags: [],
+      ...runtime,
     });
   }
 }

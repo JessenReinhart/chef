@@ -14,6 +14,73 @@ export type NodeStatus =
   | "cancelled"
   | "spawning";
 
+export type ViewMode = "simple" | "power";
+
+export type EdgeRelationship =
+  | "communication"
+  | "context"
+  | "delegation"
+  | "dependency"
+  | "control"
+  | "error"
+  | "approval";
+
+export type MissionStatus =
+  | "planning"
+  | "active"
+  | "paused"
+  | "waiting_for_approval"
+  | "blocked"
+  | "verifying"
+  | "completed"
+  | "cancelled"
+  | "failed"
+  | "idle";
+
+export interface UiMission {
+  id: string;
+  goal: string;
+  status: Exclude<MissionStatus, "idle">;
+  taskIds: string[];
+  createdAt: number;
+  updatedAt: number;
+  completedAt?: number;
+}
+
+export interface UiAutomation {
+  id: string;
+  workspaceId: string;
+  name: string;
+  description: string;
+  status: "idle" | "running" | "stopped" | "disabled";
+  nodeIds: string[];
+  edges: Array<{ source: string; target: string; type: "dependency" | "control" | "error" | "approval" }>;
+  currentRunId?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface UiAutomationRun {
+  id: string;
+  automationId: string;
+  status: "queued" | "running" | "waiting" | "completed" | "failed" | "cancelled";
+  taskIds: string[];
+  startedAt: number;
+  endedAt?: number;
+}
+
+export interface UiRuntimeEvent {
+  id: string;
+  seq: number;
+  timestamp: number;
+  source: { type: string; id: string };
+  type: string;
+  payload: unknown;
+  taskId?: string;
+  sessionId?: string;
+  correlationId?: string;
+}
+
 export type NodeKind = "agent" | "tool" | "control" | "workflow" | "human";
 
 export interface UiTask {
@@ -26,6 +93,7 @@ export interface UiTask {
   startedAt?: number;
   completedAt?: number;
   durationMs?: number;
+  contextRefs?: ContextReference[];
 }
 
 export interface UiEdge {
@@ -102,6 +170,7 @@ export interface NodeCatalogEntry {
 /** Canvas graph types — mirrors server CanvasNode/CanvasEdge from core/types.ts */
 export type CanvasNodeType = "blueprint" | "proxy";
 export type CanvasNodeKind = "agent" | "tool" | "data" | "approval" | "system";
+export type CanvasNodeLiveStatus = "offline" | "starting" | "idle" | "working" | "waiting" | "blocked" | "needs_input" | "failed";
 
 export interface UiCanvasNode {
   id: string;
@@ -111,6 +180,8 @@ export interface UiCanvasNode {
   nodeType: CanvasNodeType;
   kind: CanvasNodeKind;
   harnessId: string | null;
+  liveStatus?: CanvasNodeLiveStatus;
+  config?: Record<string, unknown>;
   position: { x: number; y: number };
   updatedAt: number;
 }
@@ -122,6 +193,8 @@ export interface UiCanvasEdge {
   target: string;
   sourceHandle: string | null;
   targetHandle: string | null;
+  /** v0.2 relationship semantics; absent records are communication links. */
+  type?: EdgeRelationship;
   updatedAt: number;
 }
 
@@ -133,12 +206,19 @@ export interface CanvasNodeInput {
   kind?: CanvasNodeKind;
   harnessId?: string | null;
   position?: { x: number; y: number };
+  config?: Record<string, unknown>;
 }
 
 export interface CanvasPatch {
   upsertNodes?: CanvasNodeInput[];
-  upsertEdges?: Array<{ source: string; target: string; sourceHandle?: string | null; targetHandle?: string | null }>;
-  deleteEdges?: Array<{ source: string; target: string }>;
+  upsertEdges?: Array<{
+    source: string;
+    target: string;
+    sourceHandle?: string | null;
+    targetHandle?: string | null;
+    type?: EdgeRelationship;
+  }>;
+  deleteEdges?: Array<{ source: string; target: string; type?: EdgeRelationship }>;
   deleteNodes?: string[];
   arrange?: { mode: "columns" | "snake" | "radial" };
 }
@@ -148,4 +228,34 @@ export interface CanvasPatchResult {
   error?: string;
   nodes?: UiCanvasNode[];
   edges?: UiCanvasEdge[];
+}
+
+export interface ContextReference {
+  type: string;
+  id: string;
+  relevance?: number;
+}
+
+export interface ContextZone {
+  id: string;
+  workspaceId: string;
+  name: string;
+  bounds: { x: number; y: number; width: number; height: number };
+  contextRefs: ContextReference[];
+  memberNodeIds: string[];
+}
+
+export interface ContextZoneInput {
+  name: string;
+  bounds: ContextZone["bounds"];
+  contextRefs: ContextReference[];
+  /** Explicit membership is authoritative after creation; bounds are presentation. */
+  memberNodeIds: string[];
+}
+
+export interface AutomationControl {
+  id: string;
+  name: string;
+  status: "idle" | "queued" | "running" | "waiting" | "completed" | "failed" | "cancelled";
+  nodeId?: string;
 }

@@ -35,6 +35,7 @@ const ALLOWED: Record<TaskStatus, readonly TaskStatus[]> = {
   completed: [],
   failed: ["running", "cancelled"],
   blocked: ["assigned", "running", "cancelled"],
+  cancelled: [],
 };
 
 /**
