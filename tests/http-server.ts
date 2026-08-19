@@ -33,7 +33,7 @@ try {
     body: JSON.stringify({
       name: "Authentication",
       bounds: { x: 0, y: 0, width: 500, height: 300 },
-      contextRefs: ["artifact:requirements"],
+      contextRefs: [{ type: "artifact", id: "requirements" }],
     }),
   });
   assert.equal(createScope.status, 201, "creating a context scope must return 201");
