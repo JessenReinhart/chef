@@ -89,9 +89,9 @@ jobs:
           done < /tmp/chef-before.txt
 
           root="$(git rev-list --max-parents=0 master | head -n1)"
-          root_identity="$(git show -s --format='%an|%ae|%cn|%ce|%aI|%cI|%s' "$root")"
+          root_identity="$(git show -s --format='%an|%ae|%cn|%ce|%at|%ct|%s' "$root")"
           echo "Rewritten root: $root_identity"
-          [[ "$root_identity" == 'JessenReinhart|jessen_1206@yahoo.com|JessenReinhart|jessen_1206@yahoo.com|2026-08-14T10:53:01+00:00|2026-08-14T10:53:01+00:00|Initial commit: Chef AI Engineering OS runtime + golden path + handoff' ]]
+          [[ "$root_identity" == 'JessenReinhart|jessen_1206@yahoo.com|JessenReinhart|jessen_1206@yahoo.com|1786704781|1786704781|Initial commit: Chef AI Engineering OS runtime + golden path + handoff' ]]
 
           refspecs=()
           while IFS= read -r branch; do
@@ -102,6 +102,15 @@ jobs:
           done < <(git tag --list)
 
           git push --atomic origin "${refspecs[@]}"
-          git push origin --delete "$REWRITE_BRANCH"
 
-          echo 'Identity rewrite completed and temporary branch deleted.'
+          # Remove operational helper refs after the atomic rewrite succeeds.
+          for helper in \
+            agent/rewrite-pgi-identity \
+            agent/rewrite-pgi-identity-pr \
+            agent/rewrite-pgi-observable \
+            agent/rewrite-pgi-run \
+            agent/rewrite-pgi-trigger; do
+            git push origin --delete "$helper" || true
+          done
+
+          echo 'Identity rewrite completed and helper branches deleted.'
