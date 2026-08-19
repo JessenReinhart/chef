@@ -1,0 +1,103 @@
+name: One-shot author identity rewrite
+
+on:
+  push:
+    branches:
+      - agent/rewrite-pgi-identity
+
+permissions:
+  contents: write
+
+jobs:
+  rewrite:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Rewrite PGI identity across every branch and tag
+        shell: bash
+        env:
+          OLD_NAME: PGI251100363
+          OLD_EMAIL: pgi251100363@lg.com
+          NEW_NAME: JessenReinhart
+          NEW_EMAIL: jessen_1206@yahoo.com
+          REWRITE_BRANCH: agent/rewrite-pgi-identity
+        run: |
+          set -euo pipefail
+          export FILTER_BRANCH_SQUELCH_WARNING=1
+
+          git fetch origin '+refs/heads/*:refs/remotes/origin/*' '+refs/tags/*:refs/tags/*' --force
+
+          mapfile -t branches < <(
+            git for-each-ref --format='%(refname:strip=3)' refs/remotes/origin \
+              | grep -v '^HEAD$' \
+              | grep -v "^${REWRITE_BRANCH}$" \
+              | sort
+          )
+
+          if [[ ${#branches[@]} -eq 0 ]]; then
+            echo 'No repository branches discovered' >&2
+            exit 1
+          fi
+
+          printf '%s\n' "${branches[@]}" > /tmp/chef-branches.txt
+          : > /tmp/chef-before.txt
+          for branch in "${branches[@]}"; do
+            git branch -f "$branch" "refs/remotes/origin/$branch"
+            printf '%s\t%s\t%s\n' \
+              "$branch" \
+              "$(git rev-parse "refs/remotes/origin/$branch^{tree}")" \
+              "$(git rev-list --count "refs/remotes/origin/$branch")" \
+              >> /tmp/chef-before.txt
+          done
+
+          git filter-branch -f \
+            --env-filter '
+              if [ "$GIT_AUTHOR_EMAIL" = "$OLD_EMAIL" ] || [ "$GIT_AUTHOR_NAME" = "$OLD_NAME" ]; then
+                export GIT_AUTHOR_NAME="$NEW_NAME"
+                export GIT_AUTHOR_EMAIL="$NEW_EMAIL"
+              fi
+              if [ "$GIT_COMMITTER_EMAIL" = "$OLD_EMAIL" ] || [ "$GIT_COMMITTER_NAME" = "$OLD_NAME" ]; then
+                export GIT_COMMITTER_NAME="$NEW_NAME"
+                export GIT_COMMITTER_EMAIL="$NEW_EMAIL"
+              fi
+            ' \
+            --tag-name-filter cat \
+            -- --all
+
+          if git log --branches --tags --format='%an <%ae> | %cn <%ce>' \
+              | grep -E 'PGI251100363|pgi251100363@lg\.com'; then
+            echo 'Old PGI identity remains in rewritten branch/tag history' >&2
+            exit 1
+          fi
+
+          while IFS=$'\t' read -r branch tree_before count_before; do
+            tree_after="$(git rev-parse "$branch^{tree}")"
+            count_after="$(git rev-list --count "$branch")"
+            if [[ "$tree_before" != "$tree_after" || "$count_before" != "$count_after" ]]; then
+              echo "Invariant failed for $branch: tree/count changed" >&2
+              exit 1
+            fi
+          done < /tmp/chef-before.txt
+
+          root="$(git rev-list --max-parents=0 master | head -n1)"
+          root_identity="$(git show -s --format='%an|%ae|%cn|%ce|%aI|%cI|%s' "$root")"
+          echo "Rewritten root: $root_identity"
+          [[ "$root_identity" == 'JessenReinhart|jessen_1206@yahoo.com|JessenReinhart|jessen_1206@yahoo.com|2026-08-14T10:53:01+00:00|2026-08-14T10:53:01+00:00|Initial commit: Chef AI Engineering OS runtime + golden path + handoff' ]]
+
+          refspecs=()
+          while IFS= read -r branch; do
+            refspecs+=("+refs/heads/$branch:refs/heads/$branch")
+          done < /tmp/chef-branches.txt
+          while IFS= read -r tag; do
+            [[ -n "$tag" ]] && refspecs+=("+refs/tags/$tag:refs/tags/$tag")
+          done < <(git tag --list)
+
+          git push --atomic origin "${refspecs[@]}"
+          git push origin --delete "$REWRITE_BRANCH"
+
+          echo 'Identity rewrite completed and temporary branch deleted.'
