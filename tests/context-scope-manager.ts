@@ -15,9 +15,22 @@ const nodes: CanvasNode[] = [
 
 try {
   const manager = new ContextScopeManager(storagePath);
-  const created = manager.create({ id: "auth", workspaceId: "ws", name: "Authentication", bounds: { x: 0, y: 0, width: 500, height: 300 }, contextRefs: ["artifact:requirements", "decision:oauth"] }, nodes);
+  const created = manager.create({
+    id: "auth",
+    workspaceId: "ws",
+    name: "Authentication",
+    bounds: { x: 0, y: 0, width: 500, height: 300 },
+    contextRefs: [
+      { type: "artifact", id: "requirements" },
+      { type: "decision", id: "oauth" },
+      { type: "artifact", id: "requirements" },
+    ],
+  }, nodes);
   assert.deepEqual(created.memberNodeIds, ["agent-a", "agent-b"]);
-  assert.deepEqual(manager.contextRefsForNode("ws", "agent-a", nodes), ["artifact:requirements", "decision:oauth"]);
+  assert.deepEqual(manager.contextRefsForNode("ws", "agent-a", nodes), [
+    { type: "artifact", id: "requirements" },
+    { type: "decision", id: "oauth" },
+  ]);
   assert.deepEqual(manager.contextRefsForNode("ws", "agent-outside", nodes), []);
 
   const persisted = JSON.parse(readFileSync(storagePath, "utf8")) as { scopes: Array<Record<string, unknown>> };
@@ -33,7 +46,10 @@ try {
   assert.throws(() => manager.create({ id: "nan", workspaceId: "ws", name: "Bad", bounds: { x: Number.NaN, y: 0, width: 10, height: 10 } }, nodes), /finite/);
 
   const reloaded = new ContextScopeManager(storagePath);
-  assert.deepEqual(reloaded.get("ws", "auth", nodes)?.contextRefs, ["artifact:requirements", "decision:oauth"]);
+  assert.deepEqual(reloaded.get("ws", "auth", nodes)?.contextRefs, [
+    { type: "artifact", id: "requirements" },
+    { type: "decision", id: "oauth" },
+  ]);
   assert.deepEqual(reloaded.get("ws", "auth", nodes)?.memberNodeIds, ["agent-a", "agent-b", "agent-outside"]);
 
   assert.equal(reloaded.delete("ws", "auth"), true);
