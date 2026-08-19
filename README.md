@@ -2,30 +2,48 @@
 
 **A living AI workspace where people, agents, tools, and context collaborate in real time.**
 
-Chef is built around a simple idea: open a persistent workspace, bring in useful agents and tools, and give the **Orchestrator** a goal when you want a coordinated outcome.
+Chef is a local-first Node/TypeScript runtime and visual workbench for coordinating AI agents, terminal tools, durable context, Missions, and repeatable Automations.
 
-The Orchestrator can break a problem into tasks, delegate those tasks to different AI agents, keep their work connected, and bring the results back together. The agents can run through real terminal-based tools, so Chef is not tied to a single AI model or coding agent.
+The core mental model is:
 
-> **Human intent → Mission → Orchestrator → live agents and tools → artifacts → verified outcome**
+> **Human intent → Mission → Orchestrator → live agents/tools → artifacts → verified outcome**
 
-Chef is local-first and designed to make complex, multi-agent engineering work feel like one coherent workspace.
+The canvas is not a batch workflow builder with a global Run gate. It is a persistent projection of runtime-owned workspace state. Agents and interactive tool surfaces can become live as soon as they are added; explicit Run/Stop semantics belong to Automations.
 
-## Why Chef?
+## What Chef can do today
 
-Today's AI coding tools are great at helping one agent work on one problem. Real engineering work is usually messier:
+The v0.2 baseline already includes a working runtime and web workbench:
 
-- one person investigates the problem
-- another implements a fix
-- another runs tests or verifies the result
-- agents need to share context and artifacts
-- work needs to survive restarts
-- someone still needs to coordinate the whole thing
+- durable Missions, Tasks, Sessions, Artifacts, Decisions, Messages, Approvals, Automations, canvas nodes/edges, and Context Zones
+- restart-safe SQLite persistence
+- Orchestrator-driven planning and task dispatch
+- terminal-based harness execution with a generic PTY fallback plus specialized harness adapters
+- live runtime events over SSE with replay
+- direct session input, interrupt, resize, and peer messaging
+- human approval gates and capability policy
+- a React/XYFlow canvas with persisted node positions and typed relationships
+- live terminal surfaces embedded in canvas nodes
+- browser/tool surfaces and MCP capability integration
+- Simple and Power modes
+- Chat with Chef over the same runtime
+- repeatable Automations with explicit Run/Stop lifecycle
+- Context Zones for bounded shared context
 
-Chef is being built to handle that coordination.
+Chef remains early, but the product is no longer a headless-runtime prototype or an SVG-only dashboard.
 
-You talk primarily to Chef's **Orchestrator**. It acts more like a technical lead than a chatbot: it plans the work, delegates it, watches what happens, and decides what needs to happen next.
+## Product invariants
 
-## What it looks like
+These rules are more important than any one UI implementation:
+
+- **Runtime is authoritative.** The UI is a projection over durable runtime state.
+- **The workspace is live.** Adding or configuring an interactive node should not require a canvas-wide Run button.
+- **Automations are explicit.** Repeatable jobs are the surface where Run/Stop, retries, dependencies, and history are primary controls.
+- **Terminal I/O and structured messaging stay separate.** PTY bytes use the harness channel; structured envelopes use the sideband channel.
+- **Restart survival matters.** Durable workspace relationships and execution history must survive process restarts.
+- **Human control stays explicit.** Sensitive capabilities can be denied or approval-gated.
+- **Context should be bounded.** Connections and Context Zones scope what agents receive instead of copying whole conversations everywhere.
+
+## Architecture
 
 ```text
                          You
@@ -33,7 +51,6 @@ You talk primarily to Chef's **Orchestrator**. It acts more like a technical lea
                           ▼
                   ┌──────────────┐
                   │ Orchestrator │
-                  │  / Squad Lead│
                   └──────┬───────┘
                          │
               ┌──────────┼──────────┐
@@ -49,43 +66,7 @@ You talk primarily to Chef's **Orchestrator**. It acts more like a technical lea
                     Verified result
 ```
 
- - **Runtime is the product** — the UI/canvas is disposable.
- - **Terminal I/O and structured messaging are never mixed.** PTY bytes remain a separate harness channel; structured envelopes arrive via sideband outbox. Runtime lifecycle/events remain durable in SQLite.
- - **Restart survival** — workspace relationships, context zones, missions, automations, tasks, artifacts, sessions, and messages persist across process restarts.
- - **Atomic dispatch** — scheduler concurrency is enforced in the dispatch transaction, so concurrent callers cannot oversubscribe live sessions.
- - **Human approvals, live observability, workflow nodes, tools, and chat** land on top of the same runtime.
-
-## What Chef can do today
-
-Chef is still early, but the core runtime is already real.
-
-- Create Missions from user intent and coordinate multi-agent plans through terminal-based agent harnesses
-- Dispatch and track tasks and sessions
-- Persist tasks, sessions, messages, artifacts, and events locally
-- Survive process restarts without losing living workspace state
-- Stream live runtime events
-- Intervene in running terminal sessions
-- Expose runtime state through a small HTTP/SSE API
-- Visualize the current runtime through a minimal dashboard
-
-## Where it's going
-
-The goal is a general-purpose **AI Engineering OS** rather than another chat interface or another coding-agent wrapper.
-
-Planned areas include:
-
-- **Living canvas** — see and directly use agents, tools, context zones, missions, and artifacts without a global Run gate
-- **Automations** — build repeatable jobs with explicit triggers, dependencies, Run/Stop, retries, and history
-- **More harnesses** — use Claude Code, Pi, OMP, Codex CLI, Aider, and other terminal-based agents
-- **Shared context** — let agents exchange the right information without copying entire conversations around
-- **Artifacts** — make files, findings, reports, and other outputs first-class parts of the workspace
-- **Approvals & permissions** — keep humans in control of sensitive actions
-- **Tools & integrations** — connect agents to browsers, MCP capabilities, and other engineering tools
-- **Resume & replay** — recover and continue interrupted work from durable runtime state
-
-The long-term experience should be simple:
-
-> **Tell Chef what you want. Chef figures out who should do what, coordinates the work, and brings you the result.**
+Chef's runtime owns durable entities and execution state. The web app reads that state, subscribes to runtime events, and sends explicit mutations back through the API.
 
 ## Getting started
 
@@ -93,183 +74,174 @@ Chef currently requires **Node.js 24+**.
 
 ```bash
 npm install
-
-# Run the end-to-end golden path
-node --experimental-strip-types tests/golden-path.ts
+npm test
 ```
 
-To run the local inspector dashboard:
+Run the server:
 
 ```bash
-# Full regression suite
+npm run server
+```
+
+Run the web workbench in another terminal:
+
+```bash
+cd web
+npm install
+npm run dev
+```
+
+The runtime API listens on `http://127.0.0.1:4321`; the Vite dev server proxies `/api` requests to it.
+
+Useful validation commands:
+
+```bash
+# full runtime regression suite
 npm test
 
-# Handle-leak diagnostic
+# root TypeScript check
+npm run typecheck
+
+# web TypeScript + production build
+cd web && npm run build
+
+# handle-leak diagnostic
 node --experimental-strip-types diag-handles.mjs
 ```
 
- ## Web UI
+## Web workbench
 
- ```bash
- npm run server          # runtime + projection API on http://127.0.0.1:4321
- cd web && npm install && npm run dev   # workbench proxying /api to the server
- ```
+### Simple Mode
 
- The workbench provides:
+Simple Mode hides most runtime jargon and focuses on goals, friendly node configuration, templates, and obvious human actions.
 
- - **Simple Mode** — template gallery (Monthly Financial Report, Cash Flow Analysis, Budget vs Actual, Developer Fix/Verify), guided setup wizard, friendly inspector fields, plain-language statuses. No runtime/model terminology.
- - **Power Mode** — full node graph, live logs with filters, interactive terminal panes, context bus inspector, wide node inspector (model/temperature/tokens), session controls.
- - **Canvas** — persistent live projection of agents, tools, typed relationships, and Context Zones.
- - **Chat with Chef** — streaming Mission surface over SSE; user intent becomes coordinated, durable work.
- - **Automations** — repeatable executable graphs are the only surface where Run/Stop is a primary control.
- - **Execution console** — node status timeline, artifacts with preview/download, approval queue, metrics strip.
+Seeded templates include:
 
- ## Runtime API
+- Monthly Financial Report
+- Cash Flow Analysis
+- Budget vs Actual
+- Developer Fix/Verify
 
- `ChefRuntime` (from `src/main.ts`) exposes:
+### Power Mode
 
- - `sendUserMessage(message)` → `OrchestratorResult` (plan → tasks → report)
- - `sendChatMessage(message)` → streaming chat via SSE
- - `retryTask(taskId)` — bounded retry through the scheduler
- - `inspectState()` → `WorkspaceSnapshot`
- - `toolRunner`, `browserTool`, `mcpRegistry` — Phase 8 capabilities
- - `subscribeEvents(cb)` → unsubscribe
+Power Mode exposes the lower-level machinery for advanced users:
 
- HTTP/SSE projection (`src/server/http-server.ts`):
+- live canvas state
+- typed relationships
+- logs and event history
+- terminal panes
+- context inspection
+- runtime/session controls
+- wider node configuration surfaces
 
- | Method | Path | Purpose |
- |---|---|---|
- | GET | `/api/state` | workspace snapshot |
- | GET | `/api/graph` | workflow graph projection |
- | GET | `/api/events?afterSeq&types=` | live SSE stream with replay |
- | POST | `/api/sessions/send\|interrupt\|resize` | direct worker controls |
- | GET/POST/PATCH/DELETE | `/api/workflows`, `/api/templates` | workflow + template CRUD |
- | POST | `/api/nodes/run\|cancel\|retry` | node execution seam |
- | GET | `/api/tools`, `/api/inspector/*` | capability catalog + inspector |
- | POST | `/api/approvals/:id/accept\|reject` | human approval gates |
- | GET/POST | `/api/chat`, `/api/chat/messages` | chat with Chef |
+### Living canvas
 
- ## LLM Provider Configuration
+The current canvas uses XYFlow/React Flow and persists runtime-owned canvas state. It supports durable nodes, typed edges, node positions, Context Zones, and live surfaces such as terminals.
 
- By default Chef uses the deterministic `ScriptedDecisionProvider` (investigate + verify). To enable intent-driven planning, set:
+A canvas relationship is not merely decorative. Depending on its type it can represent communication, context sharing, delegation, dependency/control flow, error routing, or approval semantics.
 
- ```bash
- export ANTHROPIC_API_KEY=...            # or OPENAI_API_KEY for OpenAI-compatible endpoints
- export CHEF_MODEL=claude-sonnet-5     # optional; provider-specific default
- export CHEF_PROVIDER=anthropic        # optional: anthropic | openai | openai-compatible
- ```
+### Automations
 
- `LLMDecisionProvider` (`src/orchestrator/llm-decision-provider.ts`) validates structured decisions against the node contract before the runtime applies them. Provider failure falls back to the scripted provider with an honest error decision.
+Automations are durable repeatable jobs. Unlike the living canvas, they intentionally expose an execution lifecycle with explicit Run/Stop behavior and run history.
 
- MCP servers (capability layer only — never orchestration):
+## Runtime API
 
- ```bash
- export CHEF_MCP_SERVERS='[{"id":"fs","command":"npx","args":["-y","@modelcontextprotocol/server-filesystem","/path"],"capabilities":["filesystem"]}]'
- ```
+`ChefRuntime` is exposed from `src/main.ts`. Important capabilities include:
 
- ## Capabilities & Permissions
+- `sendUserMessage(message)` — goal → plan → coordinated execution
+- `sendChatMessage(message)` — Chat with Chef
+- `dispatchPending()` — dispatch runnable pending tasks
+- `patchCanvas(workspaceId, patch)` — durable canvas mutation
+- `listCanvas(workspaceId)` — current durable canvas projection
+- `activateNode(nodeId)` — activate a live canvas node
+- `interveneNode(nodeId, message)` — send human intervention to a live node
+- `runAutomation(id)` / `stopAutomation(id)` — Automation lifecycle
+- `pauseMission(id)` / `resumeMission(id)` / `cancelMission(id)` / `redirectMission(id, goal)`
+- `sendInput`, `interruptSession`, `resizeSession`, `sendPeerMessage`
+- `inspectState()` — consistent workspace snapshot
+- `subscribeEvents(cb)` — persisted event stream subscription
 
- `src/runtime/capabilities.ts` implements spec §11.2 defaults:
+The HTTP/SSE server exposes corresponding endpoints for workspace state, canvas mutation, Missions, Automations, sessions, approvals, chat, tools, templates, Context Zones, and runtime events.
 
- | Capability | Engineer | Orchestrator | Human |
- |---|---|---|---|
- | Filesystem/Terminal/Git | allow | allow | allow |
- | Network/Browser/GitHub | deny | allow | allow |
- | Spawn agents / Assign tasks | deny | allow | allow |
- | Deploy / destructive ops | approval | approval | allow |
+## LLM provider configuration
 
- Unknown capabilities fail closed (`deny`). Approval-gated tools (`git push`, out-of-root writes, deploy) emit `approval.requested` events and block until a human decision via `/api/approvals/:id/accept|reject`.
+Without provider credentials Chef falls back to the deterministic scripted decision provider.
 
- ## Project Layout
+Example:
 
- ```
- src/
-   main.ts                  createChef() wiring, ChefRuntime interface
-   core/types.ts            domain types
-   core/nodes.ts            UI-independent node contracts (spec §12)
-   core/graph.ts            workflow graph projection
-   context/                 context reference system
-   persistence/             Repository (SQLite) + schema
-   runtime/                 Scheduler (dispatch, events, retry)
-   runtime/node-registry.ts         9+ node definitions
-   runtime/node-execution-engine.ts deterministic graph executor
-   runtime/capabilities.ts          permission policy (spec §11.2)
-   runtime/tool-runner.ts           terminal/filesystem/git tools + approval gates
-   runtime/browser-tool.ts          Playwright browser sessions (optional dep)
-   runtime/mcp-client.ts            MCP capability clients
-   runtime/harness-registry.ts      specialized harness adapters
-   harness/generic.ts               PTY harness (mandatory)
-   harness/claude-code.ts|pi.ts|omp.ts|freebuff.ts   adapters
-   orchestrator/                    Orchestrator + decision providers
-   server/http-server.ts            read-only HTTP/SSE projection API
-   server/index.ts                  server entrypoint
- tests/
-   golden-path.ts           P0 golden path test
-   timeout-cancellation.ts  plan timeout teardown
-   seq-concurrency.ts       atomic event sequences
-   cancel-facade.ts         terminal-task cancellation guard
-   dispatch-concurrency.ts  maxConcurrency under concurrent dispatch
-   plan-persistence.ts      plan close/reopen durability
-   pty-replay.ts            PTY output replay
-   live-events.ts           live event subscription
-   direct-worker-interaction.ts  send/interrupt/resize regression
-   approvals.ts             human approval gates
-   canvas-graph.ts          graph projection
-   node-registry.ts         node registry + execution engine
-   api-backend.ts           workflow/template/inspector API
-   simple-mode.ts           template wizard + mode switching
-   power-mode.ts            logs/terminals/context/inspector API
-   chat-streaming.ts        LLM decision provider + SSE chat
-   capabilities.ts          permission policy
-   tool-runner.ts           deterministic tool execution
-   acceptance.ts            spec §22 acceptance scenarios
-   http-server.ts           projection API smoke test
- web/
-   src/App.tsx              workbench (Simple/Power modes, template flow)
-   src/CanvasPanel.tsx      graph projection canvas
-   src/NavigationPanel.tsx  node library + nav
-   src/InspectorPanel.tsx   simple inspector
-   src/WideInspector.tsx    power inspector
-   src/LogsPanel.tsx        live logs
-   src/TerminalPanes.tsx    interactive terminals
-   src/ContextBusPanel.tsx  context refs/artifacts/decisions
-   src/ConsolePanel.tsx     events/chat + execution console
-   src/TemplateGallery.tsx  template selection
-   src/SetupWizard.tsx      guided wizard
-   src/simpleNodeConfig.tsx simple↔runtime config mapping
- docs/
-   AUDIT.md                 spec-to-implementation audit
+```bash
+export ANTHROPIC_API_KEY=...
+export CHEF_PROVIDER=anthropic
+export CHEF_MODEL=claude-sonnet-5
+```
 
-## Status
+OpenAI-compatible providers can be configured through the corresponding Chef environment variables used by `src/orchestrator/llm-decision-provider.ts`.
 
- **Working:**
+Chef surfaces provider configuration status through the runtime instead of pretending an LLM is active when it is not.
 
- - Golden path end-to-end: user message → plan → PTY dispatch → structured sideband delivery → artifact persistence → task completion.
- - Close/reopen cycle: full task, session, artifact, message, event, and plan state survives restart.
- - Concurrent dispatch respects `maxConcurrency`; timeout cancellation and terminal-task cancellation are regression-tested.
- - PTY terminal output is persisted as ordered `session.data` events and survives restart.
- - Live event subscription (`ChefRuntime.subscribeEvents`) delivers the persisted event stream with unsubscribe support.
- - Direct worker controls (`sendInput`, `interruptSession`, `resizeSession`) persist `user.*` intervention events.
- - Human approval gates: pending → blocked, accepted → assigned, rejected → cancelled; HTTP + canvas controls.
- - Node registry + execution engine: 9 node types, deterministic graph validation, approval blocking, failure propagation, cancellation.
- - Workflow/template/inspector API with restart-safe SSE replay.
- - Simple Mode: 4 seeded templates, guided wizard, friendly fields, mode toggle preserving workflow identity.
- - Power Mode: live logs, interactive terminals, context bus, wide inspector, dark theme.
- - Chat with Chef: LLM decision provider (env-configured), streaming SSE, chat persistence, graph patch validation.
- - Tool runner: terminal/filesystem/git with permission policy and approval gates; browser + MCP clients; specialized harness adapters (claude/pi/omp/freebuff) with generic fallback.
- - Execution console: node timeline, artifact cards, approval queue, metrics (with honest "unknown" for unavailable cost data).
+## Harnesses
 
- **Honest gaps (see `docs/AUDIT.md` for full audit):**
+Chef is designed around terminal-compatible harnesses rather than one model vendor.
 
- - React Flow canvas is the spec target; the current canvas is an SVG projection (works, not yet migrated).
- - LLM provider requires API keys at runtime; without them the deterministic scripted provider runs.
- - Playwright is optional; browser tool degrades with an honest error when absent.
- - Hierarchical squads (P4) and full IRC channel UI are future capabilities.
- - Wide inspector config persistence endpoint not yet wired.
+Current runtime wiring includes:
 
- ## Notes
+- generic PTY harness
+- Claude Code adapter
+- Pi adapter
+- OMP adapter
+- Freebuff adapter
 
- - Windows: winpty backend (`useConpty: false`) — treat as a temporary compatibility layer.
- - TypeScript native stripping: no enums, namespaces, or parameter properties.
- - SQLite via `node:sqlite` `DatabaseSync` (sync, no migrations; idempotent `CREATE TABLE IF NOT EXISTS`).
- - See `docs/AUDIT.md` for the spec-to-implementation checklist.
+The generic harness remains the fallback when a specialized harness is unavailable.
+
+## Capabilities and approvals
+
+Chef applies role-based capability policy to tool execution. Filesystem/terminal/git access, network/browser/GitHub capabilities, agent spawning, and destructive/deployment actions can be allowed, denied, or routed through approval depending on role and operation.
+
+Unknown capabilities fail closed.
+
+## Project layout
+
+```text
+src/
+  main.ts                  runtime wiring and ChefRuntime facade
+  core/                    durable domain contracts and graph types
+  context/                 bounded context/reference logic
+  persistence/             SQLite repository and schema
+  runtime/                 scheduler, automation runner, tools, capabilities
+  harness/                 generic PTY + specialized harness adapters
+  orchestrator/            planning/decision providers
+  server/                  HTTP/SSE runtime projection and mutation API
+
+web/
+  src/App.tsx              main living-workspace shell
+  src/BlueprintCanvas.tsx  XYFlow canvas
+  src/TerminalView.tsx     embedded terminal surface
+  src/BrowserSurface.tsx   browser surface
+  src/api.ts               runtime API client
+
+tests/                     runtime, server, canvas, context, approval, and acceptance coverage
+
+docs/
+  AUDIT.md                 implementation audit
+```
+
+## Honest gaps
+
+Current known limitations include:
+
+- provider-backed planning requires external API credentials; otherwise the scripted decision provider is used
+- Playwright-backed browser execution is optional and degrades with an explicit error when unavailable
+- some advanced inspector/configuration persistence paths are still incomplete
+- hierarchical squads, richer long-lived agent identity/presence, and broader collaboration UX remain later-stage work
+- resume/replay and richer artifact UX can still be expanded beyond the current durable execution history
+- Windows currently uses the winpty compatibility path (`useConpty: false`)
+
+For implementation-level detail and remaining divergences, see `docs/AUDIT.md` and the repository's active product/spec documents.
+
+## Direction
+
+Chef is aiming to become a general-purpose **AI Engineering OS / living agent workspace**, not another single-agent coding wrapper and not a traditional workflow builder.
+
+The intended experience stays simple:
+
+> **Tell Chef what you want. Chef figures out who should do what, coordinates the work, keeps the workspace alive, and brings you the result.**
