@@ -14,13 +14,15 @@ const LIVE_STATUSES: Record<string, boolean> = { spawning: true, running: true }
 
 export function TerminalPanel() {
   const [sessions, setSessions] = useState<Session[]>([]);
+  const [taskTitles, setTaskTitles] = useState<Record<string, string>>({});
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
   const refreshSessions = useCallback(async () => {
     try {
-      const list = await api.sessions();
+      const [list, state] = await Promise.all([api.sessions(), api.stateRaw()]);
       setSessions(list);
+      setTaskTitles(Object.fromEntries(state.tasks.map((task) => [task.id, task.title])));
       setFetchError(null);
     } catch (err) {
       setFetchError((err as Error)?.message ?? "Failed to load sessions");
@@ -34,6 +36,16 @@ export function TerminalPanel() {
     }, POLL_INTERVAL_MS);
     return () => clearInterval(handle);
   }, [refreshSessions]);
+
+  useEffect(() => {
+    if (sessions.length === 0) {
+      if (selectedSessionId !== null) setSelectedSessionId(null);
+      return;
+    }
+    if (selectedSessionId && sessions.some((session) => session.id === selectedSessionId)) return;
+    const preferred = sessions.find((session) => LIVE_STATUSES[session.status] === true) ?? sessions[0];
+    setSelectedSessionId(preferred.id);
+  }, [sessions, selectedSessionId]);
 
   const selected = sessions.find((s) => s.id === selectedSessionId);
 
@@ -55,6 +67,7 @@ export function TerminalPanel() {
             {sessions.map((s) => {
               const live = LIVE_STATUSES[s.status] === true;
               const active = selectedSessionId === s.id;
+              const taskTitle = taskTitles[s.taskId] ?? s.taskId.slice(0, 8);
               return (
                 <li key={s.id}>
                   <button
@@ -64,6 +77,7 @@ export function TerminalPanel() {
                     role="tab"
                     aria-selected={active}
                     onClick={() => setSelectedSessionId(s.id)}
+                    title={`${taskTitle} · ${s.status} · pid ${s.pid}`}
                   >
                     <span
                       className="wb-terminal-panel__status-dot"
@@ -71,10 +85,10 @@ export function TerminalPanel() {
                       aria-label={s.status}
                       title={s.status}
                     />
-                    <span className="wb-terminal-panel__task" title={s.taskId}>
-                      {s.taskId.slice(0, 8)}
+                    <span className="wb-terminal-panel__task" title={taskTitle}>
+                      {taskTitle}
                     </span>
-                    <span className="wb-terminal-panel__pid">pid {s.pid}</span>
+                    <span className="wb-terminal-panel__pid">{s.status}</span>
                   </button>
                 </li>
               );
