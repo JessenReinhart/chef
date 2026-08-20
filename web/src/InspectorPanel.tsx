@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import type { GraphNode } from "../../src/core/graph.ts";
 import { NodeIcon, NODE_LIBRARY } from "./nodeCatalog.tsx";
 import { SimpleConfigRenderer, mapRuntimeToSimple, mapSimpleToRuntime } from "./simpleNodeConfig.tsx";
@@ -35,6 +36,100 @@ function Field({ label, value, mono }: { label: string; value: React.ReactNode; 
     <div className="wb-inspector__field">
       <span className="wb-inspector__field-label">{label}</span>
       <span className={mono ? "wb-inspector__field-value wb-inspector__field-value--mono" : "wb-inspector__field-value"}>{value}</span>
+    </div>
+  );
+}
+
+function formatConfigValue(value: unknown): string {
+  if (typeof value === "object") return JSON.stringify(value, null, 2);
+  return String(value);
+}
+
+function parseConfigValue(draft: string, original: unknown): unknown {
+  if (original === null || typeof original === "object") return JSON.parse(draft);
+
+  if (typeof original === "number") {
+    const value = Number(draft);
+    if (!Number.isFinite(value)) throw new Error("Enter a finite number.");
+    return value;
+  }
+
+  if (typeof original === "boolean") {
+    if (draft === "true") return true;
+    if (draft === "false") return false;
+    throw new Error('Enter either "true" or "false".');
+  }
+
+  return draft;
+}
+
+function PowerConfigField({
+  configKey,
+  value,
+  onSave,
+}: {
+  configKey: string;
+  value: unknown;
+  onSave: (value: unknown) => void;
+}) {
+  const formatted = formatConfigValue(value);
+  const [draft, setDraft] = useState(formatted);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setDraft(formatted);
+    setError(null);
+  }, [formatted]);
+
+  const isStructured = value === null || typeof value === "object";
+  const dirty = draft !== formatted;
+
+  const save = () => {
+    try {
+      onSave(parseConfigValue(draft, value));
+      setError(null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Invalid value.");
+    }
+  };
+
+  return (
+    <div className="wb-inspector__field wb-inspector__field--power">
+      <label className="wb-inspector__label" htmlFor={`config-${configKey}`}>{configKey}</label>
+      {isStructured ? (
+        <textarea
+          id={`config-${configKey}`}
+          className="wb-inspector__input wb-inspector__input--mono"
+          value={draft}
+          rows={Math.min(10, Math.max(3, draft.split("\n").length))}
+          onChange={(event) => setDraft(event.target.value)}
+        />
+      ) : (
+        <input
+          id={`config-${configKey}`}
+          className="wb-inspector__input wb-inspector__input--mono"
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && dirty) save();
+          }}
+        />
+      )}
+      {error && <span className="wb-inspector__field-value" style={{ color: "var(--danger, #c44)" }}>{error}</span>}
+      {dirty && (
+        <div className="wb-inspector__actions">
+          <button className="wb-btn wb-btn--primary" onClick={save}>Save</button>
+          <button
+            className="wb-btn"
+            onClick={() => {
+              setDraft(formatted);
+              setError(null);
+            }}
+          >
+            Reset
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -92,14 +187,12 @@ export function InspectorPanel({ selectedNode, onAcceptApproval, onRejectApprova
         ) : (
           <div className="wb-inspector__section wb-inspector__section--power">
             {Object.entries(node.config).map(([key, value]) => (
-              <div key={key} className="wb-inspector__field wb-inspector__field--power">
-                <label className="wb-inspector__label">{key}</label>
-                <input
-                  className="wb-inspector__input wb-inspector__input--mono"
-                  value={typeof value === "object" ? JSON.stringify(value, null, 2) : String(value)}
-                  readOnly
-                />
-              </div>
+              <PowerConfigField
+                key={key}
+                configKey={key}
+                value={value}
+                onSave={(nextValue) => onConfigChange(node.id, key, nextValue)}
+              />
             ))}
           </div>
         )}
