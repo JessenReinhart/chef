@@ -26,7 +26,7 @@ function nodeColor(node: GraphNode): string {
 
 const EDGE_VISUALS: Record<GraphEdge["kind"], { color: string; dash?: string; label: string }> = {
   data: { color: "#1f6feb", label: "data" },
-  control: { color: "#6e7681", label: "depends on" },
+  control: { color: "#6e7681", label: "dependency" },
   conditional: { color: "#a371f7", dash: "8 4", label: "condition" },
   error: { color: "#da3633", dash: "3 3", label: "error" },
   approval: { color: "#9e6a03", dash: "5 3", label: "approval" },
