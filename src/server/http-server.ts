@@ -3,6 +3,7 @@ import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import type { ChefRuntime } from "../main.ts";
 import type { ApprovalDecision, RuntimeEvent, PlanTask, PlanStatus, CanvasPatch, CanvasEdgeType } from "../core/types.ts";
 import { buildPlanGraph } from "../core/graph.ts";
+import { buildAgentPresence } from "../runtime/agent-presence.ts";
 import { capabilityRegistry, type Role } from "../runtime/capabilities.ts";
 import type { Repository } from "../persistence/database.ts";
 
@@ -45,6 +46,12 @@ export function createHttpServer(runtime: ChefRuntime): Server {
       if (req.method === "GET" && path === "/api/state") {
         const snapshot = await runtime.inspectState();
         sendJson(res, 200, snapshot);
+        return;
+      }
+
+      if (req.method === "GET" && path === "/api/agents/presence") {
+        const snapshot = await runtime.inspectState();
+        sendJson(res, 200, { ok: true, data: buildAgentPresence(snapshot) });
         return;
       }
 
