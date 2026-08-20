@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api } from "./api";
-import type { ContextZone } from "./types";
+import type { ContextZone, ContextZoneInput } from "./types";
 
 type Bounds = { x: number; y: number; width: number; height: number };
-type CanvasNode = { id: string; position: { x: number; y: number } };
+type CanvasNode = { id: string; label: string; position: { x: number; y: number } };
 
 const VIEW_KEY = "chef:canvas:view";
 const readViewport = () => {
@@ -24,6 +24,8 @@ export function ContextScopeFeature() {
   const [drawing, setDrawing] = useState(false);
   const [draft, setDraft] = useState<Bounds | null>(null);
   const [inspectedScopeId, setInspectedScopeId] = useState<string | null>(null);
+  const [scopeAction, setScopeAction] = useState<string | null>(null);
+  const [scopeError, setScopeError] = useState<string | null>(null);
   const startRef = useRef<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
@@ -41,7 +43,7 @@ export function ContextScopeFeature() {
         api.stateRaw(),
       ]);
       setScopes(nextScopes);
-      setNodes(state.canvasNodes);
+      setNodes(state.canvasNodes.map((node) => ({ id: node.id, label: node.label, position: node.position })));
     } catch {
       // The feature is additive; the base canvas remains usable if the scope API is unavailable.
     }
@@ -68,6 +70,8 @@ export function ContextScopeFeature() {
     width: scope.bounds.width * viewport.zoom,
     height: scope.bounds.height * viewport.zoom,
   })), [scopes, viewport]);
+
+  const nodeLabels = useMemo(() => new Map(nodes.map((node) => [node.id, node.label])), [nodes]);
 
   const begin = (e: React.PointerEvent) => {
     if (!drawing || e.button !== 0) return;
@@ -106,10 +110,10 @@ export function ContextScopeFeature() {
 
     try {
       await api.createContextZone({
-          name: `Shared Context${memberNodeIds.length ? ` (${memberNodeIds.length} nodes)` : ""}`,
-          bounds: { x: a.x, y: a.y, width: b.x - a.x, height: b.y - a.y },
-          contextRefs: [],
-          memberNodeIds,
+        name: `Shared Context${memberNodeIds.length ? ` (${memberNodeIds.length} nodes)` : ""}`,
+        bounds: { x: a.x, y: a.y, width: b.x - a.x, height: b.y - a.y },
+        contextRefs: [],
+        memberNodeIds,
       });
       await refresh();
     } catch {
@@ -117,9 +121,23 @@ export function ContextScopeFeature() {
     }
   };
 
+  const updateScope = async (scope: ContextZone, patch: Partial<ContextZoneInput>, action: string) => {
+    setScopeAction(`${scope.id}:${action}`);
+    setScopeError(null);
+    try {
+      await api.updateContextZone(scope.id, patch);
+      await refresh();
+    } catch (error) {
+      setScopeError(error instanceof Error ? error.message : "Failed to update shared context");
+    } finally {
+      setScopeAction(null);
+    }
+  };
+
   const remove = async (id: string) => {
     try {
       await api.deleteContextZone(id);
+      if (inspectedScopeId === id) setInspectedScopeId(null);
       await refresh();
     } catch {
       // Best-effort UI action; the next refresh reconciles the rendered scopes.
@@ -134,18 +152,92 @@ export function ContextScopeFeature() {
         <div key={scope.id} className="absolute rounded-xl border-2 border-dashed border-cyan-500/50 bg-cyan-500/5 pointer-events-auto" style={{ left: x, top: y, width, height }}>
           <div className="absolute -top-6 left-2 flex items-center gap-2 rounded-t-md bg-[#0d1117]/90 px-2 py-1 text-[10px] text-cyan-300">
             <span>◈</span>
-            <button onClick={() => setInspectedScopeId((current) => current === scope.id ? null : scope.id)} title="Inspect explicit members">
+            <button onClick={() => { setScopeError(null); setInspectedScopeId((current) => current === scope.id ? null : scope.id); }} title="Inspect shared context">
               {scope.name}
             </button>
-            <span className="text-[#8b949e]">{scope.memberNodeIds.length} members</span>
+            <span className="text-[#8b949e]">{scope.memberNodeIds.length} members · {scope.contextRefs.length} refs</span>
             <button className="text-red-400 hover:text-red-300" onClick={() => void remove(scope.id)}>×</button>
           </div>
           {inspectedScopeId === scope.id && (
-            <div className="context-zone-members">
-              <strong>Context members</strong>
-              {scope.memberNodeIds.length > 0 ? scope.memberNodeIds.map((nodeId) => (
-                <code key={nodeId}>{nodeId}</code>
-              )) : <span>No members yet</span>}
+            <div className="context-zone-members w-[320px] max-h-[420px] overflow-y-auto space-y-3">
+              <div>
+                <strong>Shared Context</strong>
+                <small className="block mt-1">References here are durable and are injected into pending or assigned member tasks before dispatch.</small>
+              </div>
+
+              <form
+                className="flex gap-2"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  const form = new FormData(event.currentTarget);
+                  const name = String(form.get("name") ?? "").trim();
+                  if (!name || name === scope.name) return;
+                  void updateScope(scope, { name }, "rename");
+                }}
+              >
+                <input
+                  key={`${scope.id}:${scope.name}`}
+                  name="name"
+                  defaultValue={scope.name}
+                  aria-label="Context zone name"
+                  className="min-w-0 flex-1 rounded border border-[#30363d] bg-[#010409] px-2 py-1 text-[11px] text-[#e6edf3]"
+                />
+                <button type="submit" disabled={scopeAction === `${scope.id}:rename`} className="rounded border border-cyan-500/30 px-2 py-1 text-[10px] text-cyan-300 disabled:opacity-50">
+                  Save
+                </button>
+              </form>
+
+              <div className="space-y-1">
+                <span className="text-[10px] uppercase tracking-wide text-[#8b949e]">Members</span>
+                {scope.memberNodeIds.length > 0 ? scope.memberNodeIds.map((nodeId) => (
+                  <div key={nodeId} className="flex items-center justify-between gap-2 rounded bg-[#161b22] px-2 py-1">
+                    <span className="truncate text-[11px] text-[#e6edf3]">{nodeLabels.get(nodeId) ?? "Unknown node"}</span>
+                    <code className="text-[9px] text-[#6e7681]">{nodeId.slice(0, 8)}</code>
+                  </div>
+                )) : <span>No members yet</span>}
+              </div>
+
+              <div className="space-y-1">
+                <span className="text-[10px] uppercase tracking-wide text-[#8b949e]">Context references</span>
+                {scope.contextRefs.length > 0 ? scope.contextRefs.map((ref) => {
+                  const key = `${ref.type}:${ref.id}`;
+                  return (
+                    <div key={key} className="flex items-center justify-between gap-2 rounded border border-[#30363d] bg-[#010409] px-2 py-1">
+                      <code className="min-w-0 truncate text-[10px] text-cyan-200">{key}</code>
+                      <button
+                        type="button"
+                        className="text-[10px] text-red-400 hover:text-red-300 disabled:opacity-50"
+                        disabled={scopeAction === `${scope.id}:remove:${key}`}
+                        onClick={() => void updateScope(scope, {
+                          contextRefs: scope.contextRefs.filter((candidate) => candidate.type !== ref.type || candidate.id !== ref.id),
+                        }, `remove:${key}`)}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  );
+                }) : <span className="text-[10px] text-[#8b949e]">No references attached yet.</span>}
+              </div>
+
+              <form
+                className="grid grid-cols-[96px_1fr_auto] gap-1"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  const form = new FormData(event.currentTarget);
+                  const type = String(form.get("type") ?? "").trim();
+                  const id = String(form.get("id") ?? "").trim();
+                  if (!type || !id) return;
+                  if (scope.contextRefs.some((ref) => ref.type === type && ref.id === id)) return;
+                  void updateScope(scope, { contextRefs: [...scope.contextRefs, { type, id }] }, `add:${type}:${id}`);
+                  event.currentTarget.reset();
+                }}
+              >
+                <input name="type" placeholder="type" aria-label="Reference type" className="min-w-0 rounded border border-[#30363d] bg-[#010409] px-2 py-1 text-[10px] text-[#e6edf3]" />
+                <input name="id" placeholder="reference id" aria-label="Reference id" className="min-w-0 rounded border border-[#30363d] bg-[#010409] px-2 py-1 text-[10px] text-[#e6edf3]" />
+                <button type="submit" className="rounded border border-cyan-500/30 px-2 py-1 text-[10px] text-cyan-300">Add</button>
+              </form>
+
+              {scopeError && <span role="alert" className="block text-[10px] text-red-400">{scopeError}</span>}
               <small>Membership is persisted explicitly. Moving the outline does not redefine it.</small>
             </div>
           )}
