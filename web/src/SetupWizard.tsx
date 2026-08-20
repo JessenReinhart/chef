@@ -2,7 +2,7 @@
  * Chef Workbench — Setup Wizard for Simple Mode templates.
  *
  * Guided step-by-step flow for template parameters with plain language labels,
- * progressive disclosure, and preview before run.
+ * progressive disclosure, and a review step before adding the setup to the workspace.
  */
 
 import { useState, useEffect, useCallback } from "react";
@@ -382,7 +382,7 @@ export function SetupWizard({ template, onComplete, onCancel }: SetupWizardProps
           disabled={!validation.valid && isLastStep}
           aria-disabled={!validation.valid && isLastStep}
         >
-          {isLastStep ? "Preview & Run" : "Next"}
+          {isLastStep ? "Review setup" : "Next"}
         </button>
         <button className="wb-btn wb-btn--ghost" onClick={onCancel} style={{ marginLeft: "var(--space-2)" }}>
           Cancel
@@ -453,8 +453,8 @@ function PreviewModal({ draft, validation, onClose, onConfirm, onBack }: Preview
     <div className="wb-wizard__modal-overlay" onClick={onClose}>
       <div className="wb-wizard__modal" onClick={(e) => e.stopPropagation()}>
         <div className="wb-wizard__modal-header">
-          <h3>Preview Workflow</h3>
-          <button className="wb-btn wb-btn--ghost wb-wizard__close" onClick={onClose} aria-label="Close preview">
+          <h3>Review workspace setup</h3>
+          <button className="wb-btn wb-btn--ghost wb-wizard__close" onClick={onClose} aria-label="Close review">
             ✕
           </button>
         </div>
@@ -462,7 +462,7 @@ function PreviewModal({ draft, validation, onClose, onConfirm, onBack }: Preview
         <div className="wb-wizard__modal-body">
           {validation.errors.length > 0 && (
             <div className="wb-wizard__validation-summary" role="alert">
-              <strong>Please fix the following before running:</strong>
+              <strong>Please fix the following before adding this setup:</strong>
               <ul>
                 {validation.errors.map((err, i) => (
                   <li key={i}>{err.message}</li>
@@ -506,7 +506,7 @@ function PreviewModal({ draft, validation, onClose, onConfirm, onBack }: Preview
             disabled={!validation.valid}
             aria-disabled={!validation.valid}
           >
-            Run Workflow
+            Add to workspace
           </button>
         </div>
       </div>
