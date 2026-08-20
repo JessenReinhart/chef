@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { BlueprintCanvas } from "./BlueprintCanvas";
 import { NodePalette } from "./NodePalette";
 import { ChatPanel } from "./ChatPanel";
+import { MissionPanel } from "./MissionPanel";
 import { api } from "./api";
 import { NODE_LIBRARY, registerHarnesses, subscribeLibrary } from "./nodeCatalog";
 import { TerminalView } from "./TerminalView";
@@ -480,30 +481,16 @@ export function App() {
       </header>
 
       {showMissionControls && latestMission && (
-        <section className="mission-controls" aria-label="Mission controls">
-          <div className="mission-controls__identity">
-            <strong>{latestMission.goal}</strong>
-            <span>{mode === "power"
-              ? `${latestMission.status} · ${latestMission.taskIds.length} tasks`
-              : MISSION_LABELS[latestMission.status]}</span>
-          </div>
-          <div className="mission-controls__actions">
-            {latestMission.status === "paused" ? (
-              <button onClick={() => void handleMissionAction(latestMission, "resume")}>Resume mission</button>
-            ) : !["completed", "cancelled", "failed"].includes(latestMission.status) ? (
-              <button onClick={() => void handleMissionAction(latestMission, "pause")}>Pause mission</button>
-            ) : null}
-            {!["completed", "cancelled", "failed"].includes(latestMission.status) && (
-              <button className="is-danger" onClick={() => void handleMissionAction(latestMission, "cancel")}>Cancel</button>
-            )}
-            {!["completed", "cancelled"].includes(latestMission.status) && (
-              <form onSubmit={(event) => { event.preventDefault(); void handleMissionRedirect(latestMission); }}>
-                <input value={redirectGoal} onChange={(event) => setRedirectGoal(event.target.value)} placeholder="Redirect this mission…" />
-                <button disabled={!redirectGoal.trim()} type="submit">Redirect</button>
-              </form>
-            )}
-          </div>
-        </section>
+        <MissionPanel
+          mission={latestMission}
+          tasks={tasks}
+          approvals={approvals}
+          mode={mode}
+          redirectGoal={redirectGoal}
+          onRedirectGoalChange={setRedirectGoal}
+          onAction={(action) => void handleMissionAction(latestMission, action)}
+          onRedirect={() => void handleMissionRedirect(latestMission)}
+        />
       )}
 
       {showAutomation && (
