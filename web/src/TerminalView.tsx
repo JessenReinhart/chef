@@ -53,10 +53,33 @@ export function TerminalView({ sessionId }: TerminalViewProps) {
     term.loadAddon(fitAddon);
 
     term.open(containerRef.current);
-    fitAddon.fit();
 
     termRef.current = term;
     fitAddonRef.current = fitAddon;
+
+    let lastCols = 0;
+    let lastRows = 0;
+    const syncPtySize = () => {
+      if (!containerRef.current) return;
+      fitAddon.fit();
+      if (term.cols === lastCols && term.rows === lastRows) return;
+      lastCols = term.cols;
+      lastRows = term.rows;
+      fetch("/api/sessions/resize", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ sessionId, cols: term.cols, rows: term.rows }),
+      })
+        .then((response) => {
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        })
+        .catch((err) => console.error("[TerminalView] resize failed:", err));
+    };
+
+    // Fit once after mount and keep the underlying PTY geometry in sync with
+    // the visible xterm viewport. Without the runtime resize call, wrapping
+    // and full-screen terminal apps continue using stale cols/rows.
+    syncPtySize();
 
     // Handle terminal input — send to session via POST /api/sessions/send
     term.onData((data) => {
@@ -68,12 +91,7 @@ export function TerminalView({ sessionId }: TerminalViewProps) {
     });
 
     // Handle resize
-    const handleResize = () => {
-      if (termRef.current && fitAddonRef.current && containerRef.current) {
-        fitAddonRef.current.fit();
-      }
-    };
-    const resizeObserver = new ResizeObserver(handleResize);
+    const resizeObserver = new ResizeObserver(syncPtySize);
     resizeObserver.observe(containerRef.current);
 
     // Open EventSource for session.data events
