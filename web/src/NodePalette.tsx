@@ -36,6 +36,25 @@ const SIMPLE_CATEGORY_LABELS: Record<(typeof CATEGORIES)[number], string> = {
   Human: "People",
 };
 
+const STARTER_TYPE_PREFERENCES = [
+  ["harness."],
+  ["tool.terminal", "terminal"],
+  ["tool.browser", "browser"],
+] as const;
+
+function starterEntries(library: NodeCatalogEntry[]): NodeCatalogEntry[] {
+  const picked: NodeCatalogEntry[] = [];
+  for (const preferences of STARTER_TYPE_PREFERENCES) {
+    const match = library.find((entry) =>
+      preferences.some((preference) =>
+        preference.endsWith(".") ? entry.type.startsWith(preference) : entry.type === preference || entry.type.includes(preference)
+      )
+    );
+    if (match && !picked.some((entry) => entry.type === match.type)) picked.push(match);
+  }
+  return picked;
+}
+
 export function NodePalette({ onDragStart, mode }: PaletteProps) {
   const [category, setCategory] = useState<(typeof CATEGORIES)[number]>("All");
   const [search, setSearch] = useState("");
@@ -65,6 +84,8 @@ export function NodePalette({ onDragStart, mode }: PaletteProps) {
     [library, category, search]
   );
 
+  const starters = useMemo(() => starterEntries(library), [library]);
+
   const handleDragStart = useCallback(
     (entry: NodeCatalogEntry, event: React.DragEvent) => {
       // Drag payload: JSON with type + harnessId (for harness.* entries).
@@ -91,10 +112,38 @@ export function NodePalette({ onDragStart, mode }: PaletteProps) {
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search nodes…"
+          placeholder={mode === "simple" ? "Find a teammate or app…" : "Search nodes…"}
           className="w-full bg-[#161b22] border border-[#30363d] rounded-md px-2 py-1.5 text-xs text-[#e6edf3] placeholder-[#8b949e] focus:border-cyan-500 focus:outline-none transition-colors"
         />
       </div>
+
+      {mode === "simple" && starters.length > 0 && (
+        <div className="border-b border-[#21262d] px-3 py-2.5 shrink-0">
+          <div className="mb-2">
+            <div className="text-[11px] font-semibold text-[#e6edf3]">Start here</div>
+            <p className="mt-0.5 text-[10px] leading-tight text-[#8b949e]">Drag in a teammate or app. You can connect them later.</p>
+          </div>
+          <div className="space-y-1.5">
+            {starters.map((entry) => (
+              <div
+                key={`starter-${entry.type}`}
+                draggable
+                onDragStart={(e) => handleDragStart(entry, e)}
+                className="group cursor-grab rounded-lg border border-cyan-500/20 bg-cyan-500/[0.04] p-2 transition-all duration-150 hover:border-cyan-400/50 hover:bg-cyan-500/[0.08] active:cursor-grabbing"
+              >
+                <div className="flex items-center gap-2">
+                  <span className="h-2 w-2 rounded-full shrink-0" style={{ background: CATEGORY_DOT[entry.category] ?? "#6b7280" }} />
+                  <span className="truncate text-xs font-semibold text-[#e6edf3]">{entry.label}</span>
+                  <span className="ml-auto text-[9px] uppercase tracking-wide text-cyan-400/70">drag</span>
+                </div>
+                <p className="mt-0.5 line-clamp-2 text-[10px] leading-tight text-[#8b949e]">
+                  {entry.description.replace(/\s*\([^)]*\)\s*$/, "")}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Category tabs */}
       <div className="flex flex-wrap gap-1 px-3 pt-2 pb-1 border-b border-[#21262d] shrink-0">
@@ -115,7 +164,23 @@ export function NodePalette({ onDragStart, mode }: PaletteProps) {
 
       {/* Node list — draggable cards */}
       <div className="flex-1 overflow-y-auto p-2 space-y-1.5 min-h-0">
-        {filtered.length === 0 && <p className="text-xs text-[#8b949e] px-2 pt-2">No nodes match.</p>}
+        {filtered.length === 0 && (
+          <div className="px-2 pt-2">
+            <p className="text-xs text-[#8b949e]">Nothing matches yet.</p>
+            {(search || category !== "All") && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSearch("");
+                  setCategory("All");
+                }}
+                className="mt-2 text-[10px] font-medium text-cyan-400 hover:text-cyan-300"
+              >
+                Show everything
+              </button>
+            )}
+          </div>
+        )}
         {filtered.map((entry) => (
           <div
             key={entry.type}
@@ -136,7 +201,7 @@ export function NodePalette({ onDragStart, mode }: PaletteProps) {
           </div>
         ))}
         {filtered.length > 0 && (
-          <p className="text-[10px] text-[#484f58] px-2 pt-2 text-center">Drag a node onto the canvas</p>
+          <p className="text-[10px] text-[#484f58] px-2 pt-2 text-center">{mode === "simple" ? "Drag anything onto the workspace" : "Drag a node onto the canvas"}</p>
         )}
       </div>
     </div>
