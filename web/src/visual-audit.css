@@ -1,0 +1,109 @@
+/* Responsive visual hardening from the Chef visual audit.
+   This layer intentionally changes presentation only; runtime semantics stay untouched. */
+
+/* Keep the shared-context affordance below the relationship picker instead of
+   stacking two canvas controls in the same top-left slot. */
+.react-flow > .absolute.inset-0.z-\[6\] > button.absolute {
+  top: 3.25rem !important;
+}
+
+/* Let the work surface keep useful space on laptop-sized viewports. */
+.h-screen > .flex-1.flex > aside:first-child {
+  width: clamp(19rem, 28vw, 23.75rem) !important;
+}
+
+/* Selected-node actions should never disappear beyond the canvas edges. */
+.h-screen main section > .absolute.top-3.left-1\/2 {
+  max-width: calc(100% - 2rem);
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+/* Mission and automation chrome must wrap instead of forcing horizontal overflow. */
+.mission-controls,
+.automation-strip {
+  flex-wrap: wrap;
+}
+
+.mission-controls__actions,
+.mission-controls__actions form,
+.automation-strip__actions {
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+/* Browser controls remain usable when the embedded surface is narrow. */
+.browser-surface__toolbar {
+  flex-wrap: wrap;
+}
+
+.browser-surface__toolbar input {
+  flex-basis: 18rem;
+}
+
+.browser-surface__toolbar a {
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.browser-surface__toolbar button:disabled {
+  cursor: default;
+  opacity: 0.42;
+}
+
+@media (max-width: 1180px) {
+  /* The node library becomes an overlay rather than permanently consuming the
+     shrinking canvas width. */
+  .h-screen > .flex-1.flex > main {
+    position: relative;
+  }
+
+  .h-screen > .flex-1.flex > main > aside {
+    position: absolute;
+    z-index: 24;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: min(17rem, 78vw) !important;
+    box-shadow: 18px 0 48px rgb(0 0 0 / 45%);
+  }
+
+  header > div:first-child > span:last-child {
+    display: none;
+  }
+
+  header > div:last-child {
+    gap: 0.35rem !important;
+  }
+
+  .power-inspector {
+    width: min(20rem, calc(100% - 1rem));
+    right: 0.5rem;
+  }
+}
+
+@media (max-width: 900px) {
+  .h-screen > .flex-1.flex > aside:first-child {
+    width: min(20rem, 38vw) !important;
+  }
+
+  .h-screen main section > .absolute.top-3.left-1\/2 {
+    left: 1rem !important;
+    right: 1rem;
+    transform: none !important;
+  }
+
+  .browser-surface {
+    left: 8px;
+    right: 8px;
+    bottom: 8px;
+  }
+
+  .browser-surface__toolbar input {
+    order: 10;
+    flex-basis: 100%;
+    width: 100%;
+  }
+}
