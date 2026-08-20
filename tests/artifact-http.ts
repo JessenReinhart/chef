@@ -60,7 +60,7 @@ try {
 
   const detail = await request(`/api/artifacts/${encodeURIComponent(report.id)}`);
   assert.equal(detail.status, 200);
-  assert.deepEqual(detail.json.data, report);
+  assert.deepEqual(detail.json.data, JSON.parse(JSON.stringify(report)));
 
   const missing = await request("/api/artifacts/not-here");
   assert.equal(missing.status, 404);
