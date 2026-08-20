@@ -2,6 +2,8 @@
 
 Audit of `AI_Engineering_OS_Specification_v0.1.pdf` against the current codebase. Status per requirement: **implemented** (verified by tests/usage), **partial** (works but incomplete), **deferred** (intentionally not shipped; future capability), **absent** (not started).
 
+> Reconciled against the v0.2 living-workspace baseline on `master`. This audit should describe shipped repository state rather than roadmap work that has already landed.
+
 ## Product Model (§1–3)
 
 | Requirement | Status | Evidence |
@@ -112,10 +114,10 @@ Audit of `AI_Engineering_OS_Specification_v0.1.pdf` against the current codebase
 
 | Requirement | Status | Evidence |
 |---|---|---|
-| Canvas is projection | implemented | `buildPlanGraph` from snapshot |
+| Canvas is projection | implemented | runtime-owned `canvas_nodes`/`canvas_edges`; `BlueprintCanvas` renders persisted state |
 | Node categories (agent/tool/control/workflow/human) | implemented | `NodeCategory` |
 | Serializable workflow definition | implemented | `WorkflowGraph`/`ExecutionGraph` JSON |
-| XYFlow/React Flow target | partial | current SVG canvas; React Flow is planned replacement (spec target, not yet shipped) |
+| XYFlow/React Flow target | implemented | `BlueprintCanvas.tsx` uses `@xyflow/react`; node positions persist through `patchCanvas` instead of local UI state |
 
 ## UX (§13)
 
@@ -148,7 +150,7 @@ Audit of `AI_Engineering_OS_Specification_v0.1.pdf` against the current codebase
 
 | Requirement | Status | Evidence |
 |---|---|---|
-| Node inspector (status/task/context/events/terminal) | implemented | InspectorPanel; WideInspector; LogsPanel; terminal panes |
+| Node inspector (status/task/context/events/terminal) | implemented | InspectorPanel; Power runtime inspector; LogsPanel; terminal panes |
 | Replay (reconstruct state from events) | implemented | PTY replay; `afterSeq` SSE replay; `pty-replay` test |
 
 ## Reliability (§17)
@@ -175,7 +177,7 @@ Audit of `AI_Engineering_OS_Specification_v0.1.pdf` against the current codebase
 | Requirement | Status | Evidence |
 |---|---|---|
 | React + TS + Vite | implemented | `web/` |
-| XYFlow/React Flow | partial | planned replacement for SVG |
+| XYFlow/React Flow | implemented | `@xyflow/react` is a web dependency and `BlueprintCanvas.tsx` renders the workspace with React Flow |
 | Zustand/query cache | deferred | React state + polling adequate for projection |
 | Node runtime | implemented | Node ≥24 |
 | Drizzle ORM | divergence | raw `node:sqlite` per repo convention (documented in AGENTS.md) |
@@ -194,8 +196,8 @@ Audit of `AI_Engineering_OS_Specification_v0.1.pdf` against the current codebase
 | P1 multi-agent | partial | sequential multi-task; concurrent multi-harness scheduling exists |
 | P1 harness adapters | implemented | claude/pi/omp/freebuff + generic fallback |
 | P1 direct worker interaction | implemented | send/interrupt/resize; test |
-| P2 visual canvas | partial | SVG projection live; React Flow pending |
-| P2 terminal nodes | partial | terminal panes wired; canvas-embedded terminals pending |
+| P2 visual canvas | implemented | React Flow workspace canvas with runtime-persisted node positions and typed relationships |
+| P2 terminal nodes | implemented | terminal canvas node renders collapsible live `TerminalView` bound to the node session |
 | P2 context inspector | implemented | ContextBusPanel, inspector endpoints |
 | P3 MCP | implemented | mcp-client (Phase 8) |
 | P3 approvals & permissions | implemented | full approval flow + capability policy |
@@ -214,12 +216,11 @@ Audit of `AI_Engineering_OS_Specification_v0.1.pdf` against the current codebase
 
 ## Known Deferred / Divergences
 
-1. **React Flow canvas** — spec target; current SVG canvas is functional projection. Replacing requires XYFlow dependency + position persistence, not yet shipped.
-2. **Drizzle ORM** — repo convention uses raw `node:sqlite` (documented divergence).
-3. **Hierarchical squads (P4)** — Orchestrator acts as squad lead; multi-level tech/QA/research leads not implemented.
-4. **IRC channels UI** — message `channel` field exists; channel rooms not exposed.
-5. **Context hierarchy depth** — workspace/task refs work; full global→session hierarchy not surfaced.
-6. **Event-sourced projection rebuild** — events append-only; rebuild-from-events not implemented.
-7. **Playwright hard dependency** — optional; browser tool degrades honestly.
-8. **LLM provider live integration** — `LLMDecisionProvider` implemented and tested with mocks; real API call requires `ANTHROPIC_API_KEY`/`OPENAI_API_KEY` at runtime.
-9. **Wide Inspector config persistence** — inspector validates and drafts; runtime node-config update endpoint not yet wired.
+1. **Drizzle ORM** — repo convention uses raw `node:sqlite` (documented divergence).
+2. **Hierarchical squads (P4)** — Orchestrator acts as squad lead; multi-level tech/QA/research leads not implemented.
+3. **IRC channels UI** — message `channel` field exists; channel rooms not exposed.
+4. **Context hierarchy depth** — workspace/task refs work; full global→session hierarchy not surfaced.
+5. **Event-sourced projection rebuild** — events append-only; rebuild-from-events not implemented.
+6. **Playwright hard dependency** — optional; browser tool degrades honestly.
+7. **LLM provider live integration** — `LLMDecisionProvider` implemented and tested with mocks; real API call requires `ANTHROPIC_API_KEY`/`OPENAI_API_KEY` at runtime.
+8. **Wide Inspector config persistence** — inspector validates and drafts; runtime node-config update endpoint not yet wired.
