@@ -27,6 +27,14 @@ export function createContextScopeServer(runtime: ChefRuntime, baseServer: Serve
     return [...new Set(memberNodeIds)].filter((nodeId) => !validIds.has(nodeId));
   };
 
+  const invalidBounds = (bounds: unknown): boolean => {
+    if (!bounds || typeof bounds !== "object") return true;
+    const candidate = bounds as Record<string, unknown>;
+    return ["x", "y", "width", "height"].some((key) =>
+      typeof candidate[key] !== "number" || !Number.isFinite(candidate[key] as number),
+    );
+  };
+
   const syncContextRefs = async () => {
     const snapshot = await runtime.inspectState();
     const canvasNodes = nodes();
@@ -58,7 +66,7 @@ export function createContextScopeServer(runtime: ChefRuntime, baseServer: Serve
           memberNodeIds?: string[];
           policy?: Record<string, unknown>;
         };
-        if (!body.name || !body.bounds || Object.values(body.bounds).some((v) => typeof v !== "number" || !Number.isFinite(v))) {
+        if (!body.name || !body.bounds || invalidBounds(body.bounds)) {
           sendJson(res, 400, { error: "name and finite bounds are required" });
           return;
         }
@@ -93,6 +101,10 @@ export function createContextScopeServer(runtime: ChefRuntime, baseServer: Serve
         };
         const current = runtime.repository.getContextZone(match[1]);
         if (!current || current.workspaceId !== runtime.workspaceId) { sendJson(res, 404, { error: "context scope not found" }); return; }
+        if (body.bounds && invalidBounds(body.bounds)) {
+          sendJson(res, 400, { error: "bounds must be finite numbers" });
+          return;
+        }
         const memberNodeIds = body.memberNodeIds ?? current.memberNodeIds;
         const invalid = invalidMembers(memberNodeIds);
         if (invalid.length > 0) {
