@@ -10,9 +10,9 @@ interface TerminalViewProps {
 type ConnectionState = "connecting" | "live" | "reconnecting";
 
 const CONNECTION_LABEL: Record<ConnectionState, string> = {
-  connecting: "Connecting…",
-  live: "Live",
-  reconnecting: "Reconnecting…",
+  connecting: "Connecting event stream…",
+  live: "Event stream connected",
+  reconnecting: "Reconnecting event stream…",
 };
 
 export function TerminalView({ sessionId }: TerminalViewProps) {
@@ -167,7 +167,7 @@ export function TerminalView({ sessionId }: TerminalViewProps) {
       <div
         role="status"
         aria-live="polite"
-        title={`Terminal event stream: ${CONNECTION_LABEL[connectionState]}`}
+        title={CONNECTION_LABEL[connectionState]}
         style={{
           position: "absolute",
           top: 8,
