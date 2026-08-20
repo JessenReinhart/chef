@@ -16,7 +16,6 @@ import {
   type Connection,
   type OnNodesChange,
   type OnEdgesChange,
-  type NodePositionChange,
   type NodeTypes,
   type NodeMouseHandler,
 } from "@xyflow/react";
@@ -41,6 +40,36 @@ export interface TerminalSession {
   status: string;
 }
 
+type AgentPresenceStatus =
+  | "offline"
+  | "starting"
+  | "idle"
+  | "thinking"
+  | "working"
+  | "waiting"
+  | "needs_input"
+  | "waiting_for_approval"
+  | "blocked"
+  | "failed";
+
+interface AgentPresence {
+  nodeId: string;
+  workspaceId: string;
+  name: string;
+  role?: string;
+  harnessId?: string;
+  status: AgentPresenceStatus;
+  currentTaskId?: string;
+  currentObjective?: string;
+  currentMissionId?: string;
+  missionGoal?: string;
+  currentSessionId?: string;
+  sessionStatus?: string;
+  needsAttention: boolean;
+  lastActivity?: { type: string; timestamp: number };
+  updatedAt: number;
+}
+
 export interface CanvasNodeData {
   label: string;
   status: string;
@@ -50,6 +79,7 @@ export interface CanvasNodeData {
   entry: NodeCatalogEntry | undefined;
   /** Live session id for terminal nodes (session.taskId === taskId). */
   sessionId?: string;
+  presence?: AgentPresence;
   mode: ViewMode;
   [key: string]: unknown;
 }
@@ -129,9 +159,11 @@ function friendlyStatus(status: string, kind: NodeKind): string {
     offline: "Offline",
     starting: "Starting",
     idle: "Idle",
+    thinking: "Thinking",
     working: "Working",
     waiting: "Waiting",
     needs_input: "Needs input",
+    waiting_for_approval: "Needs approval",
   };
   return labels[status] ?? status;
 }
@@ -198,7 +230,7 @@ const nodeTypes: NodeTypes = {
           <div className="truncate text-[13px] font-medium text-[#e6edf3]">{data.label}</div>
           <div className="mt-0.5 flex items-center gap-1.5">
             <span className="text-[10px] uppercase tracking-wide" style={{ color: statusColor }}>
-            {friendlyStatus(data.status, data.kind)}{data.mode === "power" ? ` · ${data.status}` : ""}
+              {friendlyStatus(data.status, data.kind)}{data.mode === "power" ? ` · ${data.status}` : ""}
             </span>
           </div>
         </div>
@@ -208,56 +240,129 @@ const nodeTypes: NodeTypes = {
     );
   }),
 
-  terminal: memo(function TerminalNode({ data, selected }: { data: CanvasNodeData; selected: boolean }) {
-  const accent = data.entry ? (data.kind === "agent" ? "#06b6d4" : KIND_COLORS[data.kind] ?? "#6b7280") : KIND_COLORS[data.kind] ?? "#6b7280";
-  const statusColor = STATUS_COLORS[data.status] ?? "#6b7280";
-  const icon = data.entry?.icon ?? ">_";
-  const sessionId = typeof data.sessionId === "string" ? data.sessionId : undefined;
-  const [open, setOpen] = useState(false);
-  return (
-    <div
-      className={`relative w-[540px] max-w-[90vw] rounded-xl border bg-[#0d1117]/95 text-left shadow-xl transition-all duration-200 ${
-        selected ? "ring-2 ring-cyan-400/60 shadow-cyan-500/20" : "border-[#30363d]"
-      }`}
-      style={{ boxShadow: `0 0 0 1px ${accent}22, 0 6px 20px rgba(0,0,0,.55)`, overflow: "hidden" }}
-    >
+  agent: memo(function AgentNode({ data, selected }: { data: CanvasNodeData; selected: boolean }) {
+    const presence = data.presence;
+    const accent = "#06b6d4";
+    const statusColor = STATUS_COLORS[data.status] ?? (presence?.needsAttention ? "#f59e0b" : "#6b7280");
+    const icon = data.entry?.icon ?? "◆";
+    const objective = presence?.currentObjective ?? "Available";
+    const identityLine = presence?.role ?? data.entry?.label ?? presence?.harnessId ?? "Agent";
+    const missionLabel = presence?.missionGoal;
+    const live = data.status === "working" || data.status === "thinking" || data.status === "starting";
+
+    return (
       <div
-        className="flex cursor-pointer items-center gap-2 rounded-t-xl border-b border-[#21262d] px-3 py-1.5"
-        style={{ background: `${accent}1a` }}
-        onClick={() => setOpen((v) => !v)}
-        title={open ? "Collapse terminal" : "Expand terminal"}
+        className={`relative w-[250px] rounded-2xl border bg-[#0d1117]/95 text-left shadow-xl transition-all duration-200 ${
+          selected ? "ring-2 ring-cyan-400/60 shadow-cyan-500/20" : presence?.needsAttention ? "border-amber-400/50" : "border-[#30363d]"
+        }`}
+        style={{ boxShadow: `0 0 0 1px ${accent}28, 0 10px 28px rgba(0,0,0,.58)` }}
       >
-        <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: statusColor, boxShadow: data.status === "running" ? `0 0 6px ${statusColor}` : "none" }} />
-        <span className="truncate text-[11px] font-semibold text-[#cbd5e1]" style={{ color: accent }}>
-          {icon}
-        </span>
-        <span className="truncate text-[11px] font-semibold text-[#cbd5e1]">
-          {data.entry?.label ?? data.label}
-        </span>
-        <span className="ml-auto text-[10px] text-[#8b949e]">{open ? "▾" : "▸"}</span>
-      </div>
-      {open && sessionId ? (
-        <div className="h-[300px] border-b border-[#21262d]">
-          <TerminalView sessionId={sessionId} />
-        </div>
-      ) : (
-        <div className="px-3 py-2">
-          <div className="truncate text-[13px] font-medium text-[#e6edf3]">{data.label}</div>
-          <div className="mt-0.5 flex items-center gap-1.5">
-            <span className="text-[10px] uppercase tracking-wide" style={{ color: statusColor }}>
-              {friendlyStatus(data.status, data.kind)}{data.mode === "power" ? ` · ${data.status}` : ""}
+        <div className="flex items-center gap-2.5 rounded-t-2xl border-b border-[#21262d] bg-cyan-400/[0.07] px-3 py-2.5">
+          <span
+            className="grid h-8 w-8 shrink-0 place-items-center rounded-xl border border-cyan-400/20 bg-cyan-400/10 text-sm font-semibold text-cyan-300"
+            aria-hidden="true"
+          >
+            {icon}
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1.5">
+              <span
+                className="h-2 w-2 shrink-0 rounded-full"
+                style={{ background: statusColor, boxShadow: live ? `0 0 9px ${statusColor}` : "none" }}
+              />
+              <strong className="truncate text-[12px] font-semibold text-[#f0f6fc]">{presence?.name ?? data.label}</strong>
+            </div>
+            <div className="mt-0.5 truncate text-[9px] uppercase tracking-[0.12em] text-[#6e7681]">{identityLine}</div>
+          </div>
+          {presence?.needsAttention && (
+            <span className="rounded-full border border-amber-400/30 bg-amber-400/10 px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-wide text-amber-300">
+              Attention
             </span>
-            {data.mode === "power" && sessionId && (
-              <span className="truncate text-[10px] text-[#8b949e]">{sessionId}</span>
+          )}
+        </div>
+
+        <div className="px-3 py-2.5">
+          <div className="text-[9px] uppercase tracking-[0.12em] text-[#6e7681]">Current focus</div>
+          <div className={`mt-1 line-clamp-2 text-[12px] leading-4 ${presence?.currentObjective ? "text-[#e6edf3]" : "text-[#8b949e]"}`}>
+            {objective}
+          </div>
+
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            <span className="rounded-full border px-2 py-0.5 text-[9px] font-medium uppercase tracking-wide" style={{ color: statusColor, borderColor: `${statusColor}55`, background: `${statusColor}12` }}>
+              {friendlyStatus(data.status, "agent")}
+            </span>
+            {missionLabel && (
+              <span className="max-w-[150px] truncate rounded-full border border-violet-400/25 bg-violet-400/10 px-2 py-0.5 text-[9px] text-violet-300" title={missionLabel}>
+                Mission · {missionLabel}
+              </span>
             )}
           </div>
+
+          {data.mode === "power" && presence && (
+            <div className="mt-2 border-t border-[#21262d] pt-2 font-mono text-[8px] leading-4 text-[#6e7681]">
+              <div>{presence.harnessId ? `harness:${presence.harnessId}` : "harness:—"} · state:{presence.status}</div>
+              <div>{presence.currentTaskId ? `task:${presence.currentTaskId.slice(0, 8)}` : "task:—"} · {presence.currentSessionId ? `session:${presence.currentSessionId.slice(0, 8)}` : "session:—"}</div>
+              {presence.currentMissionId && <div>mission:{presence.currentMissionId.slice(0, 8)}</div>}
+            </div>
+          )}
         </div>
-      )}
-      <HarnessHandle color={accent} />
-      <HarnessHandleRight color={accent} />
-    </div>
-  );
-}),
+
+        <HarnessHandle color={accent} />
+        <HarnessHandleRight color={accent} />
+      </div>
+    );
+  }),
+
+  terminal: memo(function TerminalNode({ data, selected }: { data: CanvasNodeData; selected: boolean }) {
+    const accent = data.entry ? (data.kind === "agent" ? "#06b6d4" : KIND_COLORS[data.kind] ?? "#6b7280") : KIND_COLORS[data.kind] ?? "#6b7280";
+    const statusColor = STATUS_COLORS[data.status] ?? "#6b7280";
+    const icon = data.entry?.icon ?? ">_";
+    const sessionId = typeof data.sessionId === "string" ? data.sessionId : undefined;
+    const [open, setOpen] = useState(false);
+    return (
+      <div
+        className={`relative w-[540px] max-w-[90vw] rounded-xl border bg-[#0d1117]/95 text-left shadow-xl transition-all duration-200 ${
+          selected ? "ring-2 ring-cyan-400/60 shadow-cyan-500/20" : "border-[#30363d]"
+        }`}
+        style={{ boxShadow: `0 0 0 1px ${accent}22, 0 6px 20px rgba(0,0,0,.55)`, overflow: "hidden" }}
+      >
+        <div
+          className="flex cursor-pointer items-center gap-2 rounded-t-xl border-b border-[#21262d] px-3 py-1.5"
+          style={{ background: `${accent}1a` }}
+          onClick={() => setOpen((v) => !v)}
+          title={open ? "Collapse terminal" : "Expand terminal"}
+        >
+          <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: statusColor, boxShadow: data.status === "running" ? `0 0 6px ${statusColor}` : "none" }} />
+          <span className="truncate text-[11px] font-semibold text-[#cbd5e1]" style={{ color: accent }}>
+            {icon}
+          </span>
+          <span className="truncate text-[11px] font-semibold text-[#cbd5e1]">
+            {data.entry?.label ?? data.label}
+          </span>
+          <span className="ml-auto text-[10px] text-[#8b949e]">{open ? "▾" : "▸"}</span>
+        </div>
+        {open && sessionId ? (
+          <div className="h-[300px] border-b border-[#21262d]">
+            <TerminalView sessionId={sessionId} />
+          </div>
+        ) : (
+          <div className="px-3 py-2">
+            <div className="truncate text-[13px] font-medium text-[#e6edf3]">{data.label}</div>
+            <div className="mt-0.5 flex items-center gap-1.5">
+              <span className="text-[10px] uppercase tracking-wide" style={{ color: statusColor }}>
+                {friendlyStatus(data.status, data.kind)}{data.mode === "power" ? ` · ${data.status}` : ""}
+              </span>
+              {data.mode === "power" && sessionId && (
+                <span className="truncate text-[10px] text-[#8b949e]">{sessionId}</span>
+              )}
+            </div>
+          </div>
+        )}
+        <HarnessHandle color={accent} />
+        <HarnessHandleRight color={accent} />
+      </div>
+    );
+  }),
 };
 
 export function BlueprintCanvas({
@@ -283,6 +388,31 @@ export function BlueprintCanvas({
   // preserving whatever the user has dragged locally.
   const [rfNodes, setRfNodes] = useNodesState<Node<CanvasNodeData>>([]);
   const [rfEdges, setRfEdges] = useEdgesState<Edge>([]);
+  const [agentPresences, setAgentPresences] = useState<AgentPresence[]>([]);
+
+  // Presence is a runtime-owned read-only projection. Polling is deliberately
+  // independent from the canvas graph poll so identity remains present even
+  // when a task/session has just transitioned to a terminal state.
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const response = await fetch("/api/agents/presence");
+        if (!response.ok) return;
+        const body = (await response.json()) as { ok: boolean; data: AgentPresence[] };
+        if (!cancelled && body.ok) setAgentPresences(body.data);
+      } catch {
+        // Presence is progressive UI enrichment. Keep the durable canvas usable
+        // when the endpoint is temporarily unavailable during runtime restart.
+      }
+    };
+    void load();
+    const timer = window.setInterval(() => void load(), 1500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, []);
 
   // Status lookup keyed by node id (status comes from runtime tasks).
   const taskById = useMemo(() => {
@@ -291,25 +421,28 @@ export function BlueprintCanvas({
     return map;
   }, [tasks]);
 
+  const presenceByNodeId = useMemo(() => {
+    return new Map(agentPresences.map((presence) => [presence.nodeId, presence]));
+  }, [agentPresences]);
+
   // ── Reconcile runtime canvas nodes → canvas nodes (positions from server) ──
   useEffect(() => {
     setRfNodes((nds) => {
       const existing = new Map(nds.map((n) => [n.id, n]));
-      let cascade = 0;
       const merged: Node<CanvasNodeData>[] = [];
       for (const node of canvasNodes) {
         const prev = existing.get(node.id);
         // Preserve a live in-progress drag position; otherwise use the server position.
         const position = prev?.position ?? node.position;
         const task = node.taskId ? taskById.get(node.taskId) : undefined;
-        // Task/session state is authoritative for task-backed nodes. The
-        // persisted liveStatus is an identity/restoration hint for standalone
-        // nodes and must not mask running/completed/failed execution.
-        const status = task?.status ?? node.liveStatus ?? "pending";
+        const presence = node.kind === "agent" ? presenceByNodeId.get(node.id) : undefined;
+        // Agent presence composes task/session/approval state. Other task-backed
+        // nodes continue to use task state, with liveStatus as a restoration hint.
+        const status = presence?.status ?? task?.status ?? node.liveStatus ?? "pending";
 
         // Determine if this is a terminal node (by kind or label)
         const isTerminalNode = node.kind === "tool" && (node.label === "Terminal" || node.label === "tool.terminal");
-        const nodeTypeForRF = isTerminalNode ? "terminal" : "blueprint";
+        const nodeTypeForRF = isTerminalNode ? "terminal" : node.kind === "agent" ? "agent" : "blueprint";
 
         // Find session for this task (session.taskId === node.taskId)
         const session = sessions.find((s) => s.taskId === node.taskId);
@@ -325,8 +458,8 @@ export function BlueprintCanvas({
         merged.push({
           id: node.id,
           position,
-          width: 180,
-          height: 84,
+          width: node.kind === "agent" ? 250 : 180,
+          height: node.kind === "agent" ? 130 : 84,
           ...nodeDefaults,
           type: nodeTypeForRF,
           data: {
@@ -337,13 +470,14 @@ export function BlueprintCanvas({
             type: node.id,
             entry,
             sessionId,
+            presence,
             mode,
           },
         });
       }
       return merged;
     });
-  }, [canvasNodes, taskById, sessions, mode, setRfNodes]);
+  }, [canvasNodes, taskById, sessions, presenceByNodeId, mode, setRfNodes]);
 
   // ── Reconcile runtime canvas edges ──
   useEffect(() => {
@@ -351,9 +485,13 @@ export function BlueprintCanvas({
       canvasEdges.map((e) => {
         const edgeRelationship = e.type ?? "communication";
         const appearance = EDGE_STYLE[edgeRelationship];
+        const sourcePresence = presenceByNodeId.get(e.source);
         const sourceTask = e.source ? taskById.get(e.source) : undefined;
-        const isRunning =
-          sourceTask && (sourceTask.status === "running" || sourceTask.status === "spawning" || sourceTask.status === "assigned");
+        const isRunning = sourcePresence?.status === "working"
+          || sourcePresence?.status === "thinking"
+          || sourceTask?.status === "running"
+          || sourceTask?.status === "spawning"
+          || sourceTask?.status === "assigned";
         return {
           id: relationshipEdgeId(e.source, e.target, edgeRelationship),
           source: e.source,
@@ -367,13 +505,13 @@ export function BlueprintCanvas({
             strokeWidth: isRunning ? 3 : 2,
             strokeDasharray: appearance.dash,
           },
-          animated: isRunning,
+          animated: Boolean(isRunning),
           markerEnd: { type: "arrowclosed", color: appearance.color },
           data: { relationship: edgeRelationship },
         };
       }),
     );
-  }, [canvasEdges, mode, taskById, setRfEdges]);
+  }, [canvasEdges, mode, taskById, presenceByNodeId, setRfEdges]);
 
   // Track selected node so the parent can show the toolbar
   const handleNodeClick: NodeMouseHandler = useCallback(
@@ -500,8 +638,8 @@ export function BlueprintCanvas({
           onPaneClick={handlePaneClick}
           onNodeDragStop={handleNodeDragStop}
           onMoveEnd={(_event, viewport) => saveJson(VIEW_KEY, viewport)}
-          defaultViewport={undefined}
-          fitView={true}
+          defaultViewport={defaultViewport}
+          fitView={defaultViewport === undefined}
           fitViewOptions={{ padding: 0.2, maxZoom: 1.2 }}
           minZoom={0.2}
           maxZoom={2.5}
