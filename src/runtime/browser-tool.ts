@@ -108,7 +108,12 @@ export class BrowserTool {
       const browser = await mod.chromium.launch({
         headless: params.config?.headless ?? true,
       });
-      const pageResult = await (browser as { newPage: () => Promise<unknown> }).newPage();
+      const pageOptions: { viewport?: { width: number; height: number }; userAgent?: string } = {};
+      if (params.config?.viewport) pageOptions.viewport = params.config.viewport;
+      if (params.config?.userAgent) pageOptions.userAgent = params.config.userAgent;
+      const pageResult = await (browser as {
+        newPage: (opts?: { viewport?: { width: number; height: number }; userAgent?: string }) => Promise<unknown>;
+      }).newPage(pageOptions);
       page = pageResult;
       session = { id: randomUUID(), browser, page: pageResult, createdAt: Date.now() };
       this.#sessions.set(session.id, session);
@@ -131,8 +136,8 @@ export class BrowserTool {
       result = { type: "text", value: "ok" };
     } else if (params.action === "extract") {
       if (!params.selector) throw new Error("browser extract: selector is required");
-      const typedPage = page as { innerText: (selector: string) => Promise<string> };
-      result = { type: "text", value: await typedPage.innerText(params.selector) };
+      const typedPage = page as { innerText: (selector: string, opts: { timeout: number }) => Promise<string> };
+      result = { type: "text", value: await typedPage.innerText(params.selector, { timeout }) };
     } else if (params.action === "screenshot") {
       const typedPage = page as { screenshot: (opts: { fullPage?: boolean }) => Promise<Buffer> };
       const buffer = await typedPage.screenshot({ fullPage: true });
