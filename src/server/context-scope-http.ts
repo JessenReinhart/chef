@@ -27,8 +27,13 @@ export function createContextScopeServer(runtime: ChefRuntime, baseServer: Serve
     return [...new Set(memberNodeIds)].filter((nodeId) => !validIds.has(nodeId));
   };
 
-  const invalidBounds = (bounds: { x: number; y: number; width: number; height: number }): boolean =>
-    Object.values(bounds).some((value) => typeof value !== "number" || !Number.isFinite(value));
+  const invalidBounds = (bounds: unknown): boolean => {
+    if (!bounds || typeof bounds !== "object") return true;
+    const candidate = bounds as Record<string, unknown>;
+    return ["x", "y", "width", "height"].some((key) =>
+      typeof candidate[key] !== "number" || !Number.isFinite(candidate[key] as number),
+    );
+  };
 
   const syncContextRefs = async () => {
     const snapshot = await runtime.inspectState();
