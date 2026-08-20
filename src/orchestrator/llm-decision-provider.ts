@@ -23,15 +23,30 @@ import { nodeRegistry } from "../runtime/node-registry.ts";
 import { ScriptedDecisionProvider } from "./orchestrator.ts";
 import { Anthropic } from "@anthropic-ai/sdk";
 
+// ---------------------------------------------------------------------------
+// Configuration
+// ---------------------------------------------------------------------------
+
 export interface LLMDecisionProviderConfig {
+	/** Provider: "anthropic" | "openai" | "custom" */
 	provider: "anthropic" | "openai" | "custom";
+	/** API key (from env) */
 	apiKey: string;
+	/** Model name (from env CHEF_MODEL) */
 	model: string;
+	/** Base URL for custom/OpenAI-compatible provider */
 	baseUrl?: string;
+	/** Request timeout in ms (default 60s) */
 	timeoutMs?: number;
+	/** Temperature for generation (default 0.2) */
 	temperature?: number;
+	/** Max output tokens (default 4096) */
 	maxTokens?: number;
 }
+
+// ---------------------------------------------------------------------------
+// Internal types
+// ---------------------------------------------------------------------------
 
 interface NodeTypeInfo {
 	type: string;
@@ -44,6 +59,36 @@ interface NodeTypeInfo {
 	configDefaults: Record<string, unknown>;
 }
 
+interface PlanSchema {
+	type: "object";
+	properties: {
+		goal: { type: "string" };
+		tasks: {
+			type: "array";
+			items: {
+				type: "object";
+				properties: {
+					id: { type: "string" };
+					title: { type: "string" };
+					description: { type: "string" };
+					dependencies: { type: "array"; items: { type: "string" } };
+					priority: { type: "number" };
+					assignedTo: { type: "string" };
+					approvalId: { type: "string" };
+				};
+				required: ["id", "title", "description", "dependencies", "priority"];
+				additionalProperties: false;
+			};
+		};
+	};
+	required: ["goal", "tasks"];
+	additionalProperties: false;
+}
+
+// ---------------------------------------------------------------------------
+// LLM Decision Provider
+// ---------------------------------------------------------------------------
+
 export class LLMDecisionProvider implements DecisionProvider {
 	readonly name: string;
 	#config: LLMDecisionProviderConfig;
@@ -52,56 +97,166 @@ export class LLMDecisionProvider implements DecisionProvider {
 
 	constructor(config: LLMDecisionProviderConfig) {
 		this.name = `llm-${config.provider}`;
-		this.#config = { ...config, timeoutMs: config.timeoutMs ?? 60_000, temperature: config.temperature ?? 0.2, maxTokens: config.maxTokens ?? 4096 };
+		this.#config = {
+			...config,
+			timeoutMs: config.timeoutMs ?? 60_000,
+			temperature: config.temperature ?? 0.2,
+			maxTokens: config.maxTokens ?? 4096,
+		};
 		this.#fallback = new ScriptedDecisionProvider();
 		this.#initializeClient();
 	}
 
 	#initializeClient(): void {
 		const { provider, apiKey, baseUrl } = this.#config;
-		if (provider === "anthropic") this.#client = new Anthropic({ apiKey, baseURL: baseUrl, timeout: this.#config.timeoutMs });
-		else this.#client = null;
+		if (provider === "anthropic") {
+			this.#client = new Anthropic({
+				apiKey,
+				baseURL: baseUrl,
+				timeout: this.#config.timeoutMs,
+			});
+		} else if (provider === "openai" || provider === "custom") {
+			// OpenAI-compatible providers use the standard /chat/completions HTTP contract.
+			this.#client = null;
+		}
 	}
 
 	async proposePlan(input: PlanProposalContext): Promise<Plan | null> {
-		if (!this.#client && this.#config.provider === "anthropic") return this.#fallback.proposePlan(input);
+		if (!this.#client && this.#config.provider === "anthropic") {
+			return this.#fallback.proposePlan(input);
+		}
+
 		const nodeTypes = this.#getNodeTypeInfos();
 		const systemPrompt = this.#buildSystemPrompt(nodeTypes);
 		const userPrompt = this.#buildUserPrompt(input);
+
 		try {
 			const response = await this.#callLLM(systemPrompt, userPrompt);
-			return this.#parsePlan(response, input.workspaceId, input.goal);
+			const plan = this.#parsePlan(response, input.workspaceId, input.goal);
+			return plan;
 		} catch (error) {
-			throw new Error(`LLM plan proposal failed: ${error instanceof Error ? error.message : String(error)}`);
+			// Provider failure → structured error decision with status: "rejected"
+			const errorMessage = error instanceof Error ? error.message : String(error);
+			throw new Error(`LLM plan proposal failed: ${errorMessage}`);
 		}
 	}
 
 	async evaluate(taskResult: PlanTaskOutcome): Promise<Decision> {
-		if (!this.#client && this.#config.provider === "anthropic") return this.#fallback.evaluate(taskResult);
-		const prompt = `Task ${taskResult.taskId} finished with status: ${taskResult.status}.\nResult summary: ${taskResult.resultSummary ?? "none"}\nError: ${taskResult.error ?? "none"}\n\nReturn JSON with summary and status (accepted or rejected).`;
+		if (!this.#client && this.#config.provider === "anthropic") {
+			return this.#fallback.evaluate(taskResult);
+		}
+
+		const prompt = `Task ${taskResult.taskId} finished with status: ${taskResult.status}.
+Result summary: ${taskResult.resultSummary ?? "none"}
+Error: ${taskResult.error ?? "none"}
+
+Return a JSON object with:
+{
+  "summary": "concise evaluation summary",
+  "status": "accepted" | "rejected"
+}`;
+
 		try {
-			const parsed = JSON.parse(await this.#callLLM("You are a task evaluator. Return only valid JSON.", prompt));
+			const response = await this.#callLLM(
+				"You are a task evaluator. Return only valid JSON.",
+				prompt
+			);
+			const parsed = JSON.parse(response);
 			const accepted = parsed.status === "accepted";
-			return { id: crypto.randomUUID(), workspaceId: taskResult.taskId, type: "task.evaluation", summary: parsed.summary ?? (accepted ? "Task completed" : "Task failed"), payload: taskResult, madeBy: this.name, timestamp: Date.now(), status: accepted ? "accepted" : "rejected" };
+			return {
+				id: crypto.randomUUID(),
+				workspaceId: taskResult.taskId, // best effort
+				type: "task.evaluation",
+				summary: parsed.summary ?? (accepted ? "Task completed" : "Task failed"),
+				payload: taskResult,
+				madeBy: this.name,
+				timestamp: Date.now(),
+				status: accepted ? "accepted" : "rejected",
+			};
 		} catch {
+			// On LLM failure, use simple heuristic
 			const accepted = taskResult.status === "completed";
-			return { id: crypto.randomUUID(), workspaceId: taskResult.taskId, type: "task.evaluation", summary: accepted ? `Task ${taskResult.taskId} completed${taskResult.resultSummary ? `: ${taskResult.resultSummary}` : ""}` : `Task ${taskResult.taskId} did not complete (status ${taskResult.status})`, payload: taskResult, madeBy: this.name, timestamp: Date.now(), status: accepted ? "accepted" : "rejected" };
+			return {
+				id: crypto.randomUUID(),
+				workspaceId: taskResult.taskId,
+				type: "task.evaluation",
+				summary: accepted
+					? `Task ${taskResult.taskId} completed${taskResult.resultSummary ? `: ${taskResult.resultSummary}` : ""}`
+					: `Task ${taskResult.taskId} did not complete (status ${taskResult.status})`,
+				payload: taskResult,
+				madeBy: this.name,
+				timestamp: Date.now(),
+				status: accepted ? "accepted" : "rejected",
+			};
 		}
 	}
 
+	// -------------------------------------------------------------------------
+	// Private helpers
+	// -------------------------------------------------------------------------
+
 	#getNodeTypeInfos(): NodeTypeInfo[] {
-		return nodeRegistry.list().map((def: NodeDefinition) => ({ type: def.type, category: def.category, label: def.label, description: def.description, inputs: def.inputs.map((p) => ({ id: p.id, label: p.label, type: p.type, required: p.required })), outputs: def.outputs.map((p) => ({ id: p.id, label: p.label, type: p.type, required: p.required })), configSchema: {}, configDefaults: def.config.defaults() }));
+		return nodeRegistry.list().map((def: NodeDefinition) => ({
+			type: def.type,
+			category: def.category,
+			label: def.label,
+			description: def.description,
+			inputs: def.inputs.map((p) => ({
+				id: p.id,
+				label: p.label,
+				type: p.type,
+				required: p.required,
+			})),
+			outputs: def.outputs.map((p) => ({
+				id: p.id,
+				label: p.label,
+				type: p.type,
+				required: p.required,
+			})),
+			configSchema: {},
+			configDefaults: def.config.defaults(),
+		}));
 	}
 
 	#buildSystemPrompt(nodeTypes: NodeTypeInfo[]): string {
-		const typesList = nodeTypes.map((nt) => `- ${nt.type} (${nt.category}): ${nt.label} — ${nt.description}\n  Inputs: ${nt.inputs.map((i) => `${i.id}${i.required ? " (required)" : ""}`).join(", ")}\n  Outputs: ${nt.outputs.map((o) => `${o.id}${o.required ? " (required)" : ""}`).join(", ")}`).join("\n\n");
-		return `You are Chef, an AI workflow planner. Decompose user goals into executable structured plans using the available node types.\n\nAvailable node types:\n${typesList}\n\nReturn only JSON. Every task must use a valid node type, dependencies must reference task ids in the same plan, and task ids must be unique.`;
+		const typesList = nodeTypes
+			.map(
+				(nt) =>
+					`- ${nt.type} (${nt.category}): ${nt.label} — ${nt.description}\n` +
+					`  Inputs: ${nt.inputs.map((i) => `${i.id}${i.required ? " (required)" : ""}`).join(", ")}\n` +
+					`  Outputs: ${nt.outputs.map((o) => `${o.id}${o.required ? " (required)" : ""}`).join(", ")}`
+			)
+			.join("\n\n");
+
+		return `You are Chef, an AI workflow planner. You decompose user goals into structured plans using the available node types.
+
+Available node types:
+${typesList}
+
+Rules:
+1. Output ONLY valid JSON matching the Plan schema.
+2. Every task must use a valid node type from the list above.
+3. Task IDs must be unique strings (use UUIDs).
+4. Dependencies must reference other task IDs in the same plan.
+5. Priority: higher numbers run first (1 = normal, 0 = last).
+6. assignedTo should match a known agent type or be omitted.
+7. If a task requires human approval, add approvalId (UUID).
+8. Prefer linear chains; add branching only when necessary.
+9. Use human.approval nodes for gating; human.input for collecting user input.
+10. The plan must be executable by the runtime.`;
 	}
 
 	#buildUserPrompt(input: PlanProposalContext): string {
-		const contextRefs = input.contextRefs?.length ? `\nContext references:\n${input.contextRefs.map((r) => `- ${r.type}:${r.id} (relevance ${r.relevance})`).join("\n")}` : "";
-		const events = input.events?.length ? `\nRecent events:\n${input.events.slice(-5).map((e) => `- ${e.type}: ${JSON.stringify(e.payload)}`).join("\n")}` : "";
-		return `Goal: ${input.goal}${contextRefs}${events}\n\nReturn a Plan with a goal and tasks array.`;
+		const contextRefs = input.contextRefs?.length
+			? `\nContext references:\n${input.contextRefs.map((r) => `- ${r.type}:${r.id} (relevance ${r.relevance})`).join("\n")}`
+			: "";
+		const events = input.events?.length
+			? `\nRecent events:\n${input.events.slice(-5).map((e) => `- ${e.type}: ${JSON.stringify(e.payload)}`).join("\n")}`
+			: "";
+
+		return `Goal: ${input.goal}${contextRefs}${events}
+
+Return a Plan with tasks that achieve this goal.`;
 	}
 
 	async #callLLM(systemPrompt: string, userPrompt: string): Promise<string> {
@@ -111,10 +266,13 @@ export class LLMDecisionProvider implements DecisionProvider {
 			if (this.#config.provider === "openai" || this.#config.provider === "custom") {
 				const base = (this.#config.baseUrl ?? "https://api.openai.com/v1").replace(/\/$/, "");
 				const response = await fetch(`${base}/chat/completions`, {
-					method: "POST",
-					signal: controller.signal,
+					method: "POST", signal: controller.signal,
 					headers: { "content-type": "application/json", authorization: `Bearer ${this.#config.apiKey}` },
-					body: JSON.stringify({ model: this.#config.model, temperature: this.#config.temperature, max_tokens: this.#config.maxTokens ?? 4096, response_format: { type: "json_object" }, messages: [{ role: "system", content: systemPrompt }, { role: "user", content: `${userPrompt}\nReturn only valid JSON.` }] }),
+					body: JSON.stringify({
+						model: this.#config.model, temperature: this.#config.temperature, max_tokens: this.#config.maxTokens ?? 4096,
+						response_format: { type: "json_object" },
+						messages: [{ role: "system", content: systemPrompt }, { role: "user", content: `${userPrompt}\nReturn only valid JSON.` }],
+					}),
 				});
 				if (!response.ok) throw new Error(`OpenAI-compatible request failed: HTTP ${response.status} ${await response.text()}`);
 				const data = await response.json() as { choices?: Array<{ message?: { content?: string | null } }> };
@@ -125,13 +283,13 @@ export class LLMDecisionProvider implements DecisionProvider {
 
 			if (!this.#client) throw new Error("LLM client not initialized");
 			const message = await this.#client.messages.create({
-				model: this.#config.model,
-				max_tokens: this.#config.maxTokens ?? 4096,
-				temperature: this.#config.temperature,
-				system: systemPrompt,
-				messages: [{ role: "user", content: userPrompt }],
-				tools: [{ name: "propose_plan", description: "Propose a structured workflow plan", input_schema: { type: "object", properties: { goal: { type: "string" }, tasks: { type: "array", items: { type: "object", properties: { id: { type: "string" }, title: { type: "string" }, description: { type: "string" }, dependencies: { type: "array", items: { type: "string" } }, priority: { type: "number" }, assignedTo: { type: "string" }, approvalId: { type: "string" } }, required: ["id", "title", "description", "dependencies", "priority"], additionalProperties: false } } }, required: ["goal", "tasks"], additionalProperties: false } }],
-				tool_choice: { type: "tool", name: "propose_plan" },
+				model: this.#config.model, max_tokens: this.#config.maxTokens ?? 4096, temperature: this.#config.temperature,
+				system: systemPrompt, messages: [{ role: "user", content: userPrompt }],
+				tools: [{ name: "propose_plan", description: "Propose a structured workflow plan", input_schema: {
+					type: "object", properties: { goal: { type: "string" }, tasks: { type: "array", items: { type: "object", properties: {
+						id: { type: "string" }, title: { type: "string" }, description: { type: "string" }, dependencies: { type: "array", items: { type: "string" } }, priority: { type: "number" }, assignedTo: { type: "string" }, approvalId: { type: "string" },
+					}, required: ["id", "title", "description", "dependencies", "priority"], additionalProperties: false } } }, required: ["goal", "tasks"], additionalProperties: false,
+				} }], tool_choice: { type: "tool", name: "propose_plan" },
 			});
 			const toolUse = message.content.find((c) => c.type === "tool_use");
 			if (!toolUse) throw new Error("LLM did not call propose_plan tool");
@@ -146,15 +304,50 @@ export class LLMDecisionProvider implements DecisionProvider {
 
 	#parsePlan(jsonStr: string, workspaceId: WorkspaceId, goal: string): Plan {
 		const parsed = JSON.parse(jsonStr);
-		if (!parsed.tasks || !Array.isArray(parsed.tasks)) throw new Error("Invalid plan: missing tasks array");
+
+		// Validate structure
+		if (!parsed.tasks || !Array.isArray(parsed.tasks)) {
+			throw new Error("Invalid plan: missing tasks array");
+		}
+
 		const tasks: PlanTask[] = parsed.tasks.map((t: unknown) => {
 			const task = t as Record<string, unknown>;
-			return { id: String(task.id ?? crypto.randomUUID()), title: String(task.title ?? "Untitled"), description: String(task.description ?? ""), dependencies: Array.isArray(task.dependencies) ? task.dependencies.map(String) : [], priority: typeof task.priority === "number" ? task.priority : 0, assignedTo: task.assignedTo ? String(task.assignedTo) : undefined, approvalId: task.approvalId ? String(task.approvalId) : undefined };
+			return {
+				id: String(task.id ?? crypto.randomUUID()),
+				title: String(task.title ?? "Untitled"),
+				description: String(task.description ?? ""),
+				dependencies: Array.isArray(task.dependencies) ? task.dependencies.map(String) : [],
+				priority: typeof task.priority === "number" ? task.priority : 0,
+				assignedTo: task.assignedTo ? String(task.assignedTo) : undefined,
+				approvalId: task.approvalId ? String(task.approvalId) : undefined,
+			};
 		});
-		for (const task of tasks) if (task.assignedTo && !nodeRegistry.get(task.assignedTo)) throw new Error(`Unknown node type assigned: ${task.assignedTo}`);
-		return { id: crypto.randomUUID(), workspaceId, goal, status: "proposed", tasks, taskIds: tasks.map((t) => t.id), createdAt: Date.now() };
+
+		for (const task of tasks) {
+			if (task.assignedTo) {
+				const def = nodeRegistry.get(task.assignedTo);
+				if (!def) {
+					throw new Error(`Unknown node type assigned: ${task.assignedTo}`);
+				}
+			}
+		}
+
+		const createdAt = Date.now();
+		return {
+			id: crypto.randomUUID(),
+			workspaceId,
+			goal,
+			status: "proposed",
+			tasks,
+			taskIds: tasks.map((t) => t.id),
+			createdAt,
+		};
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Factory function
+// ---------------------------------------------------------------------------
 
 export interface LLMProviderConfig {
 	provider: string | null;
@@ -164,6 +357,7 @@ export interface LLMProviderConfig {
 	timeoutMs?: number;
 }
 
+/** Read the LLM decision-provider config from env (single source of truth for env var names). */
 export function readLLMProviderConfig(): LLMProviderConfig {
 	const provider = process.env.CHEF_PROVIDER?.toLowerCase() ?? null;
 	const apiKey = process.env.ANTHROPIC_API_KEY ?? process.env.OPENAI_API_KEY ?? process.env.CHEF_API_KEY ?? null;
@@ -175,7 +369,21 @@ export function readLLMProviderConfig(): LLMProviderConfig {
 
 export function createLLMDecisionProvider(): DecisionProvider | null {
 	const { provider, apiKey, model, baseUrl, timeoutMs } = readLLMProviderConfig();
-	if (!provider || !apiKey) return null;
-	if (!["anthropic", "openai", "custom"].includes(provider)) throw new Error(`Invalid CHEF_PROVIDER: ${provider}. Must be anthropic, openai, or custom`);
-	return new LLMDecisionProvider({ provider: provider as "anthropic" | "openai" | "custom", apiKey, model, baseUrl, timeoutMs });
+
+
+	if (!provider || !apiKey) {
+		return null; // No provider configured → caller uses ScriptedDecisionProvider
+	}
+
+	if (!["anthropic", "openai", "custom"].includes(provider)) {
+		throw new Error(`Invalid CHEF_PROVIDER: ${provider}. Must be anthropic, openai, or custom`);
+	}
+
+	return new LLMDecisionProvider({
+		provider: provider as "anthropic" | "openai" | "custom",
+		apiKey,
+		model,
+		baseUrl,
+		timeoutMs,
+	});
 }
