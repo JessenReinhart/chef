@@ -22,6 +22,7 @@ export function BrowserSurface({ initialUrl = "about:blank", onNavigate }: Brows
   const [reloadNonce, setReloadNonce] = useState(0);
   const [navigationError, setNavigationError] = useState<string | null>(null);
   const [navigating, setNavigating] = useState(false);
+  const [frameLoading, setFrameLoading] = useState(normalizedInitialUrl !== "about:blank");
   const pendingUrlRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -44,6 +45,7 @@ export function BrowserSurface({ initialUrl = "about:blank", onNavigate }: Brows
       setHistory([next]);
       setHistoryIndex(0);
       setNavigationError(null);
+      setFrameLoading(next !== "about:blank");
     }
   }, [initialUrl]);
 
@@ -57,6 +59,7 @@ export function BrowserSurface({ initialUrl = "about:blank", onNavigate }: Brows
       // URL that Chef failed to save.
       await onNavigate(next);
       setDraft(next);
+      setFrameLoading(next !== "about:blank");
       setUrl(next);
       return true;
     } catch (err) {
@@ -88,10 +91,30 @@ export function BrowserSurface({ initialUrl = "about:blank", onNavigate }: Brows
     if (await persistNavigation(next)) setHistoryIndex(nextIndex);
   };
 
+  const reload = () => {
+    if (url === "about:blank" || navigating) return;
+    setFrameLoading(true);
+    setReloadNonce((value) => value + 1);
+  };
+
+  const pageState = navigating
+    ? "Saving navigation…"
+    : frameLoading
+      ? "Loading page…"
+      : url === "about:blank"
+        ? "Browser ready"
+        : "Page ready";
+
   return (
     <section className="browser-surface" aria-label="Browser surface">
       <form className="browser-surface__toolbar" onSubmit={(event) => { event.preventDefault(); void navigate(); }}>
-        <span className="browser-surface__status" aria-label="Browser connected" />
+        <span
+          className="browser-surface__status"
+          data-state={frameLoading ? "loading" : "ready"}
+          aria-label={pageState}
+          title={pageState}
+        />
+        <span className="whitespace-nowrap text-[10px] text-[#8b949e]" aria-live="polite">{pageState}</span>
         <button
           type="button"
           aria-label="Go back"
@@ -115,7 +138,7 @@ export function BrowserSurface({ initialUrl = "about:blank", onNavigate }: Brows
           aria-label="Reload page"
           title="Reload"
           disabled={navigating || url === "about:blank"}
-          onClick={() => setReloadNonce((value) => value + 1)}
+          onClick={reload}
         >
           ↻
         </button>
@@ -137,7 +160,13 @@ export function BrowserSurface({ initialUrl = "about:blank", onNavigate }: Brows
       {url === "about:blank" ? (
         <div className="browser-surface__empty">Enter an address to use this Browser node.</div>
       ) : (
-        <iframe key={`${url}:${reloadNonce}`} src={url} title={`Browser: ${url}`} sandbox="allow-forms allow-popups allow-same-origin allow-scripts" />
+        <iframe
+          key={`${url}:${reloadNonce}`}
+          src={url}
+          title={`Browser: ${url}`}
+          sandbox="allow-forms allow-popups allow-same-origin allow-scripts"
+          onLoad={() => setFrameLoading(false)}
+        />
       )}
     </section>
   );
