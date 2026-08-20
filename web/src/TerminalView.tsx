@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
@@ -7,16 +7,29 @@ interface TerminalViewProps {
   sessionId: string;
 }
 
+type ConnectionState = "connecting" | "live" | "reconnecting";
+
+const CONNECTION_LABEL: Record<ConnectionState, string> = {
+  connecting: "Connecting…",
+  live: "Live",
+  reconnecting: "Reconnecting…",
+};
+
 export function TerminalView({ sessionId }: TerminalViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
-
+  const [connectionState, setConnectionState] = useState<ConnectionState>("connecting");
+  const [inputError, setInputError] = useState<string | null>(null);
 
   // Initialize xterm terminal
   useEffect(() => {
     if (!containerRef.current) return;
+
+    setConnectionState("connecting");
+    setInputError(null);
+    let disposed = false;
 
     const term = new Terminal({
       cursorBlink: true,
@@ -81,13 +94,23 @@ export function TerminalView({ sessionId }: TerminalViewProps) {
     // and full-screen terminal apps continue using stale cols/rows.
     syncPtySize();
 
-    // Handle terminal input — send to session via POST /api/sessions/send
+    // Handle terminal input — send to session via POST /api/sessions/send.
+    // Input failures are visible in the terminal surface instead of only
+    // disappearing into the browser console.
     term.onData((data) => {
       fetch("/api/sessions/send", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ sessionId, data }),
-      }).catch((err) => console.error("[TerminalView] send failed:", err));
+      })
+        .then((response) => {
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          if (!disposed) setInputError(null);
+        })
+        .catch((err) => {
+          console.error("[TerminalView] send failed:", err);
+          if (!disposed) setInputError("Input could not be delivered");
+        });
     });
 
     // Handle resize
@@ -97,6 +120,10 @@ export function TerminalView({ sessionId }: TerminalViewProps) {
     // Open EventSource for session.data events
     const es = new EventSource("/api/events?types=session.data");
     eventSourceRef.current = es;
+
+    es.onopen = () => {
+      if (!disposed) setConnectionState("live");
+    };
 
     es.onmessage = (msg) => {
       try {
@@ -116,10 +143,12 @@ export function TerminalView({ sessionId }: TerminalViewProps) {
 
     es.onerror = (err) => {
       console.error("[TerminalView] EventSource error:", err);
+      if (!disposed) setConnectionState("reconnecting");
     };
 
     // Cleanup on unmount
     return () => {
+      disposed = true;
       resizeObserver.disconnect();
       es.close();
       term.dispose();
@@ -131,9 +160,51 @@ export function TerminalView({ sessionId }: TerminalViewProps) {
 
   return (
     <div
-      ref={containerRef}
       className="wb-terminal-view"
-      style={{ width: "100%", height: "100%", minHeight: 0 }}
-    />
+      style={{ position: "relative", width: "100%", height: "100%", minHeight: 0 }}
+    >
+      <div ref={containerRef} style={{ width: "100%", height: "100%", minHeight: 0 }} />
+      <div
+        role="status"
+        aria-live="polite"
+        title={`Terminal event stream: ${CONNECTION_LABEL[connectionState]}`}
+        style={{
+          position: "absolute",
+          top: 8,
+          right: 10,
+          zIndex: 2,
+          border: `1px solid ${connectionState === "live" ? "rgba(63, 185, 80, .35)" : "rgba(210, 153, 34, .35)"}`,
+          borderRadius: 999,
+          background: "rgba(13, 17, 23, .88)",
+          padding: "2px 7px",
+          color: connectionState === "live" ? "#56d364" : "#e3b341",
+          fontSize: 10,
+          lineHeight: 1.4,
+          pointerEvents: "none",
+        }}
+      >
+        {CONNECTION_LABEL[connectionState]}
+      </div>
+      {inputError && (
+        <div
+          role="alert"
+          style={{
+            position: "absolute",
+            right: 10,
+            bottom: 8,
+            zIndex: 2,
+            border: "1px solid rgba(248, 81, 73, .35)",
+            borderRadius: 6,
+            background: "rgba(13, 17, 23, .92)",
+            padding: "4px 7px",
+            color: "#ff7b72",
+            fontSize: 10,
+            pointerEvents: "none",
+          }}
+        >
+          {inputError}
+        </div>
+      )}
+    </div>
   );
 }
