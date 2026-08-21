@@ -43,6 +43,51 @@ try {
   const listedScopes = await fetch(`${base}/api/context-scopes`);
   assert.equal((await listedScopes.json()).data.length, 1, "created scope must be listed");
 
+  const createNode = await fetch(`${base}/api/nodes`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      type: "tool.file",
+      title: "Disposable node",
+      kind: "tool",
+      position: { x: 120, y: 80 },
+    }),
+  });
+  assert.equal(createNode.status, 201, "creating a disposable node must return 201");
+  const { taskId: disposableTaskId } = (await createNode.json()).data as { taskId: string };
+
+  const addScopeMember = await fetch(`${base}/api/context-scopes/${createdScope.id}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ memberNodeIds: [disposableTaskId] }),
+  });
+  assert.equal(addScopeMember.status, 200, "context scope must accept the disposable node as a member");
+
+  const deleteNode = await fetch(`${base}/api/nodes/${disposableTaskId}`, { method: "DELETE" });
+  assert.equal(deleteNode.status, 200, "deleting a canvas node must return 200");
+
+  const afterNodeDelete = (await (await fetch(`${base}/api/state`)).json()) as {
+    tasks: Array<{ id: string; status: string }>;
+    canvasNodes: Array<{ id: string; taskId?: string }>;
+  };
+  assert.equal(
+    afterNodeDelete.canvasNodes.some((node) => node.id === disposableTaskId || node.taskId === disposableTaskId),
+    false,
+    "deleted node must not remain in the durable canvas",
+  );
+  assert.equal(
+    afterNodeDelete.tasks.find((task) => task.id === disposableTaskId)?.status,
+    "cancelled",
+    "deleting a pending node must retain its task as cancelled history",
+  );
+
+  const scopeAfterNodeDelete = (await (await fetch(`${base}/api/context-scopes`)).json()).data as Array<{ id: string; memberNodeIds: string[] }>;
+  assert.equal(
+    scopeAfterNodeDelete.find((scope) => scope.id === createdScope.id)?.memberNodeIds.includes(disposableTaskId),
+    false,
+    "deleting a node must remove stale Shared Context membership",
+  );
+
   const deleteScope = await fetch(`${base}/api/context-scopes/${createdScope.id}`, { method: "DELETE" });
   assert.equal(deleteScope.status, 200, "deleting a context scope must return 200");
 
@@ -84,7 +129,7 @@ try {
 
   await new Promise<void>((resolve) => server.close(() => resolve()));
   await chef.close();
-  console.log("http-server: ok — state, SSE projection, and context scope endpoints live");
+  console.log("http-server: ok — state, SSE projection, context scopes, and durable node deletion live");
 } finally {
   await rm(dir, { recursive: true, force: true });
 }
