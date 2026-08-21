@@ -66,7 +66,7 @@ Audit of `AI_Engineering_OS_Specification_v0.1.pdf` against the current codebase
 |---|---|---|
 | Message envelope with type/channel/refs | implemented | `AgentMessage`; `messages` table |
 | Event envelope (id, workspace, timestamp, source, type, payload) | implemented | `RuntimeEvent` |
-| IRC-like channels | partial | `channel` field on durable messages plus `GET /api/messages/channels` workspace index; no channel subscription UI yet |
+| IRC-like channels | partial | durable channel messages, `GET /api/messages/channels`, and an Advanced-mode read-only Rooms browser ship; subscription/write semantics are not implemented |
 | Channel is projection; events are system of record | implemented | events table authoritative |
 
 ## Context System (§8)
@@ -218,7 +218,7 @@ Audit of `AI_Engineering_OS_Specification_v0.1.pdf` against the current codebase
 
 1. **Drizzle ORM** — repo convention uses raw `node:sqlite` (documented divergence).
 2. **Hierarchical squads (P4)** — Orchestrator acts as squad lead; multi-level tech/QA/research leads not implemented.
-3. **IRC channels UI** — durable channel messages and a workspace channel index ship; room/subscription UI is still not exposed.
+3. **IRC channel subscriptions/writes** — the Advanced-mode read-only Rooms browser ships; explicit room subscription and channel write UI are still deferred.
 4. **Context hierarchy depth** — workspace/task refs work; full global→session hierarchy not surfaced.
 5. **Event-sourced projection rebuild** — events append-only; rebuild-from-events not implemented.
 6. **Playwright hard dependency** — optional; browser tool degrades honestly.
