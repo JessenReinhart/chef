@@ -1,4 +1,9 @@
+import { createReadStream } from "node:fs";
+import { realpath, stat } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { isAbsolute, relative, sep } from "node:path";
+import { pipeline } from "node:stream/promises";
+import { fileURLToPath } from "node:url";
 import type { ArtifactType } from "../core/types.ts";
 import type { ChefRuntime } from "../main.ts";
 
@@ -9,6 +14,75 @@ const ARTIFACT_TYPES: ArtifactType[] = ["file", "document", "code", "image", "re
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, JSON_HEADERS);
   res.end(JSON.stringify(body));
+}
+
+function isWithinRoot(rootPath: string, candidatePath: string): boolean {
+  const rel = relative(rootPath, candidatePath);
+  return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
+}
+
+async function sendArtifactDownload(runtime: ChefRuntime, artifactId: string, res: ServerResponse): Promise<void> {
+  const artifact = runtime.repository.getArtifact(artifactId);
+  if (!artifact || artifact.workspaceId !== runtime.workspaceId) {
+    sendJson(res, 404, { error: "artifact not found" });
+    return;
+  }
+
+  let artifactUrl: URL;
+  try {
+    artifactUrl = new URL(artifact.uri);
+  } catch {
+    sendJson(res, 409, { error: "artifact is not backed by a downloadable file" });
+    return;
+  }
+  if (artifactUrl.protocol !== "file:") {
+    sendJson(res, 409, { error: "artifact is not backed by a downloadable file" });
+    return;
+  }
+
+  let projectRoot: string;
+  let filePath: string;
+  try {
+    projectRoot = await realpath(runtime.projectDir);
+    filePath = await realpath(fileURLToPath(artifactUrl));
+  } catch (error) {
+    const code = error && typeof error === "object" && "code" in error ? String(error.code) : "";
+    if (code === "ENOENT") {
+      sendJson(res, 404, { error: "artifact file not found" });
+      return;
+    }
+    throw error;
+  }
+
+  if (!isWithinRoot(projectRoot, filePath)) {
+    sendJson(res, 403, { error: "artifact file is outside the project root" });
+    return;
+  }
+
+  const info = await stat(filePath);
+  if (!info.isFile()) {
+    sendJson(res, 409, { error: "artifact URI does not point to a file" });
+    return;
+  }
+
+  const metadataMimeType = artifact.metadata.mimeType;
+  const contentType = typeof metadataMimeType === "string" && metadataMimeType.trim()
+    ? metadataMimeType
+    : "application/octet-stream";
+  const encodedName = encodeURIComponent(artifact.name || "artifact");
+  res.writeHead(200, {
+    "content-type": contentType,
+    "content-length": info.size,
+    "content-disposition": `attachment; filename*=UTF-8''${encodedName}`,
+    "x-chef-artifact-id": artifact.id,
+    "x-chef-artifact-version": String(artifact.version),
+  });
+
+  try {
+    await pipeline(createReadStream(filePath), res);
+  } catch (error) {
+    res.destroy(error instanceof Error ? error : new Error(String(error)));
+  }
 }
 
 /**
@@ -53,6 +127,12 @@ export function createArtifactServer(runtime: ChefRuntime, baseServer: Server): 
         return;
       }
 
+      const downloadMatch = url.pathname.match(/^\/api\/artifacts\/([^/]+)\/download$/);
+      if (req.method === "GET" && downloadMatch) {
+        await sendArtifactDownload(runtime, decodeURIComponent(downloadMatch[1]), res);
+        return;
+      }
+
       const match = url.pathname.match(/^\/api\/artifacts\/([^/]+)$/);
       if (req.method === "GET" && match) {
         const artifact = runtime.repository.getArtifact(decodeURIComponent(match[1]));
@@ -66,7 +146,11 @@ export function createArtifactServer(runtime: ChefRuntime, baseServer: Server): 
 
       await baseHandler(req, res);
     } catch (error) {
-      sendJson(res, 500, { error: error instanceof Error ? error.message : String(error) });
+      if (!res.headersSent) {
+        sendJson(res, 500, { error: error instanceof Error ? error.message : String(error) });
+      } else {
+        res.destroy(error instanceof Error ? error : new Error(String(error)));
+      }
     }
   });
 }
