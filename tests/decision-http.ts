@@ -10,10 +10,10 @@ const dir = await mkdtemp(join(tmpdir(), "chef-decision-http-"));
 const runtime = createChef({ dbPath: join(dir, "chef.sqlite"), projectDir: dir });
 const server = createDecisionServer(runtime, createHttpServer(runtime));
 
-const request = async (path: string) => {
+const request = async (path: string, init?: RequestInit) => {
   const address = server.address();
   assert.ok(address && typeof address === "object");
-  const response = await fetch(`http://127.0.0.1:${address.port}${path}`);
+  const response = await fetch(`http://127.0.0.1:${address.port}${path}`, init);
   return { status: response.status, json: await response.json() as { ok?: boolean; data?: unknown; error?: string } };
 };
 
@@ -73,6 +73,74 @@ try {
   assert.equal(invalidStatus.status, 400);
   assert.match(invalidStatus.json.error ?? "", /status must be one of/);
 
+  const captured = await request("/api/decisions", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      type: " lesson ",
+      summary: "  Keep the friendly workspace runtime-owned.  ",
+      payload: { source: "critic-pass" },
+    }),
+  });
+  assert.equal(captured.status, 201);
+  const capturedDecision = captured.json.data as {
+    id: string;
+    workspaceId: string;
+    type: string;
+    summary: string;
+    payload: unknown;
+    madeBy: string;
+    status: string;
+  };
+  assert.ok(capturedDecision.id);
+  assert.equal(capturedDecision.workspaceId, runtime.workspaceId);
+  assert.equal(capturedDecision.type, "lesson");
+  assert.equal(capturedDecision.summary, "Keep the friendly workspace runtime-owned.");
+  assert.deepEqual(capturedDecision.payload, { source: "critic-pass" });
+  assert.equal(capturedDecision.madeBy, "human");
+  assert.equal(capturedDecision.status, "accepted");
+  assert.equal(runtime.repository.getDecision(capturedDecision.id)?.workspaceId, runtime.workspaceId);
+  const recordedEvent = runtime.repository.listEvents(runtime.workspaceId).find((event) =>
+    event.type === "memory.recorded" && (event.payload as { decisionId?: string } | undefined)?.decisionId === capturedDecision.id,
+  );
+  assert.ok(recordedEvent);
+  assert.deepEqual(recordedEvent.payload, {
+    decisionId: capturedDecision.id,
+    type: "lesson",
+    status: "accepted",
+    category: "lessons",
+  });
+
+  const openQuestion = await request("/api/decisions", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ type: "open-question", summary: "Should context zones inherit project memory?" }),
+  });
+  assert.equal(openQuestion.status, 201);
+  assert.equal((openQuestion.json.data as { status: string }).status, "proposed");
+
+  const explicitRejected = await request("/api/decisions", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ type: "approach", summary: "Persist friendly layout as runtime geometry", status: "rejected" }),
+  });
+  assert.equal(explicitRejected.status, 201);
+  assert.equal((explicitRejected.json.data as { status: string }).status, "rejected");
+
+  for (const invalidBody of [
+    { body: JSON.stringify({ type: "lesson", summary: "   " }) },
+    { body: JSON.stringify({ type: "   ", summary: "Something useful" }) },
+    { body: JSON.stringify({ type: "lesson", summary: "Something useful", status: "archived" }) },
+    { body: "{" },
+  ]) {
+    const invalid = await request("/api/decisions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: invalidBody.body,
+    });
+    assert.equal(invalid.status, 400);
+  }
+
   runtime.repository.insertDecision({
     id: "memory-requirement",
     workspaceId: runtime.workspaceId,
@@ -120,17 +188,20 @@ try {
     categories: Record<string, Array<{ id: string }>>;
     counts: Record<string, number>;
   };
-  assert.deepEqual(memoryData.categories.decisions.map((decision) => decision.id), ["decision-architecture", "decision-rejected"]);
+  assert.ok(memoryData.categories.decisions.some((decision) => decision.id === "decision-architecture"));
+  assert.ok(memoryData.categories.decisions.some((decision) => decision.id === "decision-rejected"));
+  assert.ok(memoryData.categories.decisions.some((decision) => decision.id === (explicitRejected.json.data as { id: string }).id));
   assert.deepEqual(memoryData.categories.requirements.map((decision) => decision.id), ["memory-requirement"]);
   assert.deepEqual(memoryData.categories.knownFacts.map((decision) => decision.id), ["memory-known-fact"]);
-  assert.deepEqual(memoryData.categories.openQuestions.map((decision) => decision.id), ["memory-open-question"]);
+  assert.ok(memoryData.categories.lessons.some((decision) => decision.id === capturedDecision.id));
+  assert.ok(memoryData.categories.openQuestions.some((decision) => decision.id === (openQuestion.json.data as { id: string }).id));
+  assert.ok(memoryData.categories.openQuestions.some((decision) => decision.id === "memory-open-question"));
   assert.deepEqual(memoryData.categories.conventions, []);
-  assert.deepEqual(memoryData.categories.lessons, []);
   assert.deepEqual(memoryData.categories.reusableProcedures, []);
-  assert.equal(memoryData.counts.decisions, 2);
   assert.equal(memoryData.counts.requirements, 1);
   assert.equal(memoryData.counts.knownFacts, 1);
-  assert.equal(memoryData.counts.openQuestions, 1);
+  assert.equal(memoryData.counts.lessons, 1);
+  assert.equal(memoryData.counts.openQuestions, 2);
 
   const state = await request("/api/state");
   assert.equal(state.status, 200);
