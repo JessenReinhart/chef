@@ -61,7 +61,7 @@ function DecisionDetail({ decision }: { decision: Decision | null }) {
       <dl className="grid grid-cols-[100px_minmax(0,1fr)] gap-x-3 gap-y-2 rounded-lg border border-[#21262d] bg-[#010409] p-3">
         <dt className="text-[#6e7681]">Made by</dt><dd className="text-[#c9d1d9]">{decision.madeBy}</dd>
         <dt className="text-[#6e7681]">Recorded</dt><dd className="text-[#c9d1d9]">{new Date(decision.timestamp).toLocaleString()}</dd>
-        <dt className="text-[#6e7681]">Memory ID</dt><dd className="break-all font-mono text-[#8b949e]">{decision.id}</dd>
+        <dt className="text-[#6e7681]">Record ID</dt><dd className="break-all font-mono text-[#8b949e]">{decision.id}</dd>
       </dl>
       <div>
         <h4 className="mb-2 font-medium text-[#c9d1d9]">Payload</h4>
@@ -159,7 +159,7 @@ function KnowledgeLibrary({ onClose }: { onClose: () => void }) {
             ))}
           </div>
         ) : (
-          <div className="grid grid-cols-7 gap-2 border-b border-[#21262d] px-4 py-3">
+          <div className="grid grid-cols-2 gap-2 border-b border-[#21262d] px-4 py-3 sm:grid-cols-4 xl:grid-cols-7">
             {MEMORY_CATEGORIES.map((category) => (
               <button
                 key={category.key}
