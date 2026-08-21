@@ -58,6 +58,8 @@ export function ChannelRoomsFeature() {
   const [selectedChannel, setSelectedChannel] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChannelMessage[]>([]);
   const [loading, setLoading] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -89,6 +91,28 @@ export function ChannelRoomsFeature() {
     if (!body.ok) throw new Error(body.error ?? `Could not load ${roomLabel(channel)}`);
     setMessages(body.data ?? []);
   }, []);
+
+  const sendMessage = useCallback(async () => {
+    const text = draft.trim();
+    if (!selectedChannel || !text || sending) return;
+    setSending(true);
+    try {
+      const response = await fetch("/api/messages", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ channel: selectedChannel, text }),
+      });
+      const body = (await response.json()) as { ok?: boolean; error?: string };
+      if (!response.ok || !body.ok) throw new Error(body.error ?? `Could not send to ${roomLabel(selectedChannel)}`);
+      setDraft("");
+      await Promise.all([loadMessages(selectedChannel), loadChannels()]);
+      setError(null);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : `Could not send to ${roomLabel(selectedChannel)}`);
+    } finally {
+      setSending(false);
+    }
+  }, [draft, selectedChannel, sending, loadMessages, loadChannels]);
 
   useEffect(() => {
     if (!enabled || !open) return;
@@ -208,6 +232,21 @@ export function ChannelRoomsFeature() {
                     {orderedMessages.length === 0 && (
                       <div className="chef-rooms__empty-message">This room has no messages yet.</div>
                     )}
+                  </div>
+                  <div className="chef-rooms__composer">
+                    <textarea
+                      value={draft}
+                      onChange={(event) => setDraft(event.target.value)}
+                      onKeyDown={(event) => {
+                        if ((event.ctrlKey || event.metaKey) && event.key === "Enter") void sendMessage();
+                      }}
+                      placeholder={`Message ${roomLabel(selectedChannel)} as human…`}
+                      maxLength={10_000}
+                      rows={2}
+                    />
+                    <button type="button" onClick={() => void sendMessage()} disabled={!draft.trim() || sending}>
+                      {sending ? "Sending…" : "Send"}
+                    </button>
                   </div>
                 </>
               ) : (
