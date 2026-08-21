@@ -40,11 +40,19 @@ async function sendArtifactDownload(runtime: ChefRuntime, artifactId: string, re
     return;
   }
 
+  let uriPath: string;
+  try {
+    uriPath = fileURLToPath(artifactUrl);
+  } catch {
+    sendJson(res, 409, { error: "artifact has an invalid file URI" });
+    return;
+  }
+
   let projectRoot: string;
   let filePath: string;
   try {
     projectRoot = await realpath(runtime.projectDir);
-    filePath = await realpath(fileURLToPath(artifactUrl));
+    filePath = await realpath(uriPath);
   } catch (error) {
     const code = error && typeof error === "object" && "code" in error ? String(error.code) : "";
     if (code === "ENOENT") {
