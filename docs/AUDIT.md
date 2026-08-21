@@ -58,7 +58,9 @@ Audit of `AI_Engineering_OS_Specification_v0.1.pdf` against the current codebase
 | PiHarness | implemented | `src/harness/pi.ts` |
 | OMPHarness | implemented | `src/harness/omp.ts` |
 | FreebuffHarness | implemented | `src/harness/freebuff.ts` |
-| Future harnesses (Codex, Aider, custom) | partial | first-class `CodexHarness` now ships with registry/discovery coverage; generic fallback still covers Aider/custom CLIs |
+| CodexHarness | implemented | `src/harness/codex.ts`; registry/discovery coverage |
+| AiderHarness | implemented | `src/harness/aider.ts`; registry/discovery coverage |
+| Custom harnesses | partial | generic terminal fallback can host arbitrary CLIs; no first-class adapter is required for every external agent |
 
 ## Communication & Events (§7)
 
@@ -98,7 +100,7 @@ Audit of `AI_Engineering_OS_Specification_v0.1.pdf` against the current codebase
 | Artifact model with version/provenance | implemented | `Artifact`; `artifacts` table |
 | Reference over copy | implemented | context refs; URIs |
 | Durable decisions | implemented | `decisions` table; `Decision` type |
-| Project memory | partial | deterministic `GET /api/memory` projection exposes categorized durable records with provenance; summarization/promotion lifecycle is not implemented |
+| Project memory | partial | deterministic `GET /api/memory` projection plus the read-only Knowledge Library expose categorized durable records with provenance; summarization/promotion lifecycle is not implemented |
 
 ## Permissions & Approvals (§11)
 
@@ -125,6 +127,7 @@ Audit of `AI_Engineering_OS_Specification_v0.1.pdf` against the current codebase
 |---|---|---|
 | Chat with Orchestrator (intent, not low-level) | implemented | Chat with Chef SSE; LLM decision provider |
 | Plan/squad state/progress/blockers display | implemented | workbench; console timeline; approval queue |
+| Mission activity history | implemented | runtime-owned `/api/missions/:id/timeline` projection surfaced in `MissionTimelineFeature` with Simple/Power disclosure |
 | Direct worker interaction | implemented | terminal send/interrupt; `direct-worker-interaction` test |
 | Squad state dashboard | implemented | `App.tsx` state strip; inspector |
 
@@ -194,7 +197,7 @@ Audit of `AI_Engineering_OS_Specification_v0.1.pdf` against the current codebase
 | P0 agent communication | implemented | messages/events |
 | P0 artifact references | implemented | artifacts table + context refs |
 | P1 multi-agent | partial | sequential multi-task; concurrent multi-harness scheduling exists |
-| P1 harness adapters | implemented | claude/pi/omp/freebuff/codex + generic fallback |
+| P1 harness adapters | implemented | claude/pi/omp/freebuff/codex/aider + generic fallback |
 | P1 direct worker interaction | implemented | send/interrupt/resize; test |
 | P2 visual canvas | implemented | React Flow workspace canvas with runtime-persisted node positions and typed relationships |
 | P2 terminal nodes | implemented | terminal canvas node renders collapsible live `TerminalView` bound to the node session |
