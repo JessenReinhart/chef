@@ -327,13 +327,8 @@ const nodeTypes: NodeTypes = {
         style={{ boxShadow: `0 0 0 1px ${accent}22, 0 6px 20px rgba(0,0,0,.55)`, overflow: "hidden" }}
       >
         <div
-          className="nodrag flex cursor-pointer items-center gap-2 rounded-t-xl border-b border-[#21262d] px-3 py-1.5"
+          className="flex items-center gap-2 rounded-t-xl border-b border-[#21262d] px-3 py-1.5"
           style={{ background: `${accent}1a` }}
-          onClick={(event) => {
-            event.stopPropagation();
-            setOpen((value) => !value);
-          }}
-          title={open ? "Collapse terminal" : "Expand terminal"}
         >
           <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: statusColor, boxShadow: data.status === "running" ? `0 0 6px ${statusColor}` : "none" }} />
           <span className="truncate text-[11px] font-semibold text-[#cbd5e1]" style={{ color: accent }}>
@@ -342,7 +337,18 @@ const nodeTypes: NodeTypes = {
           <span className="truncate text-[11px] font-semibold text-[#cbd5e1]">
             {data.entry?.label ?? data.label}
           </span>
-          <span className="ml-auto text-[10px] text-[#8b949e]">{open ? "▾" : "▸"}</span>
+          <button
+            type="button"
+            className="nodrag ml-auto rounded px-1 text-[10px] text-[#8b949e] hover:bg-white/5"
+            onClick={(event) => {
+              event.stopPropagation();
+              setOpen((value) => !value);
+            }}
+            title={open ? "Collapse terminal" : "Expand terminal"}
+            aria-label={open ? "Collapse terminal" : "Expand terminal"}
+          >
+            {open ? "▾" : "▸"}
+          </button>
         </div>
         {open ? (
           sessionId ? (
@@ -350,7 +356,12 @@ const nodeTypes: NodeTypes = {
               <TerminalView sessionId={sessionId} />
             </div>
           ) : (
-            <div className="nodrag px-3 py-4 text-[11px] text-[#8b949e]">Starting default terminal…</div>
+            <div
+              className="nodrag px-3 py-4 text-[11px] text-[#8b949e]"
+              onClick={(event) => event.stopPropagation()}
+            >
+              Starting default terminal…
+            </div>
           )
         ) : (
           <div className="px-3 py-2">
@@ -469,8 +480,8 @@ export function BlueprintCanvas({
         merged.push({
           id: node.id,
           position,
-          width: nodeTypeForRF === "terminal" ? 540 : node.kind === "agent" ? 250 : 180,
-          height: nodeTypeForRF === "terminal" ? 340 : node.kind === "agent" ? 130 : 84,
+          width: node.kind === "agent" ? 250 : 180,
+          height: node.kind === "agent" ? 130 : 84,
           ...nodeDefaults,
           type: nodeTypeForRF,
           data: {
