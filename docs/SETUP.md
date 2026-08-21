@@ -57,7 +57,7 @@ Chef also keeps up to 10 recent project paths in:
 Chef has two separate AI execution paths:
 
 1. The Chef Orchestrator can call an LLM provider directly.
-2. CLI-backed workers such as Claude Code, OMP, Pi, and Freebuff run through their installed terminal applications.
+2. CLI-backed workers such as Claude Code, Codex, OMP, Pi, and Freebuff run through their installed terminal applications.
 
 These paths do not share credentials by default.
 
@@ -114,6 +114,7 @@ Chef does not require its Orchestrator API key for terminal-native agents.
 Current specialized harness candidates are:
 
 - Claude Code
+- Codex
 - OMP
 - Pi
 - Freebuff
@@ -122,7 +123,7 @@ Chef also keeps a generic terminal fallback.
 
 A specialized CLI is considered available when Chef can detect its configured executable. This is an executable-readiness check only. Chef does not automatically run login commands or authentication probes.
 
-The CLI owns its own login, API keys, provider, model, and other configuration. For example, if Claude Code already works in a normal terminal, Chef can host that CLI without copying its credentials into the Orchestrator settings.
+The CLI owns its own login, API keys, provider, model, and other configuration. For example, if Claude Code or Codex already works in a normal terminal, Chef can host that CLI without copying its credentials into the Orchestrator settings.
 
 The runtime exposes readiness data at:
 
@@ -136,7 +137,7 @@ A reported `available: true` value means that Chef found the executable. It does
 
 For a CLI-first setup:
 
-1. Install and authenticate the CLI that you want to use, such as Claude Code or OMP.
+1. Install and authenticate the CLI that you want to use, such as Claude Code, Codex, or OMP.
 2. Start Chef.
 3. Open the target project.
 4. Confirm that the CLI works in a normal terminal.
