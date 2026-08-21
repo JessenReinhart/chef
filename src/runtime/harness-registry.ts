@@ -10,12 +10,19 @@ export interface DetectableHarness extends HarnessLike {
   readonly name: string;
   detect(): Promise<boolean>;
 }
-export interface HarnessDetection { id: string; name: string; available: boolean; }
+export interface HarnessDetection {
+  id: string;
+  name: string;
+  type: string;
+  command: string;
+  available: boolean;
+}
 export interface HarnessRegistryOptions { workspaceId?: string; cwd?: string; includeDefaults?: boolean; }
 
 export class HarnessRegistry {
   readonly #candidates: Array<{ id: string; name: string; make: () => DetectableHarness }> = [];
   readonly #available = new Map<string, DetectableHarness>();
+  #detections: HarnessDetection[] = [];
 
   constructor(options: HarnessRegistryOptions = {}) {
     if (options.includeDefaults === false) return;
@@ -32,21 +39,37 @@ export class HarnessRegistry {
     this.#available.clear();
     const results: HarnessDetection[] = [];
     for (const candidate of this.#candidates) {
+      let harness: DetectableHarness | undefined;
       try {
-        const harness = candidate.make();
+        harness = candidate.make();
         const available = await harness.detect();
         if (available) this.#available.set(candidate.id, harness);
         else await harness.close();
-        results.push({ id: candidate.id, name: candidate.name, available });
+        results.push({
+          id: candidate.id,
+          name: candidate.name,
+          type: harness.type,
+          command: harness.command,
+          available,
+        });
       } catch {
-        results.push({ id: candidate.id, name: candidate.name, available: false });
+        if (harness) await harness.close().catch(() => undefined);
+        results.push({
+          id: candidate.id,
+          name: candidate.name,
+          type: harness?.type ?? candidate.id,
+          command: harness?.command ?? candidate.id,
+          available: false,
+        });
       }
     }
-    return results;
+    this.#detections = results.map((result) => ({ ...result }));
+    return this.detections();
   }
   get(id: string): DetectableHarness | undefined { return this.#available.get(id); }
   values(): Iterable<DetectableHarness> { return this.#available.values(); }
   availableIds(): string[] { return [...this.#available.keys()]; }
+  detections(): HarnessDetection[] { return this.#detections.map((result) => ({ ...result })); }
   async close(): Promise<void> { await Promise.allSettled([...this.#available.values()].map((h) => h.close())); }
 }
 
