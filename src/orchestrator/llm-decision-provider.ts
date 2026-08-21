@@ -116,18 +116,13 @@ export class LLMDecisionProvider implements DecisionProvider {
 				timeout: this.#config.timeoutMs,
 			});
 		} else if (provider === "openai" || provider === "custom") {
-			// For OpenAI-compatible, we use the Anthropic SDK with a custom base URL
-			// The Anthropic SDK supports OpenAI-compatible endpoints
-			this.#client = new Anthropic({
-				apiKey,
-				baseURL: baseUrl ?? "https://api.openai.com/v1",
-				timeout: this.#config.timeoutMs,
-			});
+			// OpenAI-compatible providers use the standard /chat/completions HTTP contract.
+			this.#client = null;
 		}
 	}
 
 	async proposePlan(input: PlanProposalContext): Promise<Plan | null> {
-		if (!this.#client) {
+		if (!this.#client && this.#config.provider === "anthropic") {
 			return this.#fallback.proposePlan(input);
 		}
 
@@ -147,7 +142,7 @@ export class LLMDecisionProvider implements DecisionProvider {
 	}
 
 	async evaluate(taskResult: PlanTaskOutcome): Promise<Decision> {
-		if (!this.#client) {
+		if (!this.#client && this.#config.provider === "anthropic") {
 			return this.#fallback.evaluate(taskResult);
 		}
 
@@ -265,69 +260,45 @@ Return a Plan with tasks that achieve this goal.`;
 	}
 
 	async #callLLM(systemPrompt: string, userPrompt: string): Promise<string> {
-		if (!this.#client) {
-			throw new Error("LLM client not initialized");
-		}
-
 		const controller = new AbortController();
 		const timeout = setTimeout(() => controller.abort(), this.#config.timeoutMs);
-
 		try {
-			const message = await this.#client.messages.create({
-				model: this.#config.model,
-				max_tokens: this.#config.maxTokens ?? 4096,
-				temperature: this.#config.temperature,
-				system: systemPrompt,
-				messages: [{ role: "user", content: userPrompt }],
-				// Anthropic structured output via JSON schema
-				tools: [
-					{
-						name: "propose_plan",
-						description: "Propose a structured workflow plan",
-						input_schema: {
-							type: "object",
-							properties: {
-								goal: { type: "string" },
-								tasks: {
-									type: "array",
-									items: {
-										type: "object",
-										properties: {
-											id: { type: "string" },
-											title: { type: "string" },
-											description: { type: "string" },
-											dependencies: { type: "array", items: { type: "string" } },
-											priority: { type: "number" },
-											assignedTo: { type: "string" },
-											approvalId: { type: "string" },
-										},
-										required: ["id", "title", "description", "dependencies", "priority"],
-										additionalProperties: false,
-									},
-								},
-							},
-							required: ["goal", "tasks"],
-							additionalProperties: false,
-						},
-					},
-				],
-				tool_choice: { type: "tool", name: "propose_plan" },
-			});
-
-			clearTimeout(timeout);
-
-			const toolUse = message.content.find((c) => c.type === "tool_use");
-			if (!toolUse) {
-				throw new Error("LLM did not call propose_plan tool");
+			if (this.#config.provider === "openai" || this.#config.provider === "custom") {
+				const base = (this.#config.baseUrl ?? "https://api.openai.com/v1").replace(/\/$/, "");
+				const response = await fetch(`${base}/chat/completions`, {
+					method: "POST", signal: controller.signal,
+					headers: { "content-type": "application/json", authorization: `Bearer ${this.#config.apiKey}` },
+					body: JSON.stringify({
+						model: this.#config.model, temperature: this.#config.temperature, max_tokens: this.#config.maxTokens ?? 4096,
+						response_format: { type: "json_object" },
+						messages: [{ role: "system", content: systemPrompt }, { role: "user", content: `${userPrompt}\nReturn only valid JSON.` }],
+					}),
+				});
+				if (!response.ok) throw new Error(`OpenAI-compatible request failed: HTTP ${response.status} ${await response.text()}`);
+				const data = await response.json() as { choices?: Array<{ message?: { content?: string | null } }> };
+				const content = data.choices?.[0]?.message?.content;
+				if (!content) throw new Error("OpenAI-compatible provider returned no message content");
+				return content;
 			}
 
+			if (!this.#client) throw new Error("LLM client not initialized");
+			const message = await this.#client.messages.create({
+				model: this.#config.model, max_tokens: this.#config.maxTokens ?? 4096, temperature: this.#config.temperature,
+				system: systemPrompt, messages: [{ role: "user", content: userPrompt }],
+				tools: [{ name: "propose_plan", description: "Propose a structured workflow plan", input_schema: {
+					type: "object", properties: { goal: { type: "string" }, tasks: { type: "array", items: { type: "object", properties: {
+						id: { type: "string" }, title: { type: "string" }, description: { type: "string" }, dependencies: { type: "array", items: { type: "string" } }, priority: { type: "number" }, assignedTo: { type: "string" }, approvalId: { type: "string" },
+					}, required: ["id", "title", "description", "dependencies", "priority"], additionalProperties: false } } }, required: ["goal", "tasks"], additionalProperties: false,
+				} }], tool_choice: { type: "tool", name: "propose_plan" },
+			});
+			const toolUse = message.content.find((c) => c.type === "tool_use");
+			if (!toolUse) throw new Error("LLM did not call propose_plan tool");
 			return JSON.stringify(toolUse.input);
 		} catch (error) {
-			clearTimeout(timeout);
-			if (error instanceof Error && error.name === "AbortError") {
-				throw new Error(`LLM request timed out after ${this.#config.timeoutMs}ms`);
-			}
+			if (error instanceof Error && error.name === "AbortError") throw new Error(`LLM request timed out after ${this.#config.timeoutMs}ms`);
 			throw error;
+		} finally {
+			clearTimeout(timeout);
 		}
 	}
 
@@ -352,7 +323,6 @@ Return a Plan with tasks that achieve this goal.`;
 			};
 		});
 
-		// Validate node types exist
 		for (const task of tasks) {
 			if (task.assignedTo) {
 				const def = nodeRegistry.get(task.assignedTo);
