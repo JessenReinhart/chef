@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { MissionTimelineFeature } from "./MissionTimelineFeature";
 import type { UiMission, UiTask, ViewMode } from "./types";
 
@@ -69,6 +69,12 @@ function taskStatusLabel(status: UiTask["status"]): string {
   return labels[status];
 }
 
+function readSuccessCriteria(mission: UiMission): string[] {
+  const value = mission.metadata?.successCriteria;
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+}
+
 export function MissionPanel({
   mission,
   tasks,
@@ -89,6 +95,12 @@ export function MissionPanel({
     return approvals.filter((approval) => membership.has(approval.taskId));
   }, [approvals, mission.taskIds]);
 
+  const successCriteria = readSuccessCriteria(mission);
+  const [editingCriteria, setEditingCriteria] = useState(false);
+  const [criteriaDraft, setCriteriaDraft] = useState("");
+  const [criteriaSaving, setCriteriaSaving] = useState(false);
+  const [criteriaError, setCriteriaError] = useState<string | null>(null);
+
   const completedCount = missionTasks.filter((task) => task.status === "completed").length;
   const activeCount = missionTasks.filter((task) => ["assigned", "spawning", "running"].includes(task.status)).length;
   const blockedTasks = missionTasks.filter((task) => task.status === "blocked" || task.status === "failed");
@@ -96,6 +108,34 @@ export function MissionPanel({
   const progress = totalTaskCount > 0 ? Math.round((completedCount / totalTaskCount) * 100) : 0;
   const owners = Array.from(new Set(missionTasks.map((task) => task.assignedTo).filter((owner): owner is string => Boolean(owner))));
   const canControl = !TERMINAL_STATUSES.has(mission.status);
+
+  const beginCriteriaEdit = () => {
+    setCriteriaDraft(successCriteria.join("\n"));
+    setCriteriaError(null);
+    setEditingCriteria(true);
+  };
+
+  const saveCriteria = async () => {
+    const next = criteriaDraft.split("\n").map((item) => item.trim()).filter(Boolean);
+    setCriteriaSaving(true);
+    setCriteriaError(null);
+    try {
+      const response = await fetch(`/api/missions/${encodeURIComponent(mission.id)}/success-criteria`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ successCriteria: next }),
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({})) as { error?: string };
+        throw new Error(body.error ?? `HTTP ${response.status}`);
+      }
+      setEditingCriteria(false);
+    } catch (error) {
+      setCriteriaError(error instanceof Error ? error.message : "Could not save success criteria");
+    } finally {
+      setCriteriaSaving(false);
+    }
+  };
 
   return (
     <section className="border-b border-[#21262d] bg-[#0d1117] px-4 py-4" aria-label="Mission overview">
@@ -135,6 +175,48 @@ export function MissionPanel({
 
           <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-[#21262d]" aria-label={`Mission progress ${progress}%`}>
             <div className="h-full rounded-full bg-cyan-400 transition-[width] duration-300" style={{ width: `${progress}%` }} />
+          </div>
+
+          <div className="mt-4 rounded-lg border border-[#21262d] bg-[#0d1117] p-3" aria-label="Mission success criteria">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h3 className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#8b949e]">Success criteria</h3>
+                <p className="mt-0.5 text-[10px] text-[#6e7681]">Define what must be true before this Mission is considered successful.</p>
+              </div>
+              {canControl && !editingCriteria && (
+                <button onClick={beginCriteriaEdit} className="shrink-0 rounded-md border border-[#30363d] bg-[#161b22] px-2.5 py-1 text-[10px] text-[#c9d1d9] hover:border-cyan-500/40">
+                  {successCriteria.length > 0 ? "Edit" : "Add criteria"}
+                </button>
+              )}
+            </div>
+
+            {editingCriteria ? (
+              <div className="mt-3">
+                <textarea
+                  value={criteriaDraft}
+                  onChange={(event) => setCriteriaDraft(event.target.value)}
+                  rows={Math.max(3, Math.min(7, criteriaDraft.split("\n").length + 1))}
+                  placeholder={"One criterion per line\nTests pass\nNo regression in existing behavior"}
+                  className="w-full resize-y rounded-md border border-[#30363d] bg-[#010409] px-3 py-2 text-[11px] leading-5 text-[#e6edf3] outline-none placeholder:text-[#484f58] focus:border-cyan-500/50"
+                />
+                {criteriaError && <p className="mt-1 text-[10px] text-red-300">{criteriaError}</p>}
+                <div className="mt-2 flex justify-end gap-2">
+                  <button onClick={() => setEditingCriteria(false)} disabled={criteriaSaving} className="rounded-md border border-[#30363d] px-2.5 py-1 text-[10px] text-[#8b949e] disabled:opacity-40">Cancel</button>
+                  <button onClick={() => void saveCriteria()} disabled={criteriaSaving} className="rounded-md border border-cyan-500/30 bg-cyan-500/10 px-2.5 py-1 text-[10px] text-cyan-300 disabled:opacity-40">{criteriaSaving ? "Saving…" : "Save criteria"}</button>
+                </div>
+              </div>
+            ) : successCriteria.length > 0 ? (
+              <ul className="mt-3 space-y-1.5">
+                {successCriteria.map((criterion, index) => (
+                  <li key={`${index}:${criterion}`} className="flex items-start gap-2 text-[11px] leading-4 text-[#c9d1d9]">
+                    <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full border border-cyan-400/60 bg-cyan-400/15" />
+                    <span>{criterion}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-3 text-[10px] text-[#6e7681]">No explicit success criteria yet. Chef can still run the Mission, but completion is less inspectable.</p>
+            )}
           </div>
 
           {!TERMINAL_STATUSES.has(mission.status) && (
