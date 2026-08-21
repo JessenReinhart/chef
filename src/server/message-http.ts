@@ -3,13 +3,22 @@ import type { ChefRuntime } from "../main.ts";
 
 type RequestHandler = (req: IncomingMessage, res: ServerResponse) => void | Promise<void>;
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8" } as const;
+const MAX_CHANNEL_LENGTH = 120;
+const MAX_MESSAGE_LENGTH = 10_000;
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, JSON_HEADERS);
   res.end(JSON.stringify(body));
 }
 
-/** Read-only, workspace-scoped structured-message projection for collaboration UI. */
+async function readJsonBody(req: IncomingMessage): Promise<unknown> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  if (chunks.length === 0) return {};
+  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+}
+
+/** Workspace-scoped structured-message projection and bounded human room write surface. */
 export function createMessageServer(runtime: ChefRuntime, baseServer: Server): Server {
   const baseHandler = baseServer.listeners("request")[0] as RequestHandler | undefined;
   if (!baseHandler) throw new Error("base HTTP server has no request handler");
@@ -28,6 +37,58 @@ export function createMessageServer(runtime: ChefRuntime, baseServer: Server): S
           .map(([channel, messageCount]) => ({ channel, messageCount }))
           .sort((a, b) => a.channel.localeCompare(b.channel));
         sendJson(res, 200, { ok: true, data });
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/api/messages") {
+        let body: unknown;
+        try {
+          body = await readJsonBody(req);
+        } catch {
+          sendJson(res, 400, { error: "request body must be valid JSON" });
+          return;
+        }
+        if (!body || typeof body !== "object" || Array.isArray(body)) {
+          sendJson(res, 400, { error: "request body must be an object" });
+          return;
+        }
+        const input = body as Record<string, unknown>;
+        const channel = typeof input.channel === "string" ? input.channel.trim() : "";
+        const text = typeof input.text === "string" ? input.text.trim() : "";
+        if (!channel) {
+          sendJson(res, 400, { error: "channel is required" });
+          return;
+        }
+        if (channel.length > MAX_CHANNEL_LENGTH) {
+          sendJson(res, 400, { error: `channel must be at most ${MAX_CHANNEL_LENGTH} characters` });
+          return;
+        }
+        if (!text) {
+          sendJson(res, 400, { error: "text is required" });
+          return;
+        }
+        if (text.length > MAX_MESSAGE_LENGTH) {
+          sendJson(res, 400, { error: `text must be at most ${MAX_MESSAGE_LENGTH} characters` });
+          return;
+        }
+
+        const message = runtime.repository.transaction(() => {
+          const created = runtime.repository.insertMessage({
+            workspaceId: runtime.workspaceId,
+            from: "human",
+            channel,
+            type: "message",
+            payload: { text },
+          });
+          runtime.repository.appendEvent({
+            workspaceId: runtime.workspaceId,
+            source: { type: "human", id: "human" },
+            type: "message.sent",
+            payload: { messageId: created.id, channel, type: created.type },
+          });
+          return created;
+        });
+        sendJson(res, 201, { ok: true, data: message });
         return;
       }
 
