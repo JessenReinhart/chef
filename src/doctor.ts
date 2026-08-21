@@ -1,6 +1,6 @@
 import { access } from "node:fs/promises";
 import { constants } from "node:fs";
-import { delimiter, join } from "node:path";
+import { posix, win32 } from "node:path";
 
 export type DoctorStatus = "pass" | "warn" | "fail";
 
@@ -46,11 +46,13 @@ async function findExecutable(
   platform: NodeJS.Platform,
   canAccess: (path: string, mode: number) => Promise<void>,
 ): Promise<string | null> {
-  const directories = pathValue.split(delimiter).filter(Boolean);
+  const pathApi = platform === "win32" ? win32 : posix;
+  const separator = platform === "win32" ? ";" : ":";
+  const directories = pathValue.split(separator).filter(Boolean);
   for (const directory of directories) {
     for (const name of names) {
       for (const candidateName of executableNames(name, platform)) {
-        const candidate = join(directory, candidateName);
+        const candidate = pathApi.join(directory, candidateName);
         try {
           await canAccess(candidate, constants.X_OK);
           return candidate;
@@ -94,7 +96,7 @@ export async function runDoctor(environment: DoctorEnvironment = {}): Promise<Do
     checks.push({
       id: binary.id,
       label: binary.label,
-      status: found ? "pass" : required ? "warn" : "warn",
+      status: found ? "pass" : "warn",
       detail: found
         ? `Found at ${found}.`
         : required
