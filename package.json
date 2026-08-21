@@ -1,45 +1,18 @@
 {
-  "name": "chef",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
-  "scripts": {
-    "build": "tsc",
-    "start": "node dist/main.js",
-    "test": "npm run build && node --test dist/tests/*.js",
-    "dev": "tsx src/main.ts",
-    "web:dev": "vite --config web/vite.config.ts",
-    "web:build": "vite build --config web/vite.config.ts"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "name": "@chef/runtime",
+  "version": "0.1.0",
+  "private": true,
   "type": "module",
-  "dependencies": {
-    "@xterm/addon-fit": "^0.10.0",
-    "@xterm/xterm": "^5.5.0",
-    "better-sqlite3": "^12.2.0",
-    "cors": "^2.8.5",
-    "drizzle-orm": "^0.44.5",
-    "express": "^5.1.0",
-    "node-pty": "^1.0.0",
-    "react": "^19.1.1",
-    "react-dom": "^19.1.1",
-    "reactflow": "^11.11.4",
-    "ws": "^8.18.3"
+  "engines": { "node": ">=24.0.0" },
+  "scripts": {
+    "server": "node --experimental-strip-types src/server/index.ts",
+    "test": "node --experimental-strip-types tests/golden-path.ts && node --experimental-strip-types tests/timeout-cancellation.ts && node --experimental-strip-types tests/seq-concurrency.ts && node --experimental-strip-types tests/cancel-facade.ts && node --experimental-strip-types tests/dispatch-concurrency.ts && node --experimental-strip-types tests/plan-persistence.ts && node --experimental-strip-types tests/pty-replay.ts && node --experimental-strip-types tests/live-events.ts && node --experimental-strip-types tests/live-events-failure.ts && node --experimental-strip-types tests/direct-worker-interaction.ts && node --experimental-strip-types tests/approvals.ts && node --experimental-strip-types tests/capabilities.ts && node --experimental-strip-types tests/tool-runner.ts && node --experimental-strip-types tests/canvas-graph.ts && node --experimental-strip-types tests/http-server.ts && node --experimental-strip-types tests/canvas-layout.ts && node --experimental-strip-types tests/canvas-patcher.ts && node --experimental-strip-types tests/orchestrator-canvas.ts && node --experimental-strip-types tests/canvas-context-share.ts && node --experimental-strip-types tests/inbox-context-delivery.ts && node --experimental-strip-types tests/peer-message-delivery.ts && node --experimental-strip-types tests/context-scopes.ts && node --experimental-strip-types tests/context-scope-manager.ts && node --experimental-strip-types tests/product-runtime-v02.ts && node --experimental-strip-types tests/product-runtime-v02-http.ts && node --experimental-strip-types tests/product-runtime-v02-lifecycle.ts && node --experimental-strip-types tests/product-runtime-v02-persistence.ts && node --experimental-strip-types tests/agent-presence.ts && node --experimental-strip-types tests/mission-timeline-http.ts && node --experimental-strip-types tests/server-runtime-surfaces.ts && node --experimental-strip-types tests/specialized-harness.ts && node --experimental-strip-types tests/harness-discovery-metadata.ts && node --experimental-strip-types tests/harness-readiness-http.ts && node --experimental-strip-types tests/blocker-http.ts",
+    "typecheck": "tsc --noEmit --allowImportingTsExtensions --module nodenext --moduleResolution nodenext --target es2024 --types node --skipLibCheck src/main.ts",
+    "test:v02-persistence": "node --experimental-strip-types tests/product-runtime-v02-persistence.ts",
+    "test:agent-presence": "node --experimental-strip-types tests/agent-presence.ts",
+    "test:specialized-harness": "node --experimental-strip-types tests/specialized-harness.ts",
+    "test:server-runtime": "node --experimental-strip-types tests/server-runtime-surfaces.ts"
   },
-  "devDependencies": {
-    "@types/better-sqlite3": "^7.6.13",
-    "@types/cors": "^2.8.19",
-    "@types/express": "^5.0.3",
-    "@types/node": "^24.3.0",
-    "@types/react": "^19.1.10",
-    "@types/react-dom": "^19.1.7",
-    "@types/ws": "^8.18.1",
-    "@vitejs/plugin-react": "^5.0.2",
-    "drizzle-kit": "^0.31.4",
-    "tsx": "^4.20.5",
-    "typescript": "^5.9.2",
-    "vite": "^7.1.3"
-  }
+  "dependencies": { "@anthropic-ai/sdk": "^0.62.0", "node-pty": "^1.1.0" },
+  "devDependencies": { "@types/node": "^26.2.0", "typescript": "^7.0.2" }
 }
