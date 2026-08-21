@@ -4,6 +4,7 @@ import { createArtifactServer } from "./artifact-http.ts";
 import { createMissionTimelineServer } from "./mission-timeline-http.ts";
 import { createMissionPlanServer } from "./mission-plan-http.ts";
 import { createMessageServer } from "./message-http.ts";
+import { createArtifactLineageServer } from "./artifact-lineage-http.ts";
 import { createChef } from "../main.ts";
 import { mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -23,7 +24,8 @@ const contextServer = createContextScopeServer(chef, baseServer);
 const artifactServer = createArtifactServer(chef, contextServer);
 const timelineServer = createMissionTimelineServer(chef, artifactServer);
 const planServer = createMissionPlanServer(chef, timelineServer);
-const server = createMessageServer(chef, planServer);
+const messageServer = createMessageServer(chef, planServer);
+const server = createArtifactLineageServer(chef, messageServer);
 server.listen(port, "127.0.0.1", () => {
   const address = server.address();
   const listeningPort = typeof address === "object" && address ? address.port : port;
@@ -33,6 +35,7 @@ server.listen(port, "127.0.0.1", () => {
   console.log(`  GET  /api/events   — live SSE event stream`);
   console.log(`  GET  /api/context-scopes — shared context scopes`);
   console.log(`  GET  /api/artifacts — durable artifact library`);
+  console.log(`  GET  /api/artifacts/:id/lineage — explicit artifact lineage`);
   console.log(`  GET  /api/missions/:id/timeline — Mission event history`);
   console.log(`  GET  /api/missions/:id/plans — Mission plan history`);
   console.log(`  GET  /api/messages — structured collaboration messages`);
