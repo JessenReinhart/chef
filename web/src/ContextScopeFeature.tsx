@@ -2,8 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api } from "./api";
 import type { ContextZone, ContextZoneInput } from "./types";
-import type { Artifact, Decision, RuntimeEvent, Task } from "../../src/core/types.ts";
-import { describeContextReference } from "./contextProvenance";
+import { describeContextReference, type ContextProvenanceSnapshot } from "./contextProvenance";
 
 type Bounds = { x: number; y: number; width: number; height: number };
 type CanvasNode = { id: string; label: string; position: { x: number; y: number } };
@@ -22,7 +21,7 @@ export function ContextScopeFeature() {
   const [host, setHost] = useState<HTMLElement | null>(null);
   const [scopes, setScopes] = useState<ContextZone[]>([]);
   const [nodes, setNodes] = useState<CanvasNode[]>([]);
-  const [provenance, setProvenance] = useState<{ artifacts: Artifact[]; decisions: Decision[]; events: RuntimeEvent[]; tasks: Task[] }>({ artifacts: [], decisions: [], events: [], tasks: [] });
+  const [provenance, setProvenance] = useState<ContextProvenanceSnapshot>({ artifacts: [], decisions: [], events: [], tasks: [] });
   const [viewport, setViewport] = useState(readViewport);
   const [drawing, setDrawing] = useState(false);
   const [draft, setDraft] = useState<Bounds | null>(null);
@@ -47,7 +46,10 @@ export function ContextScopeFeature() {
       ]);
       setScopes(nextScopes);
       setNodes(state.canvasNodes.map((node) => ({ id: node.id, label: node.label, position: node.position })));
-      setProvenance({ artifacts: state.artifacts, decisions: state.decisions, events: state.events, tasks: state.tasks });
+      // /api/state is the authoritative workspace snapshot and includes artifacts
+      // and decisions even though the older lightweight API client type omits them.
+      const snapshot = state as typeof state & Pick<ContextProvenanceSnapshot, "artifacts" | "decisions">;
+      setProvenance({ artifacts: snapshot.artifacts, decisions: snapshot.decisions, events: state.events, tasks: state.tasks });
     } catch {
       // The feature is additive; the base canvas remains usable if the scope API is unavailable.
     }
