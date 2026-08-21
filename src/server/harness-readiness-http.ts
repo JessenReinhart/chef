@@ -13,8 +13,8 @@ export interface GenericHarnessReadiness {
   id: "generic";
   name: "Generic Terminal";
   type: "generic";
-  command: null;
-  available: true;
+  command: string | null;
+  available: boolean;
   kind: "generic";
 }
 
@@ -26,14 +26,17 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
 }
 
 export function buildHarnessReadiness(detections: HarnessDetection[]): HarnessReadinessItem[] {
+  const generic = detections.find((detection) => detection.id === "generic");
   return [
-    ...detections.map((detection) => ({ ...detection, kind: "cli" as const })),
+    ...detections
+      .filter((detection) => detection.id !== "generic")
+      .map((detection) => ({ ...detection, kind: "cli" as const })),
     {
       id: "generic",
       name: "Generic Terminal",
       type: "generic",
-      command: null,
-      available: true,
+      command: generic?.command ?? null,
+      available: generic?.available ?? true,
       kind: "generic",
     },
   ];
