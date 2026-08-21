@@ -318,7 +318,7 @@ const nodeTypes: NodeTypes = {
     const statusColor = STATUS_COLORS[data.status] ?? "#6b7280";
     const icon = data.entry?.icon ?? ">_";
     const sessionId = typeof data.sessionId === "string" ? data.sessionId : undefined;
-    const [open, setOpen] = useState(false);
+    const [open, setOpen] = useState(true);
     return (
       <div
         className={`relative w-[540px] max-w-[90vw] rounded-xl border bg-[#0d1117]/95 text-left shadow-xl transition-all duration-200 ${
@@ -327,10 +327,8 @@ const nodeTypes: NodeTypes = {
         style={{ boxShadow: `0 0 0 1px ${accent}22, 0 6px 20px rgba(0,0,0,.55)`, overflow: "hidden" }}
       >
         <div
-          className="flex cursor-pointer items-center gap-2 rounded-t-xl border-b border-[#21262d] px-3 py-1.5"
+          className="flex items-center gap-2 rounded-t-xl border-b border-[#21262d] px-3 py-1.5"
           style={{ background: `${accent}1a` }}
-          onClick={() => setOpen((v) => !v)}
-          title={open ? "Collapse terminal" : "Expand terminal"}
         >
           <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: statusColor, boxShadow: data.status === "running" ? `0 0 6px ${statusColor}` : "none" }} />
           <span className="truncate text-[11px] font-semibold text-[#cbd5e1]" style={{ color: accent }}>
@@ -339,12 +337,32 @@ const nodeTypes: NodeTypes = {
           <span className="truncate text-[11px] font-semibold text-[#cbd5e1]">
             {data.entry?.label ?? data.label}
           </span>
-          <span className="ml-auto text-[10px] text-[#8b949e]">{open ? "▾" : "▸"}</span>
+          <button
+            type="button"
+            className="nodrag ml-auto rounded px-1 text-[10px] text-[#8b949e] hover:bg-white/5"
+            onClick={(event) => {
+              event.stopPropagation();
+              setOpen((value) => !value);
+            }}
+            title={open ? "Collapse terminal" : "Expand terminal"}
+            aria-label={open ? "Collapse terminal" : "Expand terminal"}
+          >
+            {open ? "▾" : "▸"}
+          </button>
         </div>
-        {open && sessionId ? (
-          <div className="h-[300px] border-b border-[#21262d]">
-            <TerminalView sessionId={sessionId} />
-          </div>
+        {open ? (
+          sessionId ? (
+            <div className="nodrag nopan nowheel h-[300px] border-b border-[#21262d]">
+              <TerminalView sessionId={sessionId} />
+            </div>
+          ) : (
+            <div
+              className="nodrag px-3 py-4 text-[11px] text-[#8b949e]"
+              onClick={(event) => event.stopPropagation()}
+            >
+              Starting default terminal…
+            </div>
+          )
         ) : (
           <div className="px-3 py-2">
             <div className="truncate text-[13px] font-medium text-[#e6edf3]">{data.label}</div>
@@ -440,8 +458,12 @@ export function BlueprintCanvas({
         // nodes continue to use task state, with liveStatus as a restoration hint.
         const status = presence?.status ?? task?.status ?? node.liveStatus ?? "pending";
 
-        // Determine if this is a terminal node (by kind or label)
-        const isTerminalNode = node.kind === "tool" && (node.label === "Terminal" || node.label === "tool.terminal");
+        // Prefer the durable task type. Keep label checks for older canvas rows.
+        const isTerminalNode = node.kind === "tool" && (
+          task?.workflowNodeId === "tool.terminal"
+          || node.label === "Terminal"
+          || node.label === "tool.terminal"
+        );
         const nodeTypeForRF = isTerminalNode ? "terminal" : node.kind === "agent" ? "agent" : "blueprint";
 
         // Find session for this task (session.taskId === node.taskId)
