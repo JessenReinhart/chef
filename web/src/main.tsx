@@ -7,6 +7,7 @@ import { LivingWorkspaceFeature } from "./LivingWorkspaceFeature";
 import { LivingArtifactFeature } from "./LivingArtifactFeature";
 import { SetupChrome } from "./SetupChrome";
 import { DecisionLibraryFeature } from "./DecisionLibraryFeature";
+import { ChannelRoomsFeature } from "./ChannelRoomsFeature";
 import "./index.css";
 import "./visual-audit.css";
 
@@ -21,7 +22,7 @@ function ChefRoot() {
     return () => window.clearInterval(timer);
   }, []);
 
-  return <><App key={viewMode} /><ContextScopeFeature /><CanvasNodeDeleteFeature /><SetupChrome /><DecisionLibraryFeature /><LivingWorkspaceFeature /><LivingArtifactFeature /></>;
+  return <><App key={viewMode} /><ContextScopeFeature /><CanvasNodeDeleteFeature /><SetupChrome /><DecisionLibraryFeature /><LivingWorkspaceFeature /><LivingArtifactFeature /><ChannelRoomsFeature /></>;
 }
 
 const root = document.getElementById("root");

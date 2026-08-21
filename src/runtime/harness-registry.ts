@@ -1,6 +1,8 @@
 /** Detects scheduler-compatible specialized CLI adapters. */
+import { AiderHarness } from "../harness/aider.ts";
 import { ClaudeCodeHarness } from "../harness/claude-code.ts";
 import { CodexHarness } from "../harness/codex.ts";
+import { DefaultTerminalHarness } from "../harness/default-terminal.ts";
 import { PiHarness } from "../harness/pi.ts";
 import { OmpHarness } from "../harness/omp.ts";
 import { FreebuffHarness } from "../harness/freebuff.ts";
@@ -30,9 +32,11 @@ export class HarnessRegistry {
     const runtime = { workspaceId: options.workspaceId, cwd: options.cwd };
     this.register("claude-code", "Claude Code", () => new ClaudeCodeHarness("claude", runtime));
     this.register("codex", "Codex", () => new CodexHarness("codex", runtime));
+    this.register("aider", "Aider", () => new AiderHarness("aider", runtime));
     this.register("pi", "Pi", () => new PiHarness("pi", runtime));
     this.register("omp", "OMP", () => new OmpHarness("omp", runtime));
     this.register("freebuff", "Freebuff", () => new FreebuffHarness("freebuff", runtime));
+    this.register("generic", "Generic Terminal", () => new DefaultTerminalHarness(runtime));
   }
 
   register(id: string, name: string, make: () => DetectableHarness): void { this.#candidates.push({ id, name, make }); }
