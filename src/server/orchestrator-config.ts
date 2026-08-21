@@ -27,8 +27,9 @@ const settingsPath = resolve(homedir(), ".chef", "orchestrator-provider.json");
 async function protectWindows(value: string): Promise<string> {
   const script = [
     "$ErrorActionPreference='Stop'",
+    "Add-Type -AssemblyName System.Security",
     "$bytes=[Text.Encoding]::UTF8.GetBytes($env:CHEF_SECRET)",
-    "$enc=[Security.Cryptography.ProtectedData]::Protect($bytes,$null,[Security.Cryptography.DataProtectionScope]::CurrentUser)",
+    "$enc=[System.Security.Cryptography.ProtectedData]::Protect($bytes,$null,[System.Security.Cryptography.DataProtectionScope]::CurrentUser)",
     "[Convert]::ToBase64String($enc)",
   ].join("; ");
   const { stdout } = await execFileAsync("powershell.exe", ["-NoProfile", "-Command", script], {
@@ -41,8 +42,9 @@ async function protectWindows(value: string): Promise<string> {
 async function unprotectWindows(value: string): Promise<string> {
   const script = [
     "$ErrorActionPreference='Stop'",
+    "Add-Type -AssemblyName System.Security",
     "$enc=[Convert]::FromBase64String($env:CHEF_SECRET)",
-    "$bytes=[Security.Cryptography.ProtectedData]::Unprotect($enc,$null,[Security.Cryptography.DataProtectionScope]::CurrentUser)",
+    "$bytes=[System.Security.Cryptography.ProtectedData]::Unprotect($enc,$null,[System.Security.Cryptography.DataProtectionScope]::CurrentUser)",
     "[Text.Encoding]::UTF8.GetString($bytes)",
   ].join("; ");
   const { stdout } = await execFileAsync("powershell.exe", ["-NoProfile", "-Command", script], {
