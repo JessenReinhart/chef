@@ -13,17 +13,19 @@ type Task = {
 
 type CanvasNode = {
   id: string;
-  taskId?: string;
+  taskId?: string | null;
   label?: string;
   kind?: string;
   harnessId?: string | null;
+  liveStatus?: string;
 };
 
 type AgentOption = {
   nodeId: string;
   taskId?: string;
   label: string;
-  status: string;
+  liveStatus: string;
+  taskStatus?: string;
   harnessId?: string | null;
 };
 
@@ -32,8 +34,8 @@ type StateSnapshot = {
   canvasNodes?: CanvasNode[];
 };
 
-function isLiveStatus(status: string): boolean {
-  return status === "running" || status === "assigned" || status === "spawning" || status === "pending";
+function isPresent(status: string): boolean {
+  return status !== "offline" && status !== "failed";
 }
 
 function projectAgents(snapshot: StateSnapshot): AgentOption[] {
@@ -44,13 +46,14 @@ function projectAgents(snapshot: StateSnapshot): AgentOption[] {
       const task = node.taskId ? tasks.get(node.taskId) : tasks.get(node.id);
       return {
         nodeId: node.id,
-        taskId: task?.id ?? node.taskId,
+        taskId: task?.id ?? node.taskId ?? undefined,
         label: node.label ?? task?.title ?? node.harnessId ?? "Agent",
-        status: task?.status ?? "idle",
+        liveStatus: node.liveStatus ?? "offline",
+        taskStatus: task?.status,
         harnessId: node.harnessId,
       };
     })
-    .sort((a, b) => Number(isLiveStatus(b.status)) - Number(isLiveStatus(a.status)) || a.label.localeCompare(b.label));
+    .sort((a, b) => Number(isPresent(b.liveStatus)) - Number(isPresent(a.liveStatus)) || a.label.localeCompare(b.label));
 }
 
 function AgentQuickMessagePanel() {
@@ -112,7 +115,7 @@ function AgentQuickMessagePanel() {
       <header><div><strong>Talk to an agent</strong><span>Send a direct instruction without creating a new Mission.</span></div><button type="button" onClick={() => setOpen(false)} aria-label="Close agent message panel">×</button></header>
       {agents.length === 0 ? <div className="agent-quick-message__empty">No agent is present on the canvas yet.</div> : <div className="agent-quick-message__body">
         <label><span>Agent</span><select value={selectedNodeId} onChange={(event) => { setSelectedNodeId(event.target.value); setFeedback(null); }}>{agents.map((agent) => <option key={agent.nodeId} value={agent.nodeId}>{agent.label}</option>)}</select></label>
-        {selected && <div className="agent-quick-message__agent-meta"><span className="agent-quick-message__status" data-live={isLiveStatus(selected.status)}>{selected.status}</span>{selected.harnessId && <span>{selected.harnessId}</span>}</div>}
+        {selected && <div className="agent-quick-message__agent-meta"><span className="agent-quick-message__status" data-live={isPresent(selected.liveStatus)}>presence: {selected.liveStatus}</span>{selected.taskStatus && <span>task: {selected.taskStatus}</span>}{selected.harnessId && <span>{selected.harnessId}</span>}</div>}
         <label><span>Instruction</span><textarea value={message} onChange={(event) => setMessage(event.target.value)} onKeyDown={(event) => { if ((event.ctrlKey || event.metaKey) && event.key === "Enter") void send(); }} placeholder="Ask, redirect, or give this agent more context…" /></label>
         <button type="button" className="agent-quick-message__send" disabled={!selected || !message.trim() || loading} onClick={() => void send()}>{loading ? "Sending…" : "Send instruction"}</button>
         <div className={`agent-quick-message__feedback${feedback ? ` is-${feedback.kind}` : ""}`}>{feedback?.text ?? "Ctrl/Cmd + Enter to send."}</div>
