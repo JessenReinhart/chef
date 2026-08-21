@@ -33,10 +33,21 @@ export function createArtifactServer(runtime: ChefRuntime, baseServer: Server): 
         }
         const taskId = url.searchParams.get("taskId");
         const createdBy = url.searchParams.get("createdBy");
+        const missionId = url.searchParams.get("missionId");
+        let missionTaskIds: Set<string> | null = null;
+        if (missionId) {
+          const mission = runtime.repository.getMission(missionId);
+          if (!mission || mission.workspaceId !== runtime.workspaceId) {
+            sendJson(res, 404, { error: "mission not found" });
+            return;
+          }
+          missionTaskIds = new Set(mission.taskIds);
+        }
         const data = runtime.repository.listArtifacts(runtime.workspaceId).filter((artifact) =>
           (!requestedType || artifact.type === requestedType)
           && (!taskId || artifact.taskId === taskId)
-          && (!createdBy || artifact.createdBy === createdBy),
+          && (!createdBy || artifact.createdBy === createdBy)
+          && (!missionTaskIds || Boolean(artifact.taskId && missionTaskIds.has(artifact.taskId))),
         );
         sendJson(res, 200, { ok: true, data });
         return;

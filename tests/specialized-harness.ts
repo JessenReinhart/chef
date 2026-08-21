@@ -33,7 +33,7 @@ try {
   });
 
   const detection = await registry.initialize();
-  assert.deepEqual(detection, [{ id: "test-cli", name: "Test CLI", available: true }]);
+  assert.deepEqual(detection, [{ id: "test-cli", name: "Test CLI", type: "test-cli", command: process.execPath, available: true }]);
   const harness = registry.get("test-cli");
   assert.ok(harness, "detected specialized harness is scheduler-addressable");
 

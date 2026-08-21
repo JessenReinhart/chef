@@ -25,6 +25,10 @@ jobs:
         run: npm test
       - name: Run artifact HTTP acceptance test
         run: node --experimental-strip-types tests/artifact-http.ts
+      - name: Run Mission plan HTTP acceptance test
+        run: node --experimental-strip-types tests/mission-plan-http.ts
+      - name: Run decision HTTP acceptance test
+        run: node --experimental-strip-types tests/decision-http.ts
 
   web-build:
     name: Web TypeScript build

@@ -74,6 +74,31 @@ try {
   assert.equal((await request(`/api/nodes/${firstId}/message`, { message: "Please inspect this directly" })).status, 202);
   assert.ok(runtime.repository.listEvents(runtime.workspaceId).some((event) => event.type === "user.intervention"));
 
+  const mission = runtime.repository.insertMission({
+    id: "http-mission",
+    workspaceId: runtime.workspaceId,
+    goal: "Ship a trustworthy result",
+    createdBy: "user",
+    metadata: { priority: "high" },
+  });
+  const criteriaUpdated = await request(`/api/missions/${mission.id}/success-criteria`, {
+    successCriteria: ["  Tests pass  ", "Review evidence is attached"],
+  }, "PUT");
+  assert.equal(criteriaUpdated.status, 200);
+  const updatedMission = (criteriaUpdated.json.data as { goal: string; metadata: Record<string, unknown> });
+  assert.equal(updatedMission.goal, mission.goal, "editing success criteria must not redirect the Mission");
+  assert.equal(updatedMission.metadata.priority, "high", "Mission metadata updates must preserve unrelated keys");
+  assert.deepEqual(updatedMission.metadata.successCriteria, ["Tests pass", "Review evidence is attached"]);
+  assert.ok(runtime.repository.listEvents(runtime.workspaceId).some((event) =>
+    event.type === "mission.success_criteria.updated"
+      && (event.payload as { missionId?: string }).missionId === mission.id
+  ), "success-criteria edits should remain visible in Mission history");
+  assert.equal((await request(`/api/missions/${mission.id}/success-criteria`, { successCriteria: ["valid", "   "] }, "PUT")).status, 400);
+  assert.equal((await request(`/api/missions/${mission.id}/success-criteria`, { successCriteria: "not-an-array" }, "PUT")).status, 400);
+  const criteriaCleared = await request(`/api/missions/${mission.id}/success-criteria`, { successCriteria: [] }, "PUT");
+  assert.equal(criteriaCleared.status, 200);
+  assert.deepEqual((criteriaCleared.json.data as { metadata: Record<string, unknown> }).metadata.successCriteria, [], "an empty list should explicitly clear success criteria");
+
   const created = await request("/api/automations", {
     name: "Repeatable check", nodeIds: [firstId, secondId],
     edges: [{ source: firstId, target: secondId, type: "control" }],

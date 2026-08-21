@@ -74,6 +74,30 @@ export function createHttpServer(runtime: ChefRuntime): Server {
         return;
       }
 
+      const missionSuccessCriteriaRoute = path.match(/^\/api\/missions\/([^/]+)\/success-criteria$/);
+      if (req.method === "PUT" && missionSuccessCriteriaRoute) {
+        const missionId = missionSuccessCriteriaRoute[1];
+        const current = runtime.repository.getMission(missionId);
+        if (!current || current.workspaceId !== runtime.workspaceId) { sendJson(res, 404, { error: `mission not found: ${missionId}` }); return; }
+        const body = (await readBody(req)) as { successCriteria?: unknown };
+        if (!Array.isArray(body.successCriteria) || body.successCriteria.some((item) => typeof item !== "string" || !item.trim())) {
+          sendJson(res, 400, { error: "successCriteria must be an array of non-empty strings" });
+          return;
+        }
+        const successCriteria = body.successCriteria.map((item) => item.trim());
+        const mission = runtime.repository.updateMission(missionId, {
+          metadata: { ...current.metadata, successCriteria },
+        });
+        runtime.repository.appendEvent({
+          workspaceId: runtime.workspaceId,
+          source: { type: "mission", id: missionId },
+          type: "mission.success_criteria.updated",
+          payload: { missionId, successCriteria },
+        });
+        sendJson(res, 200, { ok: true, data: mission });
+        return;
+      }
+
       const missionIdRoute = path.match(/^\/api\/missions\/([^/]+)$/);
       if (req.method === "PATCH" && missionIdRoute) {
         const missionId = missionIdRoute[1];
