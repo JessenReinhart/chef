@@ -7,6 +7,7 @@ import { createMessageServer } from "./message-http.ts";
 import { createArtifactLineageServer } from "./artifact-lineage-http.ts";
 import { createDecisionServer } from "./decision-http.ts";
 import { createHarnessReadinessServer } from "./harness-readiness-http.ts";
+import { createBlockerServer } from "./blocker-http.ts";
 import { createProjectServer } from "./project-http.ts";
 import { createOrchestratorConfigServer } from "./orchestrator-config-http.ts";
 import { applyOrchestratorProviderEnv } from "./orchestrator-config.ts";
@@ -49,6 +50,7 @@ const messageServer = createMessageServer(chef, planServer);
 const lineageServer = createArtifactLineageServer(chef, messageServer);
 const decisionServer = createDecisionServer(chef, lineageServer);
 const readinessServer = createHarnessReadinessServer(chef, decisionServer);
+const blockerServer = createBlockerServer(chef, readinessServer);
 let server: ReturnType<typeof createProjectServer>;
 let switchingProject = false;
 const relaunch = async (nextProjectDir = projectDir) => {
@@ -71,7 +73,7 @@ const relaunch = async (nextProjectDir = projectDir) => {
   child.unref();
   process.exit(0);
 };
-const projectServer = createProjectServer(chef, readinessServer, { onOpenProject: relaunch });
+const projectServer = createProjectServer(chef, blockerServer, { onOpenProject: relaunch });
 server = createOrchestratorConfigServer(projectServer, () => relaunch(projectDir));
 server.listen(port, "127.0.0.1", () => {
   const address = server.address();
@@ -88,6 +90,7 @@ server.listen(port, "127.0.0.1", () => {
   console.log(`  GET  /api/missions/:id/plans — Mission plan history`);
   console.log(`  GET  /api/messages — structured collaboration messages`);
   console.log(`  GET  /api/harnesses/readiness — detected CLI harness readiness`);
+  console.log(`  GET  /api/blockers — pending approvals and blocked/failed tasks`);
   console.log(`  GET  /api/project   — active project + recent projects`);
   console.log(`  POST /api/project/pick — native Windows folder picker + runtime reopen`);
   console.log(`  GET/PUT /api/orchestrator/provider — orchestrator direct LLM settings`);
