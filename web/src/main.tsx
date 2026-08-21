@@ -4,6 +4,7 @@ import { App } from "./App";
 import { ContextScopeFeature } from "./ContextScopeFeature";
 import { CanvasNodeDeleteFeature } from "./CanvasNodeDeleteFeature";
 import { LivingWorkspaceFeature } from "./LivingWorkspaceFeature";
+import { LivingArtifactFeature } from "./LivingArtifactFeature";
 import { SetupChrome } from "./SetupChrome";
 import { DecisionLibraryFeature } from "./DecisionLibraryFeature";
 import "./index.css";
@@ -20,7 +21,7 @@ function ChefRoot() {
     return () => window.clearInterval(timer);
   }, []);
 
-  return <><App key={viewMode} /><ContextScopeFeature /><CanvasNodeDeleteFeature /><SetupChrome /><DecisionLibraryFeature /><LivingWorkspaceFeature /></>;
+  return <><App key={viewMode} /><ContextScopeFeature /><CanvasNodeDeleteFeature /><SetupChrome /><DecisionLibraryFeature /><LivingWorkspaceFeature /><LivingArtifactFeature /></>;
 }
 
 const root = document.getElementById("root");
