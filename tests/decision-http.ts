@@ -73,6 +73,65 @@ try {
   assert.equal(invalidStatus.status, 400);
   assert.match(invalidStatus.json.error ?? "", /status must be one of/);
 
+  runtime.repository.insertDecision({
+    id: "memory-requirement",
+    workspaceId: runtime.workspaceId,
+    type: "requirement",
+    summary: "Keep setup understandable for non-technical users",
+    payload: { source: "product-bible" },
+    madeBy: "orchestrator",
+    timestamp: Date.parse("2026-08-21T00:03:00.000Z"),
+    status: "accepted",
+  });
+  runtime.repository.insertDecision({
+    id: "memory-known-fact",
+    workspaceId: runtime.workspaceId,
+    type: "known_fact",
+    summary: "The runtime owns lifecycle state",
+    payload: {},
+    madeBy: "runtime",
+    timestamp: Date.parse("2026-08-21T00:04:00.000Z"),
+    status: "accepted",
+  });
+  runtime.repository.insertDecision({
+    id: "memory-open-question",
+    workspaceId: runtime.workspaceId,
+    type: "open-question",
+    summary: "How should long-term memory maintenance work?",
+    payload: {},
+    madeBy: "orchestrator",
+    timestamp: Date.parse("2026-08-21T00:05:00.000Z"),
+    status: "proposed",
+  });
+  runtime.repository.insertDecision({
+    id: "memory-rejected-question",
+    workspaceId: runtime.workspaceId,
+    type: "question",
+    summary: "Should rejected questions stay open?",
+    payload: {},
+    madeBy: "reviewer",
+    timestamp: Date.parse("2026-08-21T00:06:00.000Z"),
+    status: "rejected",
+  });
+
+  const memory = await request("/api/memory");
+  assert.equal(memory.status, 200);
+  const memoryData = memory.json.data as {
+    categories: Record<string, Array<{ id: string }>>;
+    counts: Record<string, number>;
+  };
+  assert.deepEqual(memoryData.categories.decisions.map((decision) => decision.id), ["decision-architecture", "decision-rejected"]);
+  assert.deepEqual(memoryData.categories.requirements.map((decision) => decision.id), ["memory-requirement"]);
+  assert.deepEqual(memoryData.categories.knownFacts.map((decision) => decision.id), ["memory-known-fact"]);
+  assert.deepEqual(memoryData.categories.openQuestions.map((decision) => decision.id), ["memory-open-question"]);
+  assert.deepEqual(memoryData.categories.conventions, []);
+  assert.deepEqual(memoryData.categories.lessons, []);
+  assert.deepEqual(memoryData.categories.reusableProcedures, []);
+  assert.equal(memoryData.counts.decisions, 2);
+  assert.equal(memoryData.counts.requirements, 1);
+  assert.equal(memoryData.counts.knownFacts, 1);
+  assert.equal(memoryData.counts.openQuestions, 1);
+
   const state = await request("/api/state");
   assert.equal(state.status, 200);
   assert.ok(Array.isArray((state.json as Record<string, unknown>).decisions));
