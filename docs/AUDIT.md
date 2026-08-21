@@ -58,7 +58,7 @@ Audit of `AI_Engineering_OS_Specification_v0.1.pdf` against the current codebase
 | PiHarness | implemented | `src/harness/pi.ts` |
 | OMPHarness | implemented | `src/harness/omp.ts` |
 | FreebuffHarness | implemented | `src/harness/freebuff.ts` |
-| Future harnesses (Codex, Aider, custom) | partial | generic adapter covers arbitrary CLIs; specialized detection registry extensible |
+| Future harnesses (Codex, Aider, custom) | partial | first-class `CodexHarness` now ships with registry/discovery coverage; generic fallback still covers Aider/custom CLIs |
 
 ## Communication & Events (§7)
 
@@ -66,7 +66,7 @@ Audit of `AI_Engineering_OS_Specification_v0.1.pdf` against the current codebase
 |---|---|---|
 | Message envelope with type/channel/refs | implemented | `AgentMessage`; `messages` table |
 | Event envelope (id, workspace, timestamp, source, type, payload) | implemented | `RuntimeEvent` |
-| IRC-like channels | partial | `channel` field on messages; no channel subscription UI |
+| IRC-like channels | partial | `channel` field on durable messages plus `GET /api/messages/channels` workspace index; no channel subscription UI yet |
 | Channel is projection; events are system of record | implemented | events table authoritative |
 
 ## Context System (§8)
@@ -98,7 +98,7 @@ Audit of `AI_Engineering_OS_Specification_v0.1.pdf` against the current codebase
 | Artifact model with version/provenance | implemented | `Artifact`; `artifacts` table |
 | Reference over copy | implemented | context refs; URIs |
 | Durable decisions | implemented | `decisions` table; `Decision` type |
-| Project memory | partial | decisions stored; no long-term memory summarization |
+| Project memory | partial | deterministic `GET /api/memory` projection exposes categorized durable records with provenance; summarization/promotion lifecycle is not implemented |
 
 ## Permissions & Approvals (§11)
 
@@ -194,7 +194,7 @@ Audit of `AI_Engineering_OS_Specification_v0.1.pdf` against the current codebase
 | P0 agent communication | implemented | messages/events |
 | P0 artifact references | implemented | artifacts table + context refs |
 | P1 multi-agent | partial | sequential multi-task; concurrent multi-harness scheduling exists |
-| P1 harness adapters | implemented | claude/pi/omp/freebuff + generic fallback |
+| P1 harness adapters | implemented | claude/pi/omp/freebuff/codex + generic fallback |
 | P1 direct worker interaction | implemented | send/interrupt/resize; test |
 | P2 visual canvas | implemented | React Flow workspace canvas with runtime-persisted node positions and typed relationships |
 | P2 terminal nodes | implemented | terminal canvas node renders collapsible live `TerminalView` bound to the node session |
@@ -218,7 +218,7 @@ Audit of `AI_Engineering_OS_Specification_v0.1.pdf` against the current codebase
 
 1. **Drizzle ORM** — repo convention uses raw `node:sqlite` (documented divergence).
 2. **Hierarchical squads (P4)** — Orchestrator acts as squad lead; multi-level tech/QA/research leads not implemented.
-3. **IRC channels UI** — message `channel` field exists; channel rooms not exposed.
+3. **IRC channels UI** — durable channel messages and a workspace channel index ship; room/subscription UI is still not exposed.
 4. **Context hierarchy depth** — workspace/task refs work; full global→session hierarchy not surfaced.
 5. **Event-sourced projection rebuild** — events append-only; rebuild-from-events not implemented.
 6. **Playwright hard dependency** — optional; browser tool degrades honestly.
