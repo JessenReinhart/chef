@@ -1,1 +1,45 @@
-placeholder
+{
+  "name": "chef",
+  "version": "0.1.0",
+  "description": "AI Engineering OS runtime prototype",
+  "type": "module",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc",
+    "test": "npm run build && node --test dist/tests/*.js",
+    "dev": "tsx src/main.ts",
+    "web:dev": "vite --config web/vite.config.ts",
+    "web:build": "vite build --config web/vite.config.ts",
+    "start": "node dist/main.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/xterm": "^5.5.0",
+    "better-sqlite3": "^12.2.0",
+    "cors": "^2.8.5",
+    "drizzle-orm": "^0.44.5",
+    "express": "^5.1.0",
+    "node-pty": "^1.0.0",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
+    "reactflow": "^11.11.4",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.3",
+    "@types/node": "^24.3.0",
+    "@types/react": "^19.1.10",
+    "@types/react-dom": "^19.1.7",
+    "@types/ws": "^8.18.1",
+    "@vitejs/plugin-react": "^5.0.2",
+    "drizzle-kit": "^0.31.4",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2",
+    "vite": "^7.1.3"
+  }
+}
