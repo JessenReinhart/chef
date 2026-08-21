@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import "./living-artifact.css";
 
@@ -111,7 +111,7 @@ export function LivingArtifactFeature() {
         <article
           key={`${artifact.id}:${artifact.version}`}
           className="chef-result-card"
-          style={{ "--chef-result-index": index } as React.CSSProperties}
+          style={{ "--chef-result-index": index } as CSSProperties}
         >
           <div className="chef-result-card__icon" aria-hidden="true">{artifactIcon(artifact.type)}</div>
           <div className="chef-result-card__body">
@@ -137,10 +137,7 @@ export function LivingArtifactFeature() {
         <button
           className="chef-result-cluster__more"
           type="button"
-          onClick={() => {
-            localStorage.setItem("chef:view-mode", "power");
-            window.dispatchEvent(new StorageEvent("storage", { key: "chef:view-mode", newValue: "power" }));
-          }}
+          onClick={() => localStorage.setItem("chef:view-mode", "power")}
         >
           +{artifacts.length - MAX_VISIBLE_RESULTS} more · Advanced ↗
         </button>
