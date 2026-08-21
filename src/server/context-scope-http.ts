@@ -50,9 +50,60 @@ export function createContextScopeServer(runtime: ChefRuntime, baseServer: Serve
     runtime.repository.syncContextZoneRefs(runtime.workspaceId, assignments);
   };
 
+  const removeNodeFromScopes = (nodeId: string) => {
+    for (const scope of runtime.repository.listContextZones(runtime.workspaceId)) {
+      if (!scope.memberNodeIds.includes(nodeId)) continue;
+      runtime.repository.upsertContextZone({
+        id: scope.id,
+        workspaceId: scope.workspaceId,
+        name: scope.name,
+        bounds: scope.bounds,
+        contextRefs: scope.contextRefs,
+        memberNodeIds: scope.memberNodeIds.filter((candidate) => candidate !== nodeId),
+        policy: scope.policy,
+      });
+    }
+  };
+
   return createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
     try {
+      // A visual node deletion is different from erasing history. Cancel any
+      // live execution, remove the durable canvas object and its edges, and
+      // remove stale Shared Context membership while retaining the Task/Event
+      // records for audit/history.
+      const nodeDeleteMatch = url.pathname.match(/^\/api\/nodes\/([^/]+)$/);
+      if (nodeDeleteMatch && req.method === "DELETE") {
+        const taskId = nodeDeleteMatch[1];
+        const task = runtime.repository.getTask(taskId);
+        if (!task) {
+          sendJson(res, 404, { error: `node not found: ${taskId}` });
+          return;
+        }
+
+        if (!["completed", "failed", "cancelled"].includes(task.status)) {
+          try {
+            await runtime.cancelTask(taskId);
+          } catch (error) {
+            const latest = runtime.repository.getTask(taskId);
+            if (!latest || !["completed", "failed", "cancelled"].includes(latest.status)) throw error;
+          }
+        }
+
+        const canvasNode = nodes().find((node) => node.id === taskId || node.taskId === taskId);
+        if (canvasNode) {
+          const result = await runtime.patchCanvas(runtime.workspaceId, { deleteNodes: [canvasNode.id] });
+          if (!result.ok) {
+            sendJson(res, 422, result);
+            return;
+          }
+          removeNodeFromScopes(canvasNode.id);
+        }
+        await syncContextRefs();
+        sendJson(res, 200, { ok: true });
+        return;
+      }
+
       if (req.method === "GET" && url.pathname === "/api/context-scopes") {
         sendJson(res, 200, { ok: true, data: runtime.repository.listContextZones(runtime.workspaceId) });
         return;
