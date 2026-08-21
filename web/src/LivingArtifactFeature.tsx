@@ -154,7 +154,7 @@ export function LivingArtifactFeature() {
           aria-controls="chef-artifact-shelf"
           onClick={() => setShelfOpen((open) => !open)}
         >
-          {shelfOpen ? "Hide result shelf" : `View all ${artifacts.length} results`}
+          {shelfOpen ? "Hide result shelf" : "Open result shelf"}
         </button>
       )}
 
