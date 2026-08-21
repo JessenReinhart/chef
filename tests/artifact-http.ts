@@ -1,12 +1,14 @@
 import { strict as assert } from "node:assert";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { pathToFileURL } from "node:url";
 import { createChef } from "../src/main.ts";
 import { createHttpServer } from "../src/server/http-server.ts";
 import { createArtifactServer } from "../src/server/artifact-http.ts";
 
 const dir = await mkdtemp(join(tmpdir(), "chef-artifact-http-"));
+const outsideDir = await mkdtemp(join(tmpdir(), "chef-artifact-http-outside-"));
 const runtime = createChef({ dbPath: join(dir, "chef.sqlite"), projectDir: dir });
 const server = createArtifactServer(runtime, createHttpServer(runtime));
 
@@ -15,6 +17,12 @@ const request = async (path: string) => {
   assert.ok(address && typeof address === "object");
   const response = await fetch(`http://127.0.0.1:${address.port}${path}`);
   return { status: response.status, json: await response.json() as { ok?: boolean; data?: unknown; error?: string } };
+};
+
+const requestRaw = async (path: string) => {
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  return fetch(`http://127.0.0.1:${address.port}${path}`);
 };
 
 try {
@@ -33,18 +41,20 @@ try {
     taskIds: ["task-other"],
   });
 
+  const reportPath = join(dir, "monthly.pdf");
+  await writeFile(reportPath, "report-bytes");
   const report = runtime.repository.insertArtifact({
     id: "artifact-report",
     workspaceId: runtime.workspaceId,
     type: "document",
-    name: "Monthly report",
-    uri: "file:///reports/monthly.pdf",
+    name: "Monthly report.pdf",
+    uri: pathToFileURL(reportPath).href,
     version: 2,
     createdBy: "analyst",
     taskId: "task-report",
-    metadata: { format: "pdf", reviewed: true },
+    metadata: { format: "pdf", reviewed: true, mimeType: "application/pdf" },
   });
-  runtime.repository.insertArtifact({
+  const result = runtime.repository.insertArtifact({
     id: "artifact-result",
     workspaceId: runtime.workspaceId,
     type: "result",
@@ -72,6 +82,27 @@ try {
     createdBy: "user",
   });
 
+  const outsidePath = join(outsideDir, "outside.txt");
+  await writeFile(outsidePath, "outside-project");
+  const outsideArtifact = runtime.repository.insertArtifact({
+    id: "artifact-outside",
+    workspaceId: runtime.workspaceId,
+    type: "file",
+    name: "Outside project",
+    uri: pathToFileURL(outsidePath).href,
+    createdBy: "agent",
+    metadata: {},
+  });
+  const missingArtifact = runtime.repository.insertArtifact({
+    id: "artifact-missing-file",
+    workspaceId: runtime.workspaceId,
+    type: "file",
+    name: "Missing file",
+    uri: pathToFileURL(join(dir, "missing.txt")).href,
+    createdBy: "agent",
+    metadata: {},
+  });
+
   const otherWorkspace = runtime.repository.createWorkspace({ name: "Other workspace" });
   const foreignMission = runtime.repository.insertMission({
     id: "foreign-mission",
@@ -84,7 +115,7 @@ try {
     workspaceId: otherWorkspace.id,
     type: "document",
     name: "Other report",
-    uri: "file:///other/report.pdf",
+    uri: pathToFileURL(reportPath).href,
     createdBy: "analyst",
   });
 
@@ -93,7 +124,14 @@ try {
   const list = await request("/api/artifacts");
   assert.equal(list.status, 200);
   const artifacts = list.json.data as Array<{ id: string }>;
-  assert.deepEqual(artifacts.map((artifact) => artifact.id), ["artifact-report", "artifact-result", "artifact-other-mission", "artifact-unscoped"]);
+  assert.deepEqual(artifacts.map((artifact) => artifact.id), [
+    "artifact-report",
+    "artifact-result",
+    "artifact-other-mission",
+    "artifact-unscoped",
+    "artifact-outside",
+    "artifact-missing-file",
+  ]);
 
   const documents = await request("/api/artifacts?type=document&createdBy=analyst");
   assert.equal(documents.status, 200);
@@ -123,6 +161,30 @@ try {
   assert.equal(detail.status, 200);
   assert.deepEqual(detail.json.data, JSON.parse(JSON.stringify(report)));
 
+  const download = await requestRaw(`/api/artifacts/${encodeURIComponent(report.id)}/download`);
+  assert.equal(download.status, 200);
+  assert.equal(download.headers.get("content-type"), "application/pdf");
+  assert.equal(download.headers.get("x-chef-artifact-id"), report.id);
+  assert.equal(download.headers.get("x-chef-artifact-version"), "2");
+  assert.match(download.headers.get("content-disposition") ?? "", /Monthly%20report.pdf/);
+  assert.equal(await download.text(), "report-bytes");
+
+  const unsupportedDownload = await request(`/api/artifacts/${encodeURIComponent(result.id)}/download`);
+  assert.equal(unsupportedDownload.status, 409);
+  assert.match(unsupportedDownload.json.error ?? "", /not backed by a downloadable file/);
+
+  const outsideDownload = await request(`/api/artifacts/${encodeURIComponent(outsideArtifact.id)}/download`);
+  assert.equal(outsideDownload.status, 403);
+  assert.match(outsideDownload.json.error ?? "", /outside the project root/);
+
+  const missingFileDownload = await request(`/api/artifacts/${encodeURIComponent(missingArtifact.id)}/download`);
+  assert.equal(missingFileDownload.status, 404);
+  assert.match(missingFileDownload.json.error ?? "", /file not found/);
+
+  const foreignDownload = await request("/api/artifacts/artifact-private-to-other-workspace/download");
+  assert.equal(foreignDownload.status, 404);
+  assert.match(foreignDownload.json.error ?? "", /artifact not found/);
+
   const missing = await request("/api/artifacts/not-here");
   assert.equal(missing.status, 404);
   assert.match(missing.json.error ?? "", /artifact not found/);
@@ -141,4 +203,5 @@ try {
   if (server.listening) await new Promise<void>((resolve) => server.close(() => resolve()));
   await runtime.close();
   await rm(dir, { recursive: true, force: true });
+  await rm(outsideDir, { recursive: true, force: true });
 }
