@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { api } from "./api";
-import type { ChatMessage, LlmStatus, ViewMode } from "./types";
+import type { ChatMessage, LlmStatus, UiRuntimeEvent, ViewMode } from "./types";
+import { summarizeMissionProgress, summarizeMissionProgressEvent, type MissionProgressItem } from "./missionProgress";
 
 interface ChatPanelProps {
   onPlanProposed: (taskIds: string[]) => void;
@@ -41,6 +42,7 @@ export function ChatPanel({ onPlanProposed, mode }: ChatPanelProps) {
   const [streaming, setStreaming] = useState(false);
   const [lastEventSeq, setLastEventSeq] = useState<number | undefined>(undefined);
   const [llmStatus, setLlmStatus] = useState<LlmStatus | null>(null);
+  const [progress, setProgress] = useState<MissionProgressItem[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const onPlanProposedRef = useRef(onPlanProposed);
@@ -69,6 +71,38 @@ export function ChatPanel({ onPlanProposed, mode }: ChatPanelProps) {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  // Seed the human-readable Mission digest from durable runtime history.
+  useEffect(() => {
+    let cancelled = false;
+    api.stateRaw()
+      .then((snapshot) => {
+        if (!cancelled) setProgress(summarizeMissionProgress(snapshot.events));
+      })
+      .catch(() => {
+        // Progress digest is additive; chat remains usable if state is unavailable.
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Keep the digest live from authoritative runtime events without exposing raw-log noise.
+  useEffect(() => {
+    const es = new EventSource("/api/events?types=mission.*,orchestrator.*,approval.*,node.failed");
+    es.onmessage = (ev) => {
+      try {
+        const event = JSON.parse(ev.data) as UiRuntimeEvent;
+        const item = summarizeMissionProgressEvent(event);
+        if (!item) return;
+        setProgress((current) => {
+          if (current.some((candidate) => candidate.id === item.id)) return current;
+          return [...current, item].slice(-5);
+        });
+      } catch {
+        // Ignore malformed event frames; EventSource reconnect remains active.
+      }
+    };
+    return () => es.close();
   }, []);
 
   // Initial history load — dedupes messages already present.
@@ -269,6 +303,33 @@ export function ChatPanel({ onPlanProposed, mode }: ChatPanelProps) {
           </span>
         )}
       </div>
+
+      {progress.length > 0 && (
+        <div className="mx-3 mt-3 shrink-0 rounded-lg border border-[#30363d] bg-[#010409]/60 p-2.5" aria-label="Mission progress">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#8b949e]">Mission progress</span>
+            <span className="text-[10px] text-[#6e7681]">latest {progress.length}</span>
+          </div>
+          <div className="space-y-1.5">
+            {progress.map((item) => (
+              <div key={item.id} className="flex items-start gap-2 text-[11px] leading-4">
+                <span
+                  className={`mt-1 h-1.5 w-1.5 shrink-0 rounded-full ${
+                    item.tone === "success" ? "bg-green-400"
+                    : item.tone === "attention" ? "bg-amber-400"
+                    : item.tone === "active" ? "bg-cyan-400"
+                    : "bg-[#6e7681]"
+                  }`}
+                />
+                <span className="min-w-0 flex-1 text-[#c9d1d9]">{item.text}</span>
+                {mode === "power" && (
+                  <code className="max-w-28 shrink-0 truncate text-[9px] text-[#6e7681]" title={item.eventType}>{item.eventType}</code>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-3 space-y-4" ref={messagesEndRef}>
