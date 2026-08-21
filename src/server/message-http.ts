@@ -17,6 +17,20 @@ export function createMessageServer(runtime: ChefRuntime, baseServer: Server): S
   return createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
     try {
+      if (req.method === "GET" && url.pathname === "/api/messages/channels") {
+        const counts = new Map<string, number>();
+        for (const message of runtime.repository.listMessages(runtime.workspaceId)) {
+          const channel = message.channel?.trim();
+          if (!channel) continue;
+          counts.set(channel, (counts.get(channel) ?? 0) + 1);
+        }
+        const data = [...counts.entries()]
+          .map(([channel, messageCount]) => ({ channel, messageCount }))
+          .sort((a, b) => a.channel.localeCompare(b.channel));
+        sendJson(res, 200, { ok: true, data });
+        return;
+      }
+
       if (req.method === "GET" && url.pathname === "/api/messages") {
         const channel = url.searchParams.get("channel") ?? undefined;
         const agentId = url.searchParams.get("agentId") ?? undefined;
