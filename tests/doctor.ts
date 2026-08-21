@@ -23,6 +23,7 @@ assert.equal(ready.checks.find((check) => check.id === "node")?.status, "pass");
 assert.equal(ready.checks.find((check) => check.id === "git")?.status, "pass");
 assert.equal(ready.checks.find((check) => check.id === "claude-code")?.status, "pass");
 assert.equal(ready.checks.find((check) => check.id === "codex")?.status, "pass");
+assert.equal(ready.checks.find((check) => check.id === "aider")?.status, "warn");
 assert.equal(ready.checks.find((check) => check.id === "pi")?.status, "warn");
 assert.match(formatDoctor(ready), /Environment is ready for Chef\./);
 
