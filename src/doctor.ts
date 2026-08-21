@@ -33,6 +33,7 @@ const OPTIONAL_BINARIES = [
   { id: "omp", label: "OMP", names: ["omp"] },
   { id: "freebuff", label: "Freebuff", names: ["freebuff"] },
   { id: "codex", label: "Codex CLI", names: ["codex"] },
+  { id: "aider", label: "Aider", names: ["aider"] },
 ] as const;
 
 function executableNames(name: string, platform: NodeJS.Platform): string[] {
