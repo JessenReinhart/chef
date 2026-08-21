@@ -17,17 +17,27 @@ type ChannelMessage = {
   timestamp: number;
 };
 
+const MAX_PREVIEW = 1_200;
+
+function truncate(text: string): string {
+  return text.length > MAX_PREVIEW ? `${text.slice(0, MAX_PREVIEW)}…` : text;
+}
+
+function roomLabel(channel: string): string {
+  return channel.startsWith("#") ? channel : `# ${channel}`;
+}
+
 function messageText(payload: unknown): string {
-  if (typeof payload === "string") return payload;
+  if (typeof payload === "string") return truncate(payload);
   if (payload && typeof payload === "object" && !Array.isArray(payload)) {
     const record = payload as Record<string, unknown>;
     for (const key of ["text", "message", "content", "summary"]) {
-      if (typeof record[key] === "string" && record[key].trim()) return record[key] as string;
+      if (typeof record[key] === "string" && record[key].trim()) return truncate(record[key] as string);
     }
   }
   try {
     const text = JSON.stringify(payload);
-    return text === undefined ? "No message body" : text;
+    return text === undefined ? "No message body" : truncate(text);
   } catch {
     return "Message payload could not be displayed";
   }
@@ -74,9 +84,9 @@ export function ChannelRoomsFeature() {
 
   const loadMessages = useCallback(async (channel: string) => {
     const response = await fetch(`/api/messages?channel=${encodeURIComponent(channel)}`);
-    if (!response.ok) throw new Error(`Could not load #${channel} (HTTP ${response.status})`);
+    if (!response.ok) throw new Error(`Could not load ${roomLabel(channel)} (HTTP ${response.status})`);
     const body = (await response.json()) as { ok: boolean; data?: ChannelMessage[]; error?: string };
-    if (!body.ok) throw new Error(body.error ?? `Could not load #${channel}`);
+    if (!body.ok) throw new Error(body.error ?? `Could not load ${roomLabel(channel)}`);
     setMessages(body.data ?? []);
   }, []);
 
@@ -113,7 +123,7 @@ export function ChannelRoomsFeature() {
         await loadMessages(selectedChannel);
         if (!cancelled) setError(null);
       } catch (reason) {
-        if (!cancelled) setError(reason instanceof Error ? reason.message : `Could not load #${selectedChannel}`);
+        if (!cancelled) setError(reason instanceof Error ? reason.message : `Could not load ${roomLabel(selectedChannel)}`);
       }
     };
     void refresh();
@@ -166,7 +176,7 @@ export function ChannelRoomsFeature() {
                   className={selectedChannel === item.channel ? "is-active" : ""}
                   onClick={() => setSelectedChannel(item.channel)}
                 >
-                  <span># {item.channel}</span>
+                  <span>{roomLabel(item.channel)}</span>
                   <i>{item.messageCount}</i>
                 </button>
               ))}
@@ -180,7 +190,7 @@ export function ChannelRoomsFeature() {
               {selectedChannel ? (
                 <>
                   <div className="chef-rooms__conversation-title">
-                    <strong># {selectedChannel}</strong>
+                    <strong>{roomLabel(selectedChannel)}</strong>
                     <span>{orderedMessages.length} message{orderedMessages.length === 1 ? "" : "s"}</span>
                   </div>
                   <div className="chef-rooms__messages">
