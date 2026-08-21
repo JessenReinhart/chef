@@ -1,5 +1,6 @@
 /** Detects scheduler-compatible specialized CLI adapters. */
 import { ClaudeCodeHarness } from "../harness/claude-code.ts";
+import { CodexHarness } from "../harness/codex.ts";
 import { PiHarness } from "../harness/pi.ts";
 import { OmpHarness } from "../harness/omp.ts";
 import { FreebuffHarness } from "../harness/freebuff.ts";
@@ -28,6 +29,7 @@ export class HarnessRegistry {
     if (options.includeDefaults === false) return;
     const runtime = { workspaceId: options.workspaceId, cwd: options.cwd };
     this.register("claude-code", "Claude Code", () => new ClaudeCodeHarness("claude", runtime));
+    this.register("codex", "Codex", () => new CodexHarness("codex", runtime));
     this.register("pi", "Pi", () => new PiHarness("pi", runtime));
     this.register("omp", "OMP", () => new OmpHarness("omp", runtime));
     this.register("freebuff", "Freebuff", () => new FreebuffHarness("freebuff", runtime));
