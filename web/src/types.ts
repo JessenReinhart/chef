@@ -42,6 +42,7 @@ export interface UiMission {
   goal: string;
   status: Exclude<MissionStatus, "idle">;
   taskIds: string[];
+  metadata?: Record<string, unknown>;
   createdAt: number;
   updatedAt: number;
   completedAt?: number;
