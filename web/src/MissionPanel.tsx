@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { MissionTimelineFeature } from "./MissionTimelineFeature";
 import type { UiMission, UiTask, ViewMode } from "./types";
 
 type ApprovalSummary = {
@@ -190,6 +191,8 @@ export function MissionPanel({
             </div>
           </div>
         </div>
+
+        <MissionTimelineFeature missionId={mission.id} mode={mode} />
       </div>
     </section>
   );
