@@ -7,6 +7,7 @@ type RequestHandler = (req: IncomingMessage, res: ServerResponse) => void | Prom
 type MemoryCategory = "decisions" | "requirements" | "knownFacts" | "conventions" | "lessons" | "openQuestions" | "reusableProcedures";
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8" } as const;
 const DECISION_STATUSES: DecisionStatus[] = ["proposed", "accepted", "rejected"];
+const MAX_REQUEST_BODY_BYTES = 64 * 1024;
 const MAX_TYPE_LENGTH = 80;
 const MAX_SUMMARY_LENGTH = 2_000;
 const MEMORY_CATEGORIES: MemoryCategory[] = [
@@ -26,7 +27,13 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
 
 async function readJsonBody(req: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
-  for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  let totalBytes = 0;
+  for await (const chunk of req) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    totalBytes += buffer.length;
+    if (totalBytes > MAX_REQUEST_BODY_BYTES) throw new Error("request body too large");
+    chunks.push(buffer);
+  }
   if (chunks.length === 0) return {};
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
@@ -79,8 +86,12 @@ export function createDecisionServer(runtime: ChefRuntime, baseServer: Server): 
         let body: unknown;
         try {
           body = await readJsonBody(req);
-        } catch {
-          sendJson(res, 400, { error: "request body must be valid JSON" });
+        } catch (error) {
+          if (error instanceof Error && error.message === "request body too large") {
+            sendJson(res, 413, { error: `request body must be at most ${MAX_REQUEST_BODY_BYTES} bytes` });
+          } else {
+            sendJson(res, 400, { error: "request body must be valid JSON" });
+          }
           return;
         }
         if (!body || typeof body !== "object" || Array.isArray(body)) {
