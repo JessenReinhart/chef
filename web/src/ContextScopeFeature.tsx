@@ -6,16 +6,31 @@ import { describeContextReference, type ContextProvenanceSnapshot } from "./cont
 
 type Bounds = { x: number; y: number; width: number; height: number };
 type CanvasNode = { id: string; label: string; position: { x: number; y: number } };
+type CanvasViewport = { x: number; y: number; zoom: number };
+type ScopeDrag = { scopeId: string; bounds: Bounds };
 
 const VIEW_KEY = "chef:canvas:view";
-const readViewport = () => {
+const readViewport = (): CanvasViewport => {
   try {
     const raw = localStorage.getItem(VIEW_KEY);
-    return raw ? JSON.parse(raw) as { x: number; y: number; zoom: number } : { x: 0, y: 0, zoom: 1 };
+    return raw ? JSON.parse(raw) as CanvasViewport : { x: 0, y: 0, zoom: 1 };
   } catch {
     return { x: 0, y: 0, zoom: 1 };
   }
 };
+
+function readViewportFromDom(host: HTMLElement): CanvasViewport | null {
+  const viewport = host.querySelector<HTMLElement>(".react-flow__viewport");
+  if (!viewport) return null;
+  const transform = getComputedStyle(viewport).transform;
+  if (!transform || transform === "none") return { x: 0, y: 0, zoom: 1 };
+  try {
+    const matrix = new DOMMatrixReadOnly(transform);
+    return { x: matrix.e, y: matrix.f, zoom: matrix.a || 1 };
+  } catch {
+    return null;
+  }
+}
 
 export function ContextScopeFeature() {
   const [host, setHost] = useState<HTMLElement | null>(null);
@@ -25,10 +40,19 @@ export function ContextScopeFeature() {
   const [viewport, setViewport] = useState(readViewport);
   const [drawing, setDrawing] = useState(false);
   const [draft, setDraft] = useState<Bounds | null>(null);
+  const [draggingScope, setDraggingScope] = useState<ScopeDrag | null>(null);
   const [inspectedScopeId, setInspectedScopeId] = useState<string | null>(null);
   const [scopeAction, setScopeAction] = useState<string | null>(null);
   const [scopeError, setScopeError] = useState<string | null>(null);
   const startRef = useRef<{ x: number; y: number } | null>(null);
+  const scopeDragRef = useRef<{
+    scope: ContextZone;
+    pointerId: number;
+    startClientX: number;
+    startClientY: number;
+    origin: Bounds;
+    current: Bounds;
+  } | null>(null);
 
   useEffect(() => {
     const find = () => setHost(document.querySelector(".react-flow") as HTMLElement | null);
@@ -37,6 +61,37 @@ export function ContextScopeFeature() {
     observer.observe(document.body, { childList: true, subtree: true });
     return () => observer.disconnect();
   }, []);
+
+  // React Flow keeps its authoritative viewport transform on the viewport DOM
+  // element while the user pans or zooms. Observe that transform directly so
+  // Shared Context outlines move in the same frame instead of waiting for the
+  // persisted localStorage viewport written at onMoveEnd.
+  useEffect(() => {
+    if (!host) return;
+    const viewportElement = host.querySelector<HTMLElement>(".react-flow__viewport");
+    if (!viewportElement) return;
+
+    let frame = 0;
+    const sync = () => {
+      const next = readViewportFromDom(host);
+      if (next) setViewport(next);
+    };
+    const scheduleSync = () => {
+      if (frame) return;
+      frame = window.requestAnimationFrame(() => {
+        frame = 0;
+        sync();
+      });
+    };
+
+    sync();
+    const observer = new MutationObserver(scheduleSync);
+    observer.observe(viewportElement, { attributes: true, attributeFilter: ["style"] });
+    return () => {
+      observer.disconnect();
+      if (frame) window.cancelAnimationFrame(frame);
+    };
+  }, [host]);
 
   const refresh = useCallback(async () => {
     try {
@@ -57,10 +112,7 @@ export function ContextScopeFeature() {
 
   useEffect(() => {
     void refresh();
-    const timer = window.setInterval(() => {
-      setViewport(readViewport());
-      void refresh();
-    }, 1500);
+    const timer = window.setInterval(() => void refresh(), 1500);
     return () => window.clearInterval(timer);
   }, [refresh]);
 
@@ -69,13 +121,17 @@ export function ContextScopeFeature() {
     y: (p.y - viewport.y) / viewport.zoom,
   }), [viewport]);
 
-  const rects = useMemo(() => scopes.map((scope) => ({
-    scope,
-    x: scope.bounds.x * viewport.zoom + viewport.x,
-    y: scope.bounds.y * viewport.zoom + viewport.y,
-    width: scope.bounds.width * viewport.zoom,
-    height: scope.bounds.height * viewport.zoom,
-  })), [scopes, viewport]);
+  const rects = useMemo(() => scopes.map((scope) => {
+    const bounds = draggingScope?.scopeId === scope.id ? draggingScope.bounds : scope.bounds;
+    return {
+      scope,
+      bounds,
+      x: bounds.x * viewport.zoom + viewport.x,
+      y: bounds.y * viewport.zoom + viewport.y,
+      width: bounds.width * viewport.zoom,
+      height: bounds.height * viewport.zoom,
+    };
+  }), [scopes, viewport, draggingScope]);
 
   const nodeLabels = useMemo(() => new Map(nodes.map((node) => [node.id, node.label])), [nodes]);
 
@@ -150,13 +206,72 @@ export function ContextScopeFeature() {
     }
   };
 
+  const beginScopeDrag = (event: React.PointerEvent<HTMLDivElement>, scope: ContextZone) => {
+    if (event.button !== 0) return;
+    const target = event.target as HTMLElement;
+    if (target.closest("button, input, textarea, select, a, [role='button']")) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    const origin = { ...scope.bounds };
+    scopeDragRef.current = {
+      scope,
+      pointerId: event.pointerId,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      origin,
+      current: origin,
+    };
+    setDraggingScope({ scopeId: scope.id, bounds: origin });
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const moveScope = (event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = scopeDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const next = {
+      ...drag.origin,
+      x: drag.origin.x + (event.clientX - drag.startClientX) / viewport.zoom,
+      y: drag.origin.y + (event.clientY - drag.startClientY) / viewport.zoom,
+    };
+    drag.current = next;
+    setDraggingScope({ scopeId: drag.scope.id, bounds: next });
+  };
+
+  const finishScopeDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = scopeDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    event.stopPropagation();
+    scopeDragRef.current = null;
+    setDraggingScope(null);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    void updateScope(drag.scope, { bounds: drag.current }, "move");
+  };
+
+  const cancelScopeDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = scopeDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    scopeDragRef.current = null;
+    setDraggingScope(null);
+  };
+
   if (!host) return null;
 
   return createPortal(
     <div className="absolute inset-0 z-[6] pointer-events-none" style={{ overflow: "visible" }}>
       {rects.map(({ scope, x, y, width, height }) => (
-        <div key={scope.id} className="absolute rounded-xl border-2 border-dashed border-cyan-500/50 bg-cyan-500/5 pointer-events-auto" style={{ left: x, top: y, width, height }}>
-          <div className="absolute -top-6 left-2 flex items-center gap-2 rounded-t-md bg-[#0d1117]/90 px-2 py-1 text-[10px] text-cyan-300">
+        <div key={scope.id} className="absolute rounded-xl border-2 border-dashed border-cyan-500/50 bg-cyan-500/5 pointer-events-none" style={{ left: x, top: y, width, height }}>
+          <div
+            className="absolute -top-6 left-2 flex cursor-move select-none items-center gap-2 rounded-t-md bg-[#0d1117]/90 px-2 py-1 text-[10px] text-cyan-300 pointer-events-auto"
+            onPointerDown={(event) => beginScopeDrag(event, scope)}
+            onPointerMove={moveScope}
+            onPointerUp={finishScopeDrag}
+            onPointerCancel={cancelScopeDrag}
+            title="Drag to move shared context"
+          >
             <span>◈</span>
             <button onClick={() => { setScopeError(null); setInspectedScopeId((current) => current === scope.id ? null : scope.id); }} title="Inspect shared context">
               {scope.name}
@@ -165,7 +280,7 @@ export function ContextScopeFeature() {
             <button className="text-red-400 hover:text-red-300" onClick={() => void remove(scope.id)}>×</button>
           </div>
           {inspectedScopeId === scope.id && (
-            <div className="context-zone-members w-[320px] max-h-[420px] overflow-y-auto space-y-3">
+            <div className="context-zone-members pointer-events-auto w-[320px] max-h-[420px] overflow-y-auto space-y-3">
               <div>
                 <strong>Shared Context</strong>
                 <small className="block mt-1">References here are durable and are injected into pending or assigned member tasks before dispatch.</small>
