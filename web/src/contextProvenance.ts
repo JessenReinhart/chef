@@ -1,10 +1,36 @@
-import type { Artifact, ContextReference, Decision, RuntimeEvent, Task } from "../../src/core/types.ts";
+export interface ContextReferenceLike {
+  type: string;
+  id: string;
+  relevance?: number;
+}
 
 export interface ContextProvenanceSnapshot {
-  artifacts: Artifact[];
-  decisions: Decision[];
-  events: RuntimeEvent[];
-  tasks: Task[];
+  artifacts: Array<{
+    id: string;
+    name: string;
+    type: string;
+    createdBy: string;
+    version: number;
+  }>;
+  decisions: Array<{
+    id: string;
+    summary: string;
+    type: string;
+    status: string;
+    madeBy: string;
+  }>;
+  events: Array<{
+    id: string;
+    seq: number;
+    type: string;
+    source: { type: string; id: string };
+  }>;
+  tasks: Array<{
+    id: string;
+    title: string;
+    status: string;
+    assignedTo?: string;
+  }>;
 }
 
 export interface ContextProvenanceDescription {
@@ -15,7 +41,7 @@ export interface ContextProvenanceDescription {
 }
 
 export function describeContextReference(
-  ref: ContextReference,
+  ref: ContextReferenceLike,
   snapshot: ContextProvenanceSnapshot,
 ): ContextProvenanceDescription {
   const base = { relevance: ref.relevance };
@@ -64,9 +90,9 @@ export function describeContextReference(
     };
   }
 
-  // File and message references are valid runtime context types but are not
-  // represented in WorkspaceSnapshot today. Keep them inspectable without
-  // falsely calling them stale merely because this projection cannot resolve them.
+  // File and message references are valid context types but are not represented
+  // in the current UI snapshot. Keep them inspectable without falsely calling
+  // them stale merely because this projection cannot resolve them.
   return {
     ...base,
     label: ref.id,
