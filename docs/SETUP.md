@@ -26,6 +26,7 @@ Start the web workbench in another terminal:
 
 ```bash
 cd web
+npm install
 npm run dev
 ```
 
@@ -45,7 +46,11 @@ The project database is stored at:
 <project>/.chef/chef.sqlite
 ```
 
-Chef also keeps a machine-level list of recent project paths so that you can reopen a project quickly.
+Chef also keeps up to 10 recent project paths in:
+
+```text
+~/.chef/recent-projects.json
+```
 
 ## Configure the Orchestrator
 
@@ -88,16 +93,19 @@ CHEF_PROVIDER
 CHEF_MODEL
 CHEF_API_KEY
 CHEF_BASE_URL
+CHEF_TIMEOUT_MS
 ```
 
-Provider-specific API key variables can also satisfy the startup credential check:
+The provider adapter also reads these provider-specific API key variables:
 
 ```text
-OPENAI_API_KEY
 ANTHROPIC_API_KEY
+OPENAI_API_KEY
 ```
 
-If `CHEF_PROVIDER` and a supported API key variable are already present, Chef does not replace that configuration with the saved machine-level provider settings.
+If `CHEF_PROVIDER` and any recognized API key variable are already present before startup, Chef does not replace that configuration with the saved machine-level provider settings.
+
+If no direct provider is configured, the runtime uses its deterministic scripted decision provider.
 
 ## CLI-backed agents
 
@@ -116,7 +124,13 @@ A specialized CLI is considered available when Chef can detect its configured ex
 
 The CLI owns its own login, API keys, provider, model, and other configuration. For example, if Claude Code already works in a normal terminal, Chef can host that CLI without copying its credentials into the Orchestrator settings.
 
-The workbench **Agents** surface shows executable readiness. A `Ready` state does not mean that the third-party CLI authentication is valid.
+The runtime exposes readiness data at:
+
+```text
+GET /api/harnesses/readiness
+```
+
+A reported `available: true` value means that Chef found the executable. It does not mean that the third-party CLI authentication is valid.
 
 ## Recommended first run
 
@@ -125,9 +139,10 @@ For a CLI-first setup:
 1. Install and authenticate the CLI that you want to use, such as Claude Code or OMP.
 2. Start Chef.
 3. Open the target project.
-4. Check **Agents** and confirm that Chef detects the CLI executable.
-5. Use the generic terminal if a specialized harness is not available.
-6. Configure **AI** only if you also want the Chef Orchestrator to use a direct provider.
+4. Confirm that the CLI works in a normal terminal.
+5. Use `GET /api/harnesses/readiness` when you need to inspect Chef's executable detection result.
+6. Use the generic terminal if a specialized harness is not available.
+7. Configure **AI** only if you also want the Chef Orchestrator to use a direct provider.
 
 For a direct-provider setup:
 
