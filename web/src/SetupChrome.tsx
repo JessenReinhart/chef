@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
+import { HarnessReadinessPanel } from "./HarnessReadinessPanel";
 import { OrchestratorSettings } from "./OrchestratorSettings";
 import { ProjectSwitcher } from "./ProjectSwitcher";
 
 export function SetupChrome() {
   const [leftHost, setLeftHost] = useState<HTMLElement | null>(null);
   const [rightHost, setRightHost] = useState<HTMLElement | null>(null);
+  const [showHarnesses, setShowHarnesses] = useState(false);
   const [showAI, setShowAI] = useState(false);
 
   useEffect(() => {
@@ -24,7 +26,11 @@ export function SetupChrome() {
 
   return <>
     {leftHost && createPortal(<ProjectSwitcher />, leftHost)}
-    {rightHost && createPortal(<button onClick={() => setShowAI(true)} className="header-quiet-button">AI</button>, rightHost)}
+    {rightHost && createPortal(<>
+      <button onClick={() => setShowHarnesses(true)} className="header-quiet-button">Agents</button>
+      <button onClick={() => setShowAI(true)} className="header-quiet-button">AI</button>
+    </>, rightHost)}
+    {showHarnesses && <HarnessReadinessPanel onClose={() => setShowHarnesses(false)} />}
     {showAI && <OrchestratorSettings onClose={() => setShowAI(false)} />}
   </>;
 }
