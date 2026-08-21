@@ -6,6 +6,7 @@ import { createMissionPlanServer } from "./mission-plan-http.ts";
 import { createMessageServer } from "./message-http.ts";
 import { createArtifactLineageServer } from "./artifact-lineage-http.ts";
 import { createDecisionServer } from "./decision-http.ts";
+import { createHarnessReadinessServer } from "./harness-readiness-http.ts";
 import { createChef } from "../main.ts";
 import { mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -27,7 +28,8 @@ const timelineServer = createMissionTimelineServer(chef, artifactServer);
 const planServer = createMissionPlanServer(chef, timelineServer);
 const messageServer = createMessageServer(chef, planServer);
 const lineageServer = createArtifactLineageServer(chef, messageServer);
-const server = createDecisionServer(chef, lineageServer);
+const decisionServer = createDecisionServer(chef, lineageServer);
+const server = createHarnessReadinessServer(chef, decisionServer);
 server.listen(port, "127.0.0.1", () => {
   const address = server.address();
   const listeningPort = typeof address === "object" && address ? address.port : port;
@@ -42,6 +44,7 @@ server.listen(port, "127.0.0.1", () => {
   console.log(`  GET  /api/missions/:id/timeline — Mission event history`);
   console.log(`  GET  /api/missions/:id/plans — Mission plan history`);
   console.log(`  GET  /api/messages — structured collaboration messages`);
+  console.log(`  GET  /api/harnesses/readiness — detected CLI harness readiness`);
   console.log(`  POST /api/sessions/send      { sessionId, data }`);
   console.log(`  POST /api/sessions/interrupt { sessionId }`);
   console.log(`  POST /api/sessions/resize    { sessionId, cols, rows }`);
