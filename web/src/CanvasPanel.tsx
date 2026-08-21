@@ -24,10 +24,16 @@ function nodeColor(node: GraphNode): string {
   return "#30363d";
 }
 
-function edgeColor(edge: GraphEdge): string {
-  if (edge.kind === "approval") return "#9e6a03";
-  if (edge.kind === "data") return "#1f6feb";
-  return "#6e7681";
+const EDGE_VISUALS: Record<GraphEdge["kind"], { color: string; dash?: string; label: string }> = {
+  data: { color: "#1f6feb", label: "data" },
+  control: { color: "#6e7681", label: "dependency" },
+  conditional: { color: "#a371f7", dash: "8 4", label: "condition" },
+  error: { color: "#da3633", dash: "3 3", label: "error" },
+  approval: { color: "#9e6a03", dash: "5 3", label: "approval" },
+};
+
+function edgeVisual(edge: GraphEdge) {
+  return EDGE_VISUALS[edge.kind];
 }
 
 export function CanvasPanel({ refreshTick, onSelectNode, onDropNode }: CanvasPanelProps) {
@@ -140,6 +146,22 @@ export function CanvasPanel({ refreshTick, onSelectNode, onDropNode }: CanvasPan
         onPointerUp={onPointerUp}
         onPointerLeave={onPointerUp}
       >
+        <defs>
+          {(Object.entries(EDGE_VISUALS) as Array<[GraphEdge["kind"], (typeof EDGE_VISUALS)[GraphEdge["kind"]]]>).map(([kind, visual]) => (
+            <marker
+              key={kind}
+              id={`chef-edge-arrow-${kind}`}
+              viewBox="0 0 10 10"
+              refX="9"
+              refY="5"
+              markerWidth="6"
+              markerHeight="6"
+              orient="auto-start-reverse"
+            >
+              <path d="M 0 0 L 10 5 L 0 10 z" fill={visual.color} />
+            </marker>
+          ))}
+        </defs>
         <g transform={`translate(${offsetX}, ${offsetY}) scale(${effectiveScale})`}>
           <g transform={`translate(${-minX + pad}, ${-minY + pad})`}>
             {graph.edges.map((edge) => {
@@ -151,16 +173,45 @@ export function CanvasPanel({ refreshTick, onSelectNode, onDropNode }: CanvasPan
               const x2 = target.position.x + NODE_W / 2;
               const y2 = target.position.y;
               const mid = (y1 + y2) / 2;
+              const labelX = (x1 + x2) / 2;
+              const labelY = mid;
+              const visual = edgeVisual(edge);
+              const labelWidth = Math.max(42, visual.label.length * 6.5 + 14);
               return (
-                <path
-                  key={edge.id}
-                  className="wb-canvas__edge"
-                  d={`M ${x1} ${y1} C ${x1} ${mid}, ${x2} ${mid}, ${x2} ${y2}`}
-                  fill="none"
-                  stroke={edgeColor(edge)}
-                  strokeWidth={1.5}
-                  strokeDasharray={edge.kind === "approval" ? "5 3" : undefined}
-                />
+                <g key={edge.id} className={`wb-canvas__edge wb-canvas__edge--${edge.kind}`}>
+                  <path
+                    d={`M ${x1} ${y1} C ${x1} ${mid}, ${x2} ${mid}, ${x2} ${y2}`}
+                    fill="none"
+                    stroke={visual.color}
+                    strokeWidth={1.75}
+                    strokeDasharray={visual.dash}
+                    markerEnd={`url(#chef-edge-arrow-${edge.kind})`}
+                  />
+                  <rect
+                    x={labelX - labelWidth / 2}
+                    y={labelY - 9}
+                    width={labelWidth}
+                    height={18}
+                    rx={9}
+                    fill="var(--bg-primary)"
+                    stroke={visual.color}
+                    strokeWidth={0.75}
+                    opacity={0.96}
+                    pointerEvents="none"
+                  />
+                  <text
+                    x={labelX}
+                    y={labelY + 3.5}
+                    textAnchor="middle"
+                    fill={visual.color}
+                    fontSize={9}
+                    fontWeight={700}
+                    letterSpacing={0.2}
+                    pointerEvents="none"
+                  >
+                    {visual.label}
+                  </text>
+                </g>
               );
             })}
             {graph.nodes.map((node) => {
@@ -257,6 +308,7 @@ export function CanvasPanel({ refreshTick, onSelectNode, onDropNode }: CanvasPan
               const source = graph.nodes.find((n) => n.id === edge.source);
               const target = graph.nodes.find((n) => n.id === edge.target);
               if (!source || !target) return null;
+              const visual = edgeVisual(edge);
               return (
                 <line
                   key={edge.id}
@@ -264,8 +316,9 @@ export function CanvasPanel({ refreshTick, onSelectNode, onDropNode }: CanvasPan
                   y1={source.position.y + NODE_H / 2}
                   x2={target.position.x + NODE_W / 2}
                   y2={target.position.y + NODE_H / 2}
-                  stroke="#6e7681"
+                  stroke={visual.color}
                   strokeWidth={1}
+                  strokeDasharray={visual.dash}
                 />
               );
             })}
