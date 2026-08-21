@@ -9,7 +9,7 @@ const appSource = readFileSync(resolve("web/src/App.tsx"), "utf8");
 describe("execution console acceptance", () => {
   it("keeps the required runtime projection tabs", () => {
     for (const tab of ["timeline", "artifacts", "blockers", "events", "chat", "terminal"]) {
-      assert.match(consoleSource, new RegExp(`id: \\"${tab}\\"`));
+      assert.match(consoleSource, new RegExp(`id: "${tab}"`));
     }
   });
 
