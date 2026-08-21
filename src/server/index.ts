@@ -1,6 +1,7 @@
 import { createHttpServer } from "./http-server.ts";
 import { createContextScopeServer } from "./context-scope-http.ts";
 import { createArtifactServer } from "./artifact-http.ts";
+import { createMissionTimelineServer } from "./mission-timeline-http.ts";
 import { createChef } from "../main.ts";
 import { mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -17,7 +18,8 @@ if (!Number.isInteger(port) || port < 0 || port > 65_535) {
 await chef.start();
 const baseServer = createHttpServer(chef);
 const contextServer = createContextScopeServer(chef, baseServer);
-const server = createArtifactServer(chef, contextServer);
+const artifactServer = createArtifactServer(chef, contextServer);
+const server = createMissionTimelineServer(chef, artifactServer);
 server.listen(port, "127.0.0.1", () => {
   const address = server.address();
   const listeningPort = typeof address === "object" && address ? address.port : port;
@@ -27,6 +29,7 @@ server.listen(port, "127.0.0.1", () => {
   console.log(`  GET  /api/events   — live SSE event stream`);
   console.log(`  GET  /api/context-scopes — shared context scopes`);
   console.log(`  GET  /api/artifacts — durable artifact library`);
+  console.log(`  GET  /api/missions/:id/timeline — Mission event history`);
   console.log(`  POST /api/sessions/send      { sessionId, data }`);
   console.log(`  POST /api/sessions/interrupt { sessionId }`);
   console.log(`  POST /api/sessions/resize    { sessionId, cols, rows }`);
