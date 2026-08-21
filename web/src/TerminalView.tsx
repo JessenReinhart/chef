@@ -160,7 +160,7 @@ export function TerminalView({ sessionId }: TerminalViewProps) {
 
   return (
     <div
-      className="wb-terminal-view"
+      className="wb-terminal-view nodrag nopan nowheel"
       style={{ position: "relative", width: "100%", height: "100%", minHeight: 0 }}
     >
       <div ref={containerRef} style={{ width: "100%", height: "100%", minHeight: 0 }} />
