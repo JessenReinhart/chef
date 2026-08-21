@@ -1,4 +1,5 @@
 import type {
+  Artifact,
   CanvasNode,
   Mission,
   RuntimeEvent,
@@ -24,9 +25,18 @@ export interface AgentPresenceActivity {
   timestamp: number;
 }
 
+export interface AgentPresenceArtifact {
+  id: string;
+  name: string;
+  type: Artifact["type"];
+  version: number;
+  taskId?: string;
+  sessionId?: string;
+}
+
 /**
  * Read-only projection for the UI. The durable source of truth remains the
- * canvas node, task, mission, session, approval, and event records.
+ * canvas node, task, mission, session, approval, artifact, and event records.
  */
 export interface AgentPresence {
   nodeId: string;
@@ -43,6 +53,7 @@ export interface AgentPresence {
   sessionStatus?: Session["status"];
   needsAttention: boolean;
   lastActivity?: AgentPresenceActivity;
+  recentArtifact?: AgentPresenceArtifact;
   updatedAt: number;
 }
 
@@ -72,6 +83,25 @@ function latestRelevantEvent(
       || (session !== undefined && event.sessionId === session.id),
     )
     .sort((a, b) => b.seq - a.seq || b.timestamp - a.timestamp)[0];
+}
+
+function latestProducedArtifact(
+  snapshot: WorkspaceSnapshot,
+  node: CanvasNode,
+  task: Task | undefined,
+  session: Session | undefined,
+): Artifact | undefined {
+  for (let index = snapshot.artifacts.length - 1; index >= 0; index -= 1) {
+    const artifact = snapshot.artifacts[index];
+    if (
+      artifact.createdBy === node.id
+      || (task !== undefined && artifact.taskId === task.id)
+      || (session !== undefined && artifact.sessionId === session.id)
+    ) {
+      return artifact;
+    }
+  }
+  return undefined;
 }
 
 function deriveStatus(
@@ -134,6 +164,7 @@ export function buildAgentPresence(snapshot: WorkspaceSnapshot): AgentPresence[]
       const approvalPending = task?.approvalId !== undefined && pendingApprovalIds.has(task.approvalId);
       const status = deriveStatus(node, task, session, approvalPending);
       const event = latestRelevantEvent(snapshot, node, task, session);
+      const artifact = latestProducedArtifact(snapshot, node, task, session);
       const role = typeof node.config.role === "string" && node.config.role.trim().length > 0
         ? node.config.role.trim()
         : undefined;
@@ -154,6 +185,16 @@ export function buildAgentPresence(snapshot: WorkspaceSnapshot): AgentPresence[]
         ...(activeSession ? { currentSessionId: activeSession.id, sessionStatus: activeSession.status } : {}),
         needsAttention: ATTENTION_STATES.has(status),
         ...(event ? { lastActivity: { type: event.type, timestamp: event.timestamp } } : {}),
+        ...(artifact ? {
+          recentArtifact: {
+            id: artifact.id,
+            name: artifact.name,
+            type: artifact.type,
+            version: artifact.version,
+            ...(artifact.taskId ? { taskId: artifact.taskId } : {}),
+            ...(artifact.sessionId ? { sessionId: artifact.sessionId } : {}),
+          },
+        } : {}),
         updatedAt: Math.max(
           node.updatedAt,
           task?.updatedAt ?? 0,

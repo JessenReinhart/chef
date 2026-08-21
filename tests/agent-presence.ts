@@ -2,7 +2,7 @@
  * Agent Presence V1 acceptance coverage.
  *
  * Proves that durable agent identity survives independently of a live Session,
- * while task/session/approval/Mission records compose into one read-only
+ * while task/session/approval/Mission/artifact records compose into one read-only
  * presence projection for the UI.
  */
 import { strict as assert } from "node:assert";
@@ -41,6 +41,7 @@ try {
   assert.equal(alpha!.harnessId, "claude-code");
   assert.equal(alpha!.currentTaskId, undefined);
   assert.equal(alpha!.currentSessionId, undefined);
+  assert.equal(alpha!.recentArtifact, undefined);
   assert.equal(alpha!.needsAttention, false);
 
   const mission = chef.repository.insertMission({
@@ -91,6 +92,36 @@ try {
     taskId: task.id,
     sessionId: session.id,
   });
+  chef.repository.insertArtifact({
+    id: "presence-artifact-draft",
+    workspaceId,
+    type: "research",
+    name: "Checkout trace draft",
+    uri: "file:///checkout-trace-draft.md",
+    version: 1,
+    createdBy: "agent-alpha",
+    taskId: task.id,
+    sessionId: session.id,
+  });
+  chef.repository.insertArtifact({
+    id: "presence-artifact-final",
+    workspaceId,
+    type: "result",
+    name: "Checkout race finding",
+    uri: "file:///checkout-race-finding.md",
+    version: 2,
+    createdBy: "agent-alpha",
+    taskId: task.id,
+    sessionId: session.id,
+  });
+  chef.repository.insertArtifact({
+    id: "presence-artifact-unrelated",
+    workspaceId,
+    type: "document",
+    name: "Other agent output",
+    uri: "file:///other-agent-output.md",
+    createdBy: "agent-beta",
+  });
 
   presence = buildAgentPresence(await chef.inspectState());
   alpha = presence.find((item) => item.nodeId === "agent-alpha");
@@ -100,6 +131,14 @@ try {
   assert.equal(alpha?.missionGoal, mission.goal);
   assert.equal(alpha?.currentSessionId, session.id);
   assert.equal(alpha?.lastActivity?.type, "agent.working");
+  assert.deepEqual(alpha?.recentArtifact, {
+    id: "presence-artifact-final",
+    name: "Checkout race finding",
+    type: "result",
+    version: 2,
+    taskId: task.id,
+    sessionId: session.id,
+  }, "presence must show the newest durable output associated with the agent work");
 
   // Human approval has higher semantic priority than an underlying live
   // process: this is the state the human needs to see and act on.
@@ -118,7 +157,8 @@ try {
   assert.equal(alpha?.needsAttention, true);
 
   // Once work is terminal, the process may be historical but the agent
-  // remains a living workspace identity and returns to Idle.
+  // remains a living workspace identity and returns to Idle. The most recent
+  // produced artifact remains useful history for the persistent identity.
   chef.repository.resolveApproval(approval.id, "accepted", "human");
   chef.repository.updateTask(task.id, { status: "completed" });
   chef.repository.updateSession(session.id, { status: "completed", endedAt: Date.now(), exitCode: 0 });
@@ -127,6 +167,7 @@ try {
   assert.equal(alpha?.status, "idle");
   assert.equal(alpha?.currentTaskId, undefined, "completed task is history, not current responsibility");
   assert.equal(alpha?.currentSessionId, undefined, "completed session is history, not live presence");
+  assert.equal(alpha?.recentArtifact?.id, "presence-artifact-final");
   assert.ok(alpha, "agent identity must remain after its session ends");
 
   // HTTP is a projection over the same runtime state, not a second store.
@@ -135,13 +176,15 @@ try {
   const address = server.address() as AddressInfo;
   const response = await fetch(`http://127.0.0.1:${address.port}/api/agents/presence`);
   assert.equal(response.status, 200);
-  const body = (await response.json()) as { ok: boolean; data: Array<{ nodeId: string; status: string }> };
+  const body = (await response.json()) as { ok: boolean; data: Array<{ nodeId: string; status: string; recentArtifact?: { id: string } }> };
   assert.equal(body.ok, true);
-  assert.equal(body.data.find((item) => item.nodeId === "agent-alpha")?.status, "idle");
+  const httpAlpha = body.data.find((item) => item.nodeId === "agent-alpha");
+  assert.equal(httpAlpha?.status, "idle");
+  assert.equal(httpAlpha?.recentArtifact?.id, "presence-artifact-final");
   await new Promise<void>((resolve) => server.close(() => resolve()));
 
   await chef.close();
-  console.log("agent-presence: ok — durable identity composes runtime presence");
+  console.log("agent-presence: ok — durable identity composes runtime presence and recent output");
 } finally {
   try {
     await chef.close();
