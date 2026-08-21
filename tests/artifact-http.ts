@@ -18,6 +18,21 @@ const request = async (path: string) => {
 };
 
 try {
+  const mission = runtime.repository.insertMission({
+    id: "mission-monthly-close",
+    workspaceId: runtime.workspaceId,
+    goal: "Produce and verify the monthly close report",
+    status: "active",
+    taskIds: ["task-report", "task-verification"],
+  });
+  const otherMission = runtime.repository.insertMission({
+    id: "mission-other",
+    workspaceId: runtime.workspaceId,
+    goal: "Prepare a separate analysis",
+    status: "active",
+    taskIds: ["task-other"],
+  });
+
   const report = runtime.repository.insertArtifact({
     id: "artifact-report",
     workspaceId: runtime.workspaceId,
@@ -26,6 +41,7 @@ try {
     uri: "file:///reports/monthly.pdf",
     version: 2,
     createdBy: "analyst",
+    taskId: "task-report",
     metadata: { format: "pdf", reviewed: true },
   });
   runtime.repository.insertArtifact({
@@ -35,9 +51,34 @@ try {
     name: "Verification result",
     uri: "sideband://verification/result.json",
     createdBy: "verifier",
+    taskId: "task-verification",
     metadata: { passed: true },
   });
+  runtime.repository.insertArtifact({
+    id: "artifact-other-mission",
+    workspaceId: runtime.workspaceId,
+    type: "research",
+    name: "Separate analysis",
+    uri: "file:///analysis/other.md",
+    createdBy: "analyst",
+    taskId: "task-other",
+  });
+  runtime.repository.insertArtifact({
+    id: "artifact-unscoped",
+    workspaceId: runtime.workspaceId,
+    type: "file",
+    name: "Workspace reference",
+    uri: "file:///references/source.csv",
+    createdBy: "user",
+  });
+
   const otherWorkspace = runtime.repository.createWorkspace({ name: "Other workspace" });
+  const foreignMission = runtime.repository.insertMission({
+    id: "foreign-mission",
+    workspaceId: otherWorkspace.id,
+    goal: "Private workspace work",
+    taskIds: ["foreign-task"],
+  });
   runtime.repository.insertArtifact({
     id: "artifact-private-to-other-workspace",
     workspaceId: otherWorkspace.id,
@@ -52,11 +93,31 @@ try {
   const list = await request("/api/artifacts");
   assert.equal(list.status, 200);
   const artifacts = list.json.data as Array<{ id: string }>;
-  assert.deepEqual(artifacts.map((artifact) => artifact.id), ["artifact-report", "artifact-result"]);
+  assert.deepEqual(artifacts.map((artifact) => artifact.id), ["artifact-report", "artifact-result", "artifact-other-mission", "artifact-unscoped"]);
 
   const documents = await request("/api/artifacts?type=document&createdBy=analyst");
   assert.equal(documents.status, 200);
   assert.deepEqual((documents.json.data as Array<{ id: string }>).map((artifact) => artifact.id), ["artifact-report"]);
+
+  const missionArtifacts = await request(`/api/artifacts?missionId=${encodeURIComponent(mission.id)}`);
+  assert.equal(missionArtifacts.status, 200);
+  assert.deepEqual((missionArtifacts.json.data as Array<{ id: string }>).map((artifact) => artifact.id), ["artifact-report", "artifact-result"]);
+
+  const missionDocuments = await request(`/api/artifacts?missionId=${encodeURIComponent(mission.id)}&type=document&createdBy=analyst`);
+  assert.equal(missionDocuments.status, 200);
+  assert.deepEqual((missionDocuments.json.data as Array<{ id: string }>).map((artifact) => artifact.id), ["artifact-report"]);
+
+  const otherMissionArtifacts = await request(`/api/artifacts?missionId=${encodeURIComponent(otherMission.id)}`);
+  assert.equal(otherMissionArtifacts.status, 200);
+  assert.deepEqual((otherMissionArtifacts.json.data as Array<{ id: string }>).map((artifact) => artifact.id), ["artifact-other-mission"]);
+
+  const unknownMission = await request("/api/artifacts?missionId=not-here");
+  assert.equal(unknownMission.status, 404);
+  assert.match(unknownMission.json.error ?? "", /mission not found/);
+
+  const foreignMissionArtifacts = await request(`/api/artifacts?missionId=${encodeURIComponent(foreignMission.id)}`);
+  assert.equal(foreignMissionArtifacts.status, 404);
+  assert.match(foreignMissionArtifacts.json.error ?? "", /mission not found/);
 
   const detail = await request(`/api/artifacts/${encodeURIComponent(report.id)}`);
   assert.equal(detail.status, 200);
