@@ -21,6 +21,28 @@ import type {
   UiAutomationRun,
   UiRuntimeEvent,
 } from "./types";
+
+export interface RecentProject {
+  path: string;
+  name: string;
+  openedAt: number;
+}
+
+export interface ProjectInfo {
+  path: string;
+  name: string;
+  recent: RecentProject[];
+  nativePicker: boolean;
+}
+
+export interface OrchestratorProviderSettings {
+  provider: "anthropic" | "openai" | "custom" | null;
+  model: string;
+  baseUrl?: string;
+  configured: boolean;
+  hasApiKey: boolean;
+}
+
 export interface CreateNodeInput {
   type: string;
   title?: string;
@@ -59,6 +81,35 @@ export class Api {
       throw new Error(message);
     }
     return (await res.json()) as T;
+  }
+
+  // ── Project launcher ─────────────────────────────────────────────
+  async project(): Promise<ProjectInfo> {
+    const data = await this.request<{ ok: boolean; data: ProjectInfo }>("/api/project");
+    return data.data;
+  }
+
+  async openProject(path: string): Promise<{ path?: string; reopening?: boolean; current?: boolean; cancelled?: boolean }> {
+    const data = await this.request<{ ok: boolean; data: { path?: string; reopening?: boolean; current?: boolean; cancelled?: boolean } }>("/api/project/open", {
+      method: "POST",
+      body: JSON.stringify({ path }),
+    });
+    return data.data;
+  }
+
+  async pickProject(): Promise<{ path?: string; reopening?: boolean; current?: boolean; cancelled?: boolean }> {
+    const data = await this.request<{ ok: boolean; data: { path?: string; reopening?: boolean; current?: boolean; cancelled?: boolean } }>("/api/project/pick", { method: "POST" });
+    return data.data;
+  }
+
+  // ── Orchestrator direct LLM provider ─────────────────────────────
+  async orchestratorProvider(): Promise<OrchestratorProviderSettings> {
+    const data = await this.request<{ ok: boolean; data: OrchestratorProviderSettings }>("/api/orchestrator/provider");
+    return data.data;
+  }
+
+  async saveOrchestratorProvider(input: { provider: string; model: string; baseUrl?: string; apiKey?: string }): Promise<void> {
+    await this.request("/api/orchestrator/provider", { method: "PUT", body: JSON.stringify(input) });
   }
 
   // ── Harnesses ────────────────────────────────────────────────────
