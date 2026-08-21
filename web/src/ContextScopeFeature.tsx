@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api } from "./api";
 import type { ContextZone, ContextZoneInput } from "./types";
+import { describeContextReference, type ContextProvenanceSnapshot } from "./contextProvenance";
 
 type Bounds = { x: number; y: number; width: number; height: number };
 type CanvasNode = { id: string; label: string; position: { x: number; y: number } };
@@ -20,6 +21,7 @@ export function ContextScopeFeature() {
   const [host, setHost] = useState<HTMLElement | null>(null);
   const [scopes, setScopes] = useState<ContextZone[]>([]);
   const [nodes, setNodes] = useState<CanvasNode[]>([]);
+  const [provenance, setProvenance] = useState<ContextProvenanceSnapshot>({ artifacts: [], decisions: [], events: [], tasks: [] });
   const [viewport, setViewport] = useState(readViewport);
   const [drawing, setDrawing] = useState(false);
   const [draft, setDraft] = useState<Bounds | null>(null);
@@ -44,6 +46,10 @@ export function ContextScopeFeature() {
       ]);
       setScopes(nextScopes);
       setNodes(state.canvasNodes.map((node) => ({ id: node.id, label: node.label, position: node.position })));
+      // /api/state is the authoritative workspace snapshot and includes artifacts
+      // and decisions even though the older lightweight API client type omits them.
+      const snapshot = state as typeof state & Pick<ContextProvenanceSnapshot, "artifacts" | "decisions">;
+      setProvenance({ artifacts: snapshot.artifacts, decisions: snapshot.decisions, events: state.events, tasks: state.tasks });
     } catch {
       // The feature is additive; the base canvas remains usable if the scope API is unavailable.
     }
@@ -201,19 +207,34 @@ export function ContextScopeFeature() {
                 <span className="text-[10px] uppercase tracking-wide text-[#8b949e]">Context references</span>
                 {scope.contextRefs.length > 0 ? scope.contextRefs.map((ref) => {
                   const key = `${ref.type}:${ref.id}`;
+                  const source = describeContextReference(ref, provenance);
                   return (
-                    <div key={key} className="flex items-center justify-between gap-2 rounded border border-[#30363d] bg-[#010409] px-2 py-1">
-                      <code className="min-w-0 truncate text-[10px] text-cyan-200">{key}</code>
-                      <button
-                        type="button"
-                        className="text-[10px] text-red-400 hover:text-red-300 disabled:opacity-50"
-                        disabled={scopeAction === `${scope.id}:remove:${key}`}
-                        onClick={() => void updateScope(scope, {
-                          contextRefs: scope.contextRefs.filter((candidate) => candidate.type !== ref.type || candidate.id !== ref.id),
-                        }, `remove:${key}`)}
-                      >
-                        Remove
-                      </button>
+                    <div key={key} className={`rounded border px-2 py-2 ${source.stale ? "border-amber-500/40 bg-amber-500/5" : "border-[#30363d] bg-[#010409]"}`}>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <span className="rounded bg-cyan-500/10 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-cyan-300">{ref.type}</span>
+                            <strong className="truncate text-[11px] font-medium text-[#e6edf3]">{source.label}</strong>
+                            {source.stale && <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[9px] text-amber-300">stale</span>}
+                          </div>
+                          <div className={`mt-1 text-[10px] ${source.stale ? "text-amber-200/80" : "text-[#8b949e]"}`}>{source.detail}</div>
+                          <div className="mt-1 flex flex-wrap gap-x-2 text-[9px] text-[#6e7681]">
+                            <span>Why available: attached to this Shared Context zone</span>
+                            {source.relevance !== undefined && <span>Relevance {source.relevance.toFixed(2)}</span>}
+                          </div>
+                          <code className="mt-1 block truncate text-[9px] text-[#484f58]" title={key}>{key}</code>
+                        </div>
+                        <button
+                          type="button"
+                          className="shrink-0 text-[10px] text-red-400 hover:text-red-300 disabled:opacity-50"
+                          disabled={scopeAction === `${scope.id}:remove:${key}`}
+                          onClick={() => void updateScope(scope, {
+                            contextRefs: scope.contextRefs.filter((candidate) => candidate.type !== ref.type || candidate.id !== ref.id),
+                          }, `remove:${key}`)}
+                        >
+                          Remove
+                        </button>
+                      </div>
                     </div>
                   );
                 }) : <span className="text-[10px] text-[#8b949e]">No references attached yet.</span>}
