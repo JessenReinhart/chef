@@ -12,7 +12,6 @@ import {
 import "@xyflow/react/dist/style.css";
 import { api } from "./api";
 import type {
-  CanvasNodeLiveStatus,
   HarnessInfo,
   MissionStatus,
   UiCanvasEdge,
@@ -59,6 +58,13 @@ type ChatStreamEvent = {
   };
 };
 
+type Side = "left" | "right" | "top" | "bottom";
+
+type RoutedHandles = {
+  sourceHandle: string;
+  targetHandle: string;
+};
+
 const EMPTY_SNAPSHOT: WorkspaceSnapshot = {
   tasks: [],
   nodes: [],
@@ -74,22 +80,32 @@ const QUICK_PROMPTS = [
 ];
 
 const WORKING_TASK_STATES = new Set(["assigned", "spawning", "running"]);
-const WORKING_LIVE_STATES = new Set<CanvasNodeLiveStatus>(["starting", "working"]);
+const SIDES: Array<{ side: Side; position: Position }> = [
+  { side: "left", position: Position.Left },
+  { side: "right", position: Position.Right },
+  { side: "top", position: Position.Top },
+  { side: "bottom", position: Position.Bottom },
+];
 
 function taskStatus(task: UiTask | undefined, node: UiCanvasNode): string {
-  if (node.liveStatus) return node.liveStatus;
-  if (!task) return "idle";
-  const labels: Record<string, string> = {
-    pending: "idle",
-    assigned: "starting",
-    spawning: "starting",
-    running: "working",
-    completed: "ready",
-    failed: "failed",
-    blocked: "blocked",
-    cancelled: "offline",
-  };
-  return labels[task.status] ?? task.status;
+  // A task is the durable execution truth. Canvas liveStatus describes the
+  // attached surface/session and can legitimately remain `offline` after the
+  // task has moved to pending/completed. Prefer task state for task-backed
+  // nodes so the living projection does not contradict itself.
+  if (task) {
+    const labels: Record<string, string> = {
+      pending: "idle",
+      assigned: "starting",
+      spawning: "starting",
+      running: "working",
+      completed: "ready",
+      failed: "failed",
+      blocked: "blocked",
+      cancelled: "offline",
+    };
+    return labels[task.status] ?? task.status;
+  }
+  return node.liveStatus ?? "idle";
 }
 
 function friendlyStatus(status: string): string {
@@ -136,6 +152,19 @@ function nodeIcon(node: UiCanvasNode, task?: UiTask): string {
   return "◇";
 }
 
+function NodeHandles({ target = true, source = true }: { target?: boolean; source?: boolean }) {
+  return (
+    <>
+      {SIDES.map(({ side, position }) => (
+        <span key={side}>
+          {target && <Handle className="chef-living-handle" id={`target-${side}`} type="target" position={position} />}
+          {source && <Handle className="chef-living-handle" id={`source-${side}`} type="source" position={position} />}
+        </span>
+      ))}
+    </>
+  );
+}
+
 function LivingObjectNode({ data, selected }: NodeProps) {
   const item = data as LivingNodeData;
   const active = item.status === "working" || item.status === "starting";
@@ -144,7 +173,7 @@ function LivingObjectNode({ data, selected }: NodeProps) {
       className={`chef-living-node ${selected ? "is-selected" : ""} ${active ? "is-active" : ""}`}
       data-status={item.status}
     >
-      <Handle className="chef-living-handle" type="target" position={Position.Left} />
+      <NodeHandles />
       <div className="chef-living-node__orb" aria-hidden="true">
         <span>{item.icon}</span>
       </div>
@@ -153,7 +182,6 @@ function LivingObjectNode({ data, selected }: NodeProps) {
         <i />
         {friendlyStatus(item.status)}
       </span>
-      <Handle className="chef-living-handle" type="source" position={Position.Right} />
     </div>
   );
 }
@@ -163,7 +191,7 @@ function MissionFocusNode({ data }: NodeProps) {
   const progress = item.total === 0 ? 6 : Math.max(6, Math.round((item.completed / item.total) * 100));
   return (
     <div className="chef-mission-focus" data-status={item.status}>
-      <Handle className="chef-living-handle" type="source" position={Position.Right} />
+      <NodeHandles target={false} />
       <span className="chef-mission-focus__eyebrow">Your work</span>
       <strong>{item.goal}</strong>
       <div className="chef-mission-focus__meta">
@@ -194,6 +222,45 @@ function semanticPosition(index: number, total: number): { x: number; y: number 
     x: Math.cos(angle) * radiusX - 74,
     y: Math.sin(angle) * radiusY - 42,
   };
+}
+
+function nodeProjectionScore(node: UiCanvasNode): number {
+  return (node.nodeType === "blueprint" ? 4 : 0)
+    + (node.harnessId ? 2 : 0)
+    + (node.liveStatus && node.liveStatus !== "offline" ? 1 : 0);
+}
+
+function isWorkspaceHelper(node: UiCanvasNode, task?: UiTask): boolean {
+  if (!node.taskId) return true;
+  const type = task?.workflowNodeId ?? "";
+  return type.startsWith("harness.") || type.startsWith("tool.");
+}
+
+function centerOf(node: Node): { x: number; y: number } {
+  if (node.type === "mission") {
+    return { x: node.position.x + 155, y: node.position.y + 88 };
+  }
+  return { x: node.position.x + 74, y: node.position.y + 48 };
+}
+
+function routeHandles(source: Node | undefined, target: Node | undefined): RoutedHandles {
+  if (!source || !target) {
+    return { sourceHandle: "source-right", targetHandle: "target-left" };
+  }
+  const a = centerOf(source);
+  const b = centerOf(target);
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+
+  if (Math.abs(dx) >= Math.abs(dy)) {
+    const sourceSide: Side = dx >= 0 ? "right" : "left";
+    const targetSide: Side = dx >= 0 ? "left" : "right";
+    return { sourceHandle: `source-${sourceSide}`, targetHandle: `target-${targetSide}` };
+  }
+
+  const sourceSide: Side = dy >= 0 ? "bottom" : "top";
+  const targetSide: Side = dy >= 0 ? "top" : "bottom";
+  return { sourceHandle: `source-${sourceSide}`, targetHandle: `target-${targetSide}` };
 }
 
 export function LivingWorkspaceFeature() {
@@ -294,20 +361,79 @@ export function LivingWorkspaceFeature() {
   const currentStatus = latestMission?.status ?? missionStatusFor(snapshot);
   const focusGoal = latestMission?.goal || optimisticGoal;
   const missionTaskIds = useMemo(() => new Set(latestMission?.taskIds ?? []), [latestMission?.taskIds]);
+  const missionTaskOrder = useMemo(
+    () => new Map((latestMission?.taskIds ?? []).map((taskId, index) => [taskId, index])),
+    [latestMission?.taskIds],
+  );
   const taskById = useMemo(() => new Map(snapshot.tasks.map((task) => [task.id, task])), [snapshot.tasks]);
-  const canvasNodeById = useMemo(() => new Map(snapshot.nodes.map((node) => [node.id, node])), [snapshot.nodes]);
+  const allCanvasNodeById = useMemo(() => new Map(snapshot.nodes.map((node) => [node.id, node])), [snapshot.nodes]);
 
   useEffect(() => {
     if (latestMission?.goal) setOptimisticGoal("");
   }, [latestMission?.goal]);
 
+  const visibleCanvasNodes = useMemo(() => {
+    const candidates = latestMission
+      ? snapshot.nodes.filter((node) => {
+          if (node.taskId && missionTaskIds.has(node.taskId)) return true;
+          const task = node.taskId ? taskById.get(node.taskId) : undefined;
+          return isWorkspaceHelper(node, task);
+        })
+      : snapshot.nodes;
+
+    // One task can be represented by multiple runtime canvas objects (for
+    // example a blueprint plus a proxy). The friendly workspace shows one
+    // canonical visual object per task and leaves the full topology to
+    // Advanced mode.
+    const byTask = new Map<string, UiCanvasNode>();
+    const standalone: UiCanvasNode[] = [];
+    for (const node of candidates) {
+      if (!node.taskId) {
+        standalone.push(node);
+        continue;
+      }
+      const current = byTask.get(node.taskId);
+      if (!current) {
+        byTask.set(node.taskId, node);
+        continue;
+      }
+      const currentScore = nodeProjectionScore(current);
+      const nextScore = nodeProjectionScore(node);
+      if (nextScore > currentScore || (nextScore === currentScore && node.updatedAt > current.updatedAt)) {
+        byTask.set(node.taskId, node);
+      }
+    }
+
+    return [...byTask.values(), ...standalone].sort((a, b) => {
+      const aOrder = a.taskId ? missionTaskOrder.get(a.taskId) : undefined;
+      const bOrder = b.taskId ? missionTaskOrder.get(b.taskId) : undefined;
+      if (aOrder !== undefined && bOrder !== undefined) return aOrder - bOrder;
+      if (aOrder !== undefined) return -1;
+      if (bOrder !== undefined) return 1;
+      return a.updatedAt - b.updatedAt;
+    });
+  }, [latestMission, snapshot.nodes, missionTaskIds, taskById, missionTaskOrder]);
+
+  const canvasNodeById = useMemo(
+    () => new Map(visibleCanvasNodes.map((node) => [node.id, node])),
+    [visibleCanvasNodes],
+  );
+  const canonicalNodeIdByTaskId = useMemo(
+    () => new Map(visibleCanvasNodes.flatMap((node) => node.taskId ? [[node.taskId, node.id] as const] : [])),
+    [visibleCanvasNodes],
+  );
+
+  useEffect(() => {
+    if (selectedNodeId && !canvasNodeById.has(selectedNodeId)) setSelectedNodeId(null);
+  }, [selectedNodeId, canvasNodeById]);
+
   const flowNodes = useMemo(() => {
-    const nodes: Node[] = snapshot.nodes.map((node, index) => {
+    const nodes: Node[] = visibleCanvasNodes.map((node, index) => {
       const task = node.taskId ? taskById.get(node.taskId) : undefined;
       return {
         id: node.id,
         type: "living",
-        position: semanticPosition(index, snapshot.nodes.length),
+        position: semanticPosition(index, visibleCanvasNodes.length),
         draggable: false,
         selectable: true,
         data: {
@@ -341,35 +467,60 @@ export function LivingWorkspaceFeature() {
       });
     }
     return nodes;
-  }, [snapshot.nodes, snapshot.tasks, taskById, missionTaskIds, focusGoal, latestMission, currentStatus]);
+  }, [visibleCanvasNodes, snapshot.tasks, taskById, missionTaskIds, focusGoal, latestMission, currentStatus]);
+
+  const flowNodeById = useMemo(() => new Map(flowNodes.map((node) => [node.id, node])), [flowNodes]);
 
   const flowEdges = useMemo(() => {
-    const edges: Edge[] = snapshot.edges
-      .filter((edge) => canvasNodeById.has(edge.source) && canvasNodeById.has(edge.target))
-      .map((edge) => {
-        const source = canvasNodeById.get(edge.source);
-        const target = canvasNodeById.get(edge.target);
-        const sourceTask = source?.taskId ? taskById.get(source.taskId) : undefined;
-        const targetTask = target?.taskId ? taskById.get(target.taskId) : undefined;
-        const sourceActive = Boolean(source && (WORKING_LIVE_STATES.has(source.liveStatus ?? "idle") || (sourceTask && WORKING_TASK_STATES.has(sourceTask.status))));
-        const targetActive = Boolean(target && (WORKING_LIVE_STATES.has(target.liveStatus ?? "idle") || (targetTask && WORKING_TASK_STATES.has(targetTask.status))));
-        return {
-          id: edge.id,
-          source: edge.source,
-          target: edge.target,
-          type: "bezier",
-          className: `chef-living-edge ${sourceActive || targetActive ? "is-active" : ""}`,
-          animated: false,
-        };
+    const edges: Edge[] = [];
+    const seen = new Set<string>();
+
+    const canonicalIdFor = (rawId: string): string | null => {
+      if (canvasNodeById.has(rawId)) return rawId;
+      const raw = allCanvasNodeById.get(rawId);
+      if (!raw?.taskId) return null;
+      return canonicalNodeIdByTaskId.get(raw.taskId) ?? null;
+    };
+
+    for (const edge of snapshot.edges) {
+      const sourceId = canonicalIdFor(edge.source);
+      const targetId = canonicalIdFor(edge.target);
+      if (!sourceId || !targetId || sourceId === targetId) continue;
+      const key = `${sourceId}->${targetId}:${edge.type ?? "communication"}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      const source = canvasNodeById.get(sourceId);
+      const target = canvasNodeById.get(targetId);
+      const sourceTask = source?.taskId ? taskById.get(source.taskId) : undefined;
+      const targetTask = target?.taskId ? taskById.get(target.taskId) : undefined;
+      const sourceActive = Boolean(source && ["working", "starting"].includes(taskStatus(sourceTask, source)));
+      const targetActive = Boolean(target && ["working", "starting"].includes(taskStatus(targetTask, target)));
+      const handles = routeHandles(flowNodeById.get(sourceId), flowNodeById.get(targetId));
+
+      edges.push({
+        id: `living:${key}`,
+        source: sourceId,
+        target: targetId,
+        sourceHandle: handles.sourceHandle,
+        targetHandle: handles.targetHandle,
+        type: "bezier",
+        className: `chef-living-edge ${sourceActive || targetActive ? "is-active" : ""}`,
+        animated: false,
       });
+    }
 
     if (focusGoal) {
-      for (const node of snapshot.nodes) {
+      const missionNode = flowNodeById.get("chef:mission-focus");
+      for (const node of visibleCanvasNodes) {
         if (!node.taskId || !missionTaskIds.has(node.taskId)) continue;
+        const handles = routeHandles(missionNode, flowNodeById.get(node.id));
         edges.push({
           id: `chef:mission:${node.id}`,
           source: "chef:mission-focus",
           target: node.id,
+          sourceHandle: handles.sourceHandle,
+          targetHandle: handles.targetHandle,
           type: "bezier",
           className: "chef-mission-edge",
           selectable: false,
@@ -377,7 +528,7 @@ export function LivingWorkspaceFeature() {
       }
     }
     return edges;
-  }, [snapshot.edges, snapshot.nodes, canvasNodeById, taskById, missionTaskIds, focusGoal]);
+  }, [snapshot.edges, canvasNodeById, allCanvasNodeById, canonicalNodeIdByTaskId, taskById, focusGoal, visibleCanvasNodes, missionTaskIds, flowNodeById]);
 
   const selectedNode = selectedNodeId ? canvasNodeById.get(selectedNodeId) : undefined;
   const selectedTask = selectedNode?.taskId ? taskById.get(selectedNode.taskId) : undefined;
@@ -417,7 +568,7 @@ export function LivingWorkspaceFeature() {
         title: inputNode.label,
         kind: inputNode.kind,
         position,
-        config: {},
+        config: { livingPinned: true },
         assignedTo: inputNode.harnessId,
         autoDispatch: inputNode.kind === "agent" || inputNode.type === "tool.terminal",
       });
@@ -429,6 +580,7 @@ export function LivingWorkspaceFeature() {
           nodeType: "blueprint",
           kind: inputNode.kind,
           harnessId: inputNode.harnessId ?? (inputNode.type === "tool.terminal" ? "generic" : null),
+          config: { livingPinned: true },
           position,
         }],
       });
@@ -473,7 +625,7 @@ export function LivingWorkspaceFeature() {
   if (!enabled) return null;
 
   const agentHarnesses = harnesses.filter((harness) => harness.available && harness.id !== "generic").slice(0, 3);
-  const hasWork = Boolean(focusGoal || snapshot.nodes.length > 0);
+  const hasWork = Boolean(focusGoal || visibleCanvasNodes.length > 0);
 
   return (
     <div className="chef-living-shell" aria-label="Chef living workspace">
