@@ -20,9 +20,9 @@ describe("execution console acceptance", () => {
     assert.match(consoleSource, /wb-console__progress-indeterminate/);
   });
 
-  it("keeps retry and approval actions on runtime APIs", () => {
-    assert.match(consoleSource, /api\.retryNode\(/);
-    assert.match(consoleSource, /api\.approve\(/);
+  it("keeps retry and approval actions on runtime endpoints", () => {
+    assert.match(consoleSource, /\/api\/nodes\/\$\{taskId\}\/retry/);
+    assert.match(consoleSource, /\/api\/approvals\/\$\{approvalId\}\/\$\{decision\}/);
     assert.match(consoleSource, /Retry/);
     assert.match(consoleSource, /Accept/);
     assert.match(consoleSource, /Reject/);
