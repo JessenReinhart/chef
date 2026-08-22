@@ -138,6 +138,118 @@ export function parseModelJsonObject(text: string): Record<string, unknown> {
 	}
 }
 
+function parseTopLevelJsonObjects(text: string): Record<string, unknown>[] {
+	const objects: Record<string, unknown>[] = [];
+	const trimmed = text.trim();
+	if (!trimmed) return objects;
+
+	try {
+		objects.push(asJsonObject(JSON.parse(trimmed) as unknown));
+		return objects;
+	} catch {
+		// Compatibility path below handles wrappers, NDJSON, SSE and concatenated objects.
+	}
+
+	let searchFrom = 0;
+	while (searchFrom < text.length) {
+		const start = text.indexOf("{", searchFrom);
+		if (start < 0) break;
+		const end = findBalancedObjectEnd(text, start);
+		if (end === null) {
+			searchFrom = start + 1;
+			continue;
+		}
+		const candidate = text.slice(start, end + 1);
+		try {
+			objects.push(asJsonObject(JSON.parse(candidate) as unknown));
+			searchFrom = end + 1;
+		} catch {
+			searchFrom = start + 1;
+		}
+	}
+	return objects;
+}
+
+function readChoiceContent(envelope: Record<string, unknown>, field: "message" | "delta"): string | null {
+	const choices = envelope.choices;
+	if (!Array.isArray(choices) || choices.length === 0) return null;
+	const choice = choices[0];
+	if (typeof choice !== "object" || choice === null || Array.isArray(choice)) return null;
+	const container = (choice as Record<string, unknown>)[field];
+	if (typeof container !== "object" || container === null || Array.isArray(container)) return null;
+	const content = (container as Record<string, unknown>).content;
+	return typeof content === "string" ? content : null;
+}
+
+/**
+ * Decode the HTTP body returned by an OpenAI-compatible provider.
+ *
+ * The OpenAI contract is one JSON object when `stream: false`, but local
+ * gateways sometimes append metadata, emit NDJSON, or return SSE-like chunks
+ * even for a non-streaming request. Parsing the body with `response.json()`
+ * makes those otherwise usable responses fail before Chef can inspect them.
+ */
+export function parseOpenAICompatibleResponseBody(text: string): string {
+	const objects = parseTopLevelJsonObjects(text);
+	if (objects.length === 0) {
+		throw new Error("OpenAI-compatible provider returned a body with no valid JSON object");
+	}
+
+	// Prefer a complete message if any envelope contains one. Search from the
+	// end because some gateways append a final normalized completion envelope.
+	for (let index = objects.length - 1; index >= 0; index -= 1) {
+		const content = readChoiceContent(objects[index], "message");
+		if (content) return content;
+	}
+
+	// Compatibility with accidental streaming/NDJSON responses.
+	let streamedContent = "";
+	for (const object of objects) {
+		streamedContent += readChoiceContent(object, "delta") ?? "";
+	}
+	if (streamedContent) return streamedContent;
+
+	const providerError = objects.find((object) => object.error !== undefined)?.error;
+	if (providerError !== undefined) {
+		let detail: string;
+		try {
+			detail = JSON.stringify(providerError);
+		} catch {
+			detail = String(providerError);
+		}
+		throw new Error(`OpenAI-compatible provider returned an error payload: ${detail.slice(0, 800)}`);
+	}
+
+	throw new Error(`OpenAI-compatible provider returned ${objects.length} JSON object(s) but no message content`);
+}
+
+function isLLMDebugEnabled(): boolean {
+	return ["1", "true", "yes", "on"].includes((process.env.CHEF_LLM_DEBUG ?? "").toLowerCase());
+}
+
+function debugPreview(text: string, limit = 1200): string {
+	const normalized = text.replace(/\s+/g, " ").trim();
+	return normalized.length > limit ? `${normalized.slice(0, limit)}…` : normalized;
+}
+
+function sanitizeEndpoint(endpoint: string): string {
+	try {
+		const url = new URL(endpoint);
+		url.username = "";
+		url.password = "";
+		url.search = "";
+		url.hash = "";
+		return url.toString();
+	} catch {
+		return "<invalid endpoint>";
+	}
+}
+
+function llmDebug(event: string, details: Record<string, unknown>): void {
+	if (!isLLMDebugEnabled()) return;
+	console.error(`[chef:llm] ${event} ${JSON.stringify(details)}`);
+}
+
 // ---------------------------------------------------------------------------
 // LLM Decision Provider
 // ---------------------------------------------------------------------------
@@ -188,6 +300,11 @@ export class LLMDecisionProvider implements DecisionProvider {
 			return this.#parsePlan(response, input.workspaceId, input.goal);
 		} catch (error) {
 			const errorMessage = error instanceof Error ? error.message : String(error);
+			llmDebug("plan.error", {
+				provider: this.#config.provider,
+				model: this.#config.model,
+				error: errorMessage,
+			});
 			throw new Error(`LLM plan proposal failed: ${errorMessage}`);
 		}
 	}
@@ -312,30 +429,55 @@ Return a Plan with tasks that achieve this goal.`;
 		try {
 			if (this.#config.provider === "openai" || this.#config.provider === "custom") {
 				const base = (this.#config.baseUrl ?? "https://api.openai.com/v1").replace(/\/$/, "");
-				const response = await fetch(`${base}/chat/completions`, {
+				const endpoint = `${base}/chat/completions`;
+				const requestBody = {
+					model: this.#config.model,
+					temperature: this.#config.temperature,
+					max_tokens: this.#config.maxTokens ?? 4096,
+					stream: false,
+					response_format: { type: "json_object" },
+					messages: [
+						{ role: "system", content: systemPrompt },
+						{ role: "user", content: `${userPrompt}\nReturn only valid JSON.` },
+					],
+				};
+				llmDebug("request", {
+					provider: this.#config.provider,
+					model: this.#config.model,
+					endpoint: sanitizeEndpoint(endpoint),
+					timeoutMs: this.#config.timeoutMs,
+					systemPromptChars: systemPrompt.length,
+					userPromptChars: userPrompt.length,
+				});
+				const response = await fetch(endpoint, {
 					method: "POST",
 					signal: controller.signal,
 					headers: {
 						"content-type": "application/json",
 						authorization: `Bearer ${this.#config.apiKey}`,
 					},
-					body: JSON.stringify({
-						model: this.#config.model,
-						temperature: this.#config.temperature,
-						max_tokens: this.#config.maxTokens ?? 4096,
-						response_format: { type: "json_object" },
-						messages: [
-							{ role: "system", content: systemPrompt },
-							{ role: "user", content: `${userPrompt}\nReturn only valid JSON.` },
-						],
-					}),
+					body: JSON.stringify(requestBody),
+				});
+				const responseBody = await response.text();
+				llmDebug("response", {
+					provider: this.#config.provider,
+					model: this.#config.model,
+					endpoint: sanitizeEndpoint(endpoint),
+					status: response.status,
+					contentType: response.headers.get("content-type"),
+					bodyChars: responseBody.length,
+					bodyPreview: debugPreview(responseBody),
 				});
 				if (!response.ok) {
-					throw new Error(`OpenAI-compatible request failed: HTTP ${response.status} ${await response.text()}`);
+					throw new Error(`OpenAI-compatible request failed: HTTP ${response.status} ${debugPreview(responseBody, 800)}`);
 				}
-				const data = await response.json() as { choices?: Array<{ message?: { content?: string | null } }> };
-				const content = data.choices?.[0]?.message?.content;
-				if (!content) throw new Error("OpenAI-compatible provider returned no message content");
+				const content = parseOpenAICompatibleResponseBody(responseBody);
+				llmDebug("content", {
+					provider: this.#config.provider,
+					model: this.#config.model,
+					contentChars: content.length,
+					contentPreview: debugPreview(content),
+				});
 				return content;
 			}
 
