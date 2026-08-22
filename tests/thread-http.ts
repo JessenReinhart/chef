@@ -76,6 +76,12 @@ try {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ title: "   " }),
   })).status, 400);
+  assert.equal((await fetch(`${origin}/api/threads`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: "null",
+  })).status, 400, "non-object JSON bodies must fail closed");
+  assert.equal((await fetch(`${origin}/api/threads/%E0%A4%A`)).status, 400, "malformed encoded Thread ids must not escape the request boundary");
 
   const fallback = await fetch(`${origin}/api/state`);
   assert.equal(fallback.status, 200);
