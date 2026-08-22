@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { ContextScopeFeature } from "./ContextScopeFeature";
@@ -24,15 +24,6 @@ type WorkbenchDepth = "simple" | "power";
 function ChefRoot() {
   const [surface, setSurface] = useState<ProductSurface>(() => localStorage.getItem("chef:surface") === "workbench" ? "workbench" : "home");
   const [viewMode, setViewMode] = useState<WorkbenchDepth>(() => localStorage.getItem("chef:view-mode") === "power" ? "power" : "simple");
-
-  useEffect(() => {
-    if (surface !== "workbench") return;
-    const timer = window.setInterval(() => {
-      const next: WorkbenchDepth = localStorage.getItem("chef:view-mode") === "power" ? "power" : "simple";
-      setViewMode((current) => current === next ? current : next);
-    }, 200);
-    return () => window.clearInterval(timer);
-  }, [surface]);
 
   const openWorkbench = () => {
     localStorage.setItem("chef:surface", "workbench");
