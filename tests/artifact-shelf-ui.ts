@@ -38,6 +38,7 @@ assert.match(missionFeature, /\/api\/artifacts\/\$\{encodeURIComponent\(artifact
 assert.match(missionFeature, /Mission decisions/, "Mission overview should expose durable decisions tied to its tasks");
 assert.match(missionFeature, /MAX_MISSION_DECISIONS = 6/, "Mission decision disclosure should remain bounded");
 assert.match(missionFeature, /fetch\("\/api\/decisions"\)/, "Mission decisions should reuse the runtime-owned decision projection");
+assert.match(missionFeature, /Promise\.allSettled/, "artifact and decision network failures should degrade independently");
 assert.match(missionFeature, /function decisionTaskId/, "Mission decision scope should require explicit task provenance");
 assert.match(missionFeature, /const taskId = payload\.taskId/, "Mission decision provenance should come from the durable decision payload");
 assert.match(missionFeature, /taskId !== null && taskIds\.has\(taskId\)/, "workspace decisions should be filtered to durable Mission task membership");
