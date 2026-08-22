@@ -8,13 +8,44 @@ This guide describes the setup behavior that exists in the current Chef runtime.
 - npm
 - Windows is the primary supported desktop environment for local development
 
-Install dependencies:
+Install runtime and web dependencies:
 
 ```bash
 npm install
-cd web
-npm install
+npm run web:install
 ```
+
+## Local web mode
+
+Chef is a local-first runtime with a browser-based UI. The browser is a control surface; the authoritative runtime, project files, PTY sessions, Git operations, artifacts, and SQLite database remain on the local machine.
+
+Build the web client once:
+
+```bash
+npm run web:build
+```
+
+Then start Chef from the repository root:
+
+```bash
+npm run chef
+```
+
+Open:
+
+```text
+http://127.0.0.1:4321
+```
+
+The Chef runtime serves the built web client from `web/dist` and exposes its runtime API on the same origin under `/api`. A separate Vite process is not required for this mode.
+
+This mode remains usable without internet access for local capabilities. Any configured remote LLM provider, web research, or other network-backed integration still requires its own network connection.
+
+Set `CHEF_WEB_DIST` only when you need to serve a web build from a different directory.
+
+## Web development mode
+
+For UI development, run the runtime and Vite separately so hot reload stays available.
 
 Start the runtime from the repository root:
 
@@ -26,11 +57,10 @@ Start the web workbench in another terminal:
 
 ```bash
 cd web
-npm install
 npm run dev
 ```
 
-The runtime listens on `http://127.0.0.1:4321`. The Vite development server proxies `/api` requests to the runtime.
+The runtime listens on `http://127.0.0.1:4321`. The Vite development server listens on port `5173` and proxies `/api` requests to the local runtime.
 
 ## Open a project
 
@@ -94,6 +124,7 @@ CHEF_MODEL
 CHEF_API_KEY
 CHEF_BASE_URL
 CHEF_TIMEOUT_MS
+CHEF_WEB_DIST
 ```
 
 The provider adapter also reads these provider-specific API key variables:
@@ -138,21 +169,24 @@ A reported `available: true` value means that Chef found the executable. It does
 For a CLI-first setup:
 
 1. Install and authenticate the CLI that you want to use, such as Claude Code, Codex, or OMP.
-2. Start Chef.
-3. Open the target project.
-4. Confirm that the CLI works in a normal terminal.
-5. Use `GET /api/harnesses/readiness` when you need to inspect Chef's executable detection result.
-6. Use the generic terminal if a specialized harness is not available.
-7. Configure **AI** only if you also want the Chef Orchestrator to use a direct provider.
+2. Build the web client with `npm run web:build`.
+3. Start Chef with `npm run chef`.
+4. Open `http://127.0.0.1:4321`.
+5. Open the target project.
+6. Confirm that the CLI works in a normal terminal.
+7. Use `GET /api/harnesses/readiness` when you need to inspect Chef's executable detection result.
+8. Use the generic terminal if a specialized harness is not available.
+9. Configure **AI** only if you also want the Chef Orchestrator to use a direct provider.
 
 For a direct-provider setup:
 
-1. Start Chef.
-2. Open the target project.
-3. Open **AI**.
-4. Select the provider and model.
-5. Add the API key and base URL when required.
-6. Save the settings and let Chef restart the runtime.
+1. Build the web client and start Chef.
+2. Open `http://127.0.0.1:4321`.
+3. Open the target project.
+4. Open **AI**.
+5. Select the provider and model.
+6. Add the API key and base URL when required.
+7. Save the settings and let Chef restart the runtime.
 
 ## Validation commands
 
@@ -166,12 +200,12 @@ npm run typecheck
 For the web application:
 
 ```bash
-cd web
-npm run build
+npm run web:build
 ```
 
 ## Security notes
 
+- The local web server binds to `127.0.0.1`, not all network interfaces.
 - Do not commit provider credentials to the project repository.
 - The project SQLite database is project-scoped. Orchestrator credentials are machine-scoped.
 - Windows provider secrets use DPAPI with `CurrentUser` scope.
