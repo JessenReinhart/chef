@@ -1,6 +1,10 @@
-# Chef
+<p align="center">
+  <img src="assets/chef-icon.svg" alt="Chef icon" width="148" />
+</p>
 
-**A living AI workspace where people, agents, tools, and context collaborate in real time.**
+<h1 align="center">Chef</h1>
+
+<p align="center"><strong>A living AI workspace where people, agents, tools, and context collaborate in real time.</strong></p>
 
 Chef is a local-first Node/TypeScript runtime and visual workbench for coordinating AI agents, terminal tools, durable context, Missions, and repeatable Automations.
 
@@ -85,6 +89,8 @@ or run:
 ```powershell
 npm run chef
 ```
+
+On the first Windows launch, `Chef.cmd` also prepares a branded `Chef.lnk` shortcut beside it using the Chef app icon. You can use that shortcut for later launches.
 
 ### macOS / Linux
 
@@ -234,6 +240,9 @@ Unknown capabilities fail closed.
 ## Project layout
 
 ```text
+assets/
+  chef-icon.svg            canonical Chef app icon
+
 src/
   main.ts                  runtime wiring and ChefRuntime facade
   core/                    durable domain contracts and graph types
