@@ -172,11 +172,11 @@ export function MissionTimelineFeature({ missionId, mode }: Props) {
   const visiblePlanTasks = useMemo(() => {
     if (!currentPlan) return [];
     const states = new Map(currentPlan.taskStates.map((state) => [state.id, state]));
-    return currentPlan.tasks.slice(0, PLAN_TASK_LIMIT).map((task, index) => {
-      const runtimeTaskId = currentPlan.taskIds[index];
-      const state = runtimeTaskId ? states.get(runtimeTaskId) : undefined;
-      return { task, runtimeTaskId, state };
-    });
+    return currentPlan.tasks.slice(0, PLAN_TASK_LIMIT).map((task) => ({
+      task,
+      runtimeTaskId: currentPlan.taskIds.includes(task.id) ? task.id : undefined,
+      state: states.get(task.id),
+    }));
   }, [currentPlan]);
 
   return (
