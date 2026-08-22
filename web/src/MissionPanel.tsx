@@ -261,7 +261,7 @@ export function MissionPanel({
             <form className="mt-4 rounded-lg border border-[#30363d] bg-[#0d1117] p-3" aria-label="Continue with a follow-up Mission" onSubmit={(event) => { event.preventDefault(); void startFollowUp(); }}>
               <div className="mb-2">
                 <h3 className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#8b949e]">Continue from here</h3>
-                <p className="mt-0.5 text-[10px] text-[#6e7681]">Start a new Mission with this Mission goal included as explicit context, while keeping this finished run intact.</p>
+                <p className="mt-0.5 text-[10px] text-[#6e7681]">Start a new Mission that carries this Mission goal forward in the request, while keeping this finished run intact.</p>
               </div>
               <div className="flex flex-wrap gap-2">
                 <input
