@@ -10,478 +10,447 @@ Chef should feel like giving a capable team an outcome, then watching useful wor
 
 The user should not need to understand agent infrastructure, workflow graphs, sessions, PTYs, event streams, or task state before Chef becomes useful.
 
-The default experience is therefore:
+The interaction hierarchy is:
 
-> **Intent first. Activity second. Workbench when needed. Runtime details last.**
+> **Intent first → activity second → Workbench when needed → runtime details last.**
 
-The runtime remains the product source of truth. The UI is a projection over Missions, Tasks, agents, sessions, events, artifacts, approvals, and other runtime state.
+The runtime remains authoritative. The UI is a projection that decides how much of that state is useful to show at each depth.
 
-## 2. Why this direction changed
+## 2. Core product invariant
 
-Recent hands-on use exposed a problem in the previous living-workspace direction: too many surfaces can control or describe the same work at the same time.
+There must be only **one obvious primary way** to tell Chef what the user wants.
 
-A user can encounter several competing interaction paths:
+For normal goal-oriented work, that surface is the Chef composer.
 
-- a primary Chef goal input;
-- another Chef/chat input;
-- direct worker intervention;
-- terminal input;
-- Rooms or Messages;
-- node selection and inspector actions;
-- floating work surfaces;
-- Simple and Power mode representations of similar state.
+Direct worker messages, terminal input, graph editing, Rooms, interventions, runtime controls, and low-level inspectors are advanced capabilities. They remain available, but they must not compete with the Chef composer in the default experience.
 
-Each capability is useful by itself. Together, they create an unclear control model and many UI projections that can drift out of sync.
+If a first-time user asks, "Where do I type what I want?", the interface has failed.
 
-The result is two related problems:
+## 3. Chef is not graph-first
 
-1. **User confusion:** it is not obvious where the user should speak, what is authoritative, or whether Chef is currently working.
-2. **Bug surface area:** Mission state, node state, inspector state, terminal state, counters, surfaces, and messages can each show a different interpretation of the same runtime activity.
+The graph is valuable for inspection, orchestration, debugging, and direct control, but it is not the mandatory homepage.
 
-The solution is not more onboarding. The interaction architecture must become simpler.
+Chef should open into an intent-and-activity surface that answers:
 
-## 3. The product hierarchy
+- What do you want Chef to do?
+- What is Chef currently doing?
+- Does anything need your attention?
+- What finished?
 
-Chef has three levels of depth.
+The graph becomes the **Workbench**: a deeper workspace that the user opens when they want to inspect or manipulate how the work is happening.
 
-```text
-DEFAULT EXPERIENCE
-Chef + current work + meaningful activity
-            |
-            v
-WORKBENCH
-Graph + workers + tools + artifacts + work surfaces
-            |
-            v
-RUNTIME / DEBUG DETAILS
-Sessions + PTYs + events + context + raw task state + IDs
-```
+This changes the previous mental model from:
 
-Users move deeper when they need more control or explanation. They do not choose a permanent beginner or expert identity.
+`Simple graph ↔ Power graph`
 
-### 3.1 Default experience
+to:
 
-The default screen answers four questions:
+`Chef Home / Activity → Workbench → runtime/debug detail`
 
-1. What do you want Chef to do?
-2. What is Chef doing now?
-3. Does Chef need anything from you?
-4. What did Chef produce?
+The underlying runtime and objects remain the same.
 
-The default screen should not require a graph.
+## 4. Progressive depth, not separate products
 
-### 3.2 Workbench
+Do not make the user choose whether they are a "simple" or "power" user before using Chef.
 
-The Workbench is where users inspect and control how work happens.
+The product should reveal capability through depth:
 
-It can expose:
+### Level 1: Chef Home
 
-- the live graph;
-- agents and tools;
-- terminals and browsers;
-- files and artifacts;
-- task relationships;
-- direct worker interaction;
-- deeper Mission state.
+The default surface.
 
-The Workbench is a powerful tool, not Chef's mandatory homepage.
+Show:
 
-### 3.3 Runtime and debug details
+- Chef composer
+- current work / Mission
+- concise activity
+- approvals or blockers that need the user
+- recent meaningful outcomes
+- entry to Workbench
 
-Low-level state is available for developers and troubleshooting, but it is not part of the normal product vocabulary.
+Hide:
 
-Examples:
+- node ports
+- edge semantics
+- PTY/session IDs
+- event streams
+- task IDs
+- provider internals
+- context-ref internals
+- permission matrices
+- raw token/runtime counters unless specifically requested
 
-- session IDs;
-- task IDs;
-- event streams;
-- context references;
-- PTY state;
-- raw permission capabilities;
-- process lifecycle details;
-- retry metadata.
+### Level 2: Workbench
 
-## 4. Primary interaction invariant
+For users who want to inspect or shape execution.
 
-> **There must be one obvious way to tell Chef what you want.**
+Show:
 
-The primary Chef composer is the default command surface for normal work.
+- graph/canvas
+- agents and tools
+- artifacts
+- contextual node cards
+- surfaces such as terminals and browsers
+- relationships
+- Mission highlighting
+- direct worker actions
 
-Other input surfaces are contextual tools, not competing primary controls.
+### Level 3: Runtime / Debug detail
 
-Examples:
+For troubleshooting and deep control.
 
-- typing into a terminal means operating that terminal;
-- messaging a worker means explicitly intervening in that worker;
-- approving an action means resolving an approval request;
-- editing a Mission means changing Mission requirements.
+Show:
 
-Direct worker interaction must remain possible, but it must look and feel like a deliberate intervention. It must also become a runtime event visible to the Orchestrator.
+- sessions
+- PTY state
+- raw events
+- task IDs
+- context refs
+- permission policy
+- harness/provider details
+- retry/lifecycle internals
+- usage and cost telemetry
 
-Chef must not show two equivalent global Chef inputs at the same time.
+Each level must be reachable without rebuilding or duplicating the underlying workflow.
 
-## 5. Default experience
+## 5. Human-facing state model
 
-A normal work session should resemble this mental model:
+The runtime may keep detailed lifecycle states. The primary UI should intentionally collapse them.
 
-```text
-+--------------------------------------------------+
-| Chef                                Open Workbench|
-|                                                  |
-|               What are we doing?                 |
-|       [ Fix the login bug in this project ]      |
-|                                                  |
-| Current work                                     |
-| Fix login bug                                    |
-|                                                  |
-|  Working                                         |
-|  Claude is investigating authentication          |
-|  Next: run verification                          |
-|                                                  |
-| Needs your attention                             |
-| Allow edit to auth.ts?              [Review]     |
-|                                                  |
-| Results                                          |
-| No final result yet                              |
-|                                                  |
-| Ask Chef anything...                             |
-+--------------------------------------------------+
-```
-
-This is not a dashboard full of runtime widgets. It is a calm control surface around the current outcome.
-
-### 5.1 Required default surfaces
-
-The default product should have only a small number of first-class surfaces:
-
-- **Chef composer** for intent and follow-up;
-- **Current Work** for the active Mission and meaningful progress;
-- **Attention** for approvals, blockers, and required user decisions;
-- **Results** for artifacts and completed outcomes;
-- **Open Workbench** for deeper inspection and control.
-
-## 6. State hierarchy
-
-The UI must not expose every runtime state at the same visual level.
-
-### 6.1 Human-facing state
-
-At the highest level, Chef should prefer a small state vocabulary:
+For normal work, users mainly need:
 
 - **Working**
 - **Needs attention**
 - **Done**
 
-A secondary state such as **Stopped** or **Failed** can appear when the whole work item cannot continue.
+A fourth neutral state such as **Waiting** or **Ready** is acceptable when necessary.
 
-### 6.2 Mission and worker detail
+Examples of runtime projection:
 
-Deeper views can explain the human-facing state with more specific information:
+| Runtime detail | Primary UI |
+| --- | --- |
+| pending / assigned / spawning / running | Working |
+| approval requested / blocked / actionable failure | Needs attention |
+| completed / verified | Done |
+| idle / dependency wait with no user action | Waiting / Ready |
 
-```text
-Work: Fix login bug
-|
-+-- Working
-|   +-- Claude: Investigating
-|   +-- Test Agent: Waiting
-|
-+-- Needs attention
-    +-- Terminal command failed
-```
+Do not display several independent counters and labels that make the same Mission appear active, failed, completed, and pending at the same time.
 
-### 6.3 Runtime state
+## 6. One state hierarchy
 
-The runtime may retain a richer state machine. The UI does not need to flatten all of it into badges.
-
-Task, agent, session, process, and Mission states can differ without creating contradictory top-level messages. The UI derives one meaningful user-facing interpretation.
-
-## 7. The graph is not the homepage
-
-The graph remains important, but its job changes.
-
-It is best for:
-
-- understanding orchestration;
-- inspecting relationships;
-- seeing handoffs;
-- debugging blocked work;
-- directly controlling workers and tools;
-- building or editing advanced reusable structures.
-
-It is not required for:
-
-- asking Chef to do something;
-- checking whether Chef is still working;
-- approving a request;
-- reading a result;
-- downloading or opening an artifact;
-- doing a simple follow-up.
-
-The Workbench graph is therefore an inspection and control environment, not the primary conversation metaphor.
-
-## 8. Nodes and work surfaces are different things
-
-A node represents a runtime participant or relationship in the Workbench.
-
-A work surface is where the user directly interacts with that participant.
+Status must be understandable as a hierarchy:
 
 ```text
-NODE                    WORK SURFACE
-Terminal        ->      Interactive terminal
-Claude Code     ->      Agent conversation / terminal
-Browser         ->      Browser viewport
-File            ->      File preview or editor
-Artifact        ->      Result preview
+Workspace
+└── Current work / Mission
+    ├── Working
+    │   └── Claude: investigating auth
+    ├── Waiting
+    │   └── verifier
+    └── Needs attention
+        └── terminal command failed
 ```
 
-Nodes should stay compact and stable.
+Mission, task, node, and session state may all exist internally, but the default UI presents the most useful user-level interpretation.
 
-A Terminal node should not also be responsible for being a draggable floating terminal window, task participant, inspector target, PTY lifecycle controller, resizable viewport, and status dashboard at the same time.
+When detailed state is needed, the user deliberately opens deeper inspection.
 
-### 8.1 Surface behavior
+## 7. Node is not surface
 
-By default, interactive surfaces should open in a stable dock, panel, or focused workspace region instead of floating over the graph.
+A canvas node is a compact representation of a runtime participant or tool.
 
-This reduces:
+An interactive **surface** is the place where the user directly works with that participant.
 
-- focus bugs;
-- drag and resize conflicts;
-- z-index problems;
-- unclear selection state;
-- accidental graph interaction;
-- duplicate lifecycle state.
+Do not make one visual object simultaneously own graph geometry, PTY input, resize state, window stacking, runtime lifecycle, selection, and detailed inspection.
 
-Floating surfaces can remain an optional advanced interaction later if there is a clear use case.
-
-## 9. Progressive depth replaces the hard Simple / Power split
-
-Chef should not require users to switch between two product identities.
-
-Instead, each object can expose increasing depth:
+Conceptually:
 
 ```text
-summary -> contextual detail -> Workbench -> runtime/debug detail
+NODE                     SURFACE
+Agent              →     agent work / terminal
+Terminal           →     interactive terminal
+Browser            →     browser viewport
+File / Artifact    →     preview / editor
 ```
 
-Examples:
+Nodes should stay compact on the canvas. Interactive surfaces should open in a stable workspace region.
 
-### Agent
+## 8. Surface behavior
+
+Workbench surfaces should prefer docked or otherwise stable regions instead of arbitrary floating windows over the graph.
+
+Reasons:
+
+- fewer focus and z-index conflicts
+- fewer drag/resize state machines
+- less overlap with graph interaction
+- clearer identity between selected node and active surface
+- easier persistence and restoration
+- lower synchronization surface
+
+Floating surfaces may be added later for explicit multi-window use cases, but they must not be the baseline implementation.
+
+A surface must have one stable runtime identity. Re-rendering, moving, or selecting a node must not silently create a second session or second source of lifecycle state.
+
+## 9. Default Chef Home
+
+The default screen should feel closer to a capable work assistant than an IDE.
+
+A representative information structure:
 
 ```text
-Claude is investigating
-        ->
-Claude detail card
-        ->
-Open in Workbench
-        ->
-Session / terminal / events / context
+Chef                                      Open Workbench
+
+                     What are we doing?
+
+             [ Describe the outcome here... ]
+
+                     Chef is working
+
+              ✓ Inspect project
+              ● Investigate login failure
+              ○ Verify the fix
+
+Needs your attention
+Claude needs permission to edit auth.ts
+                                [Allow] [Review]
+
+Ask Chef anything...
 ```
 
-### Failure
+This is an information architecture example, not a pixel contract.
 
-```text
-Needs attention
-        ->
-Tests failed
-        ->
-Open verification work
-        ->
-Raw command output and event history
-```
+Important properties:
 
-This keeps advanced capability available without making low-level concepts permanent UI chrome.
+- the composer is visually dominant
+- the current goal is obvious
+- progress is meaningful, not log spam
+- approvals are impossible to miss
+- there is no graph configuration prerequisite
+- there is no global Run button for normal Mission work
 
-## 10. Direct intervention
+## 10. Workbench
 
-Direct intervention is a power feature and must stay possible.
+The Workbench is where the graph belongs.
 
-It should not be a permanent textarea in every inspector.
+Its job is to help answer:
 
-A user deliberately chooses an action such as:
+- Who is involved?
+- What is each worker doing?
+- What tools and artifacts are in use?
+- How are they related?
+- Which worker or surface do I want to inspect?
 
-- **Message Claude**
-- **Open terminal**
-- **Redirect task**
-- **Retry**
-- **Stop worker**
+The canvas should not be surrounded by permanent panels simply because those panels exist.
 
-Chef records the intervention as runtime state. The Orchestrator sees it and adapts if needed.
+Prefer contextual access to:
 
-This keeps direct control without creating a second invisible orchestration path.
+- Node Library
+- Inspector
+- direct worker messaging
+- relationship controls
+- runtime details
+- Rooms
+- context inspection
 
-## 11. Rooms and messages
+The user should be able to expand the Workbench into a dense engineering environment, but density must be intentional.
 
-Agent-to-agent messaging and channels remain useful runtime capabilities.
+## 11. Direct worker interaction
 
-They should not be a required top-level navigation concept for normal work.
+Direct worker interaction remains a core Chef capability.
 
-Default users should see meaningful collaboration through activity summaries and Mission progress.
+It is not removed. Its UX role changes.
 
-Rooms, channels, and raw messages belong in Workbench or debug depth unless a future use case proves they deserve a first-class product surface.
+Default flow:
 
-## 12. Bug-resistance rules
+`Chef composer → Orchestrator → coordinated work`
 
-The UI redesign must reduce state duplication, not only change visual styling.
+Advanced flow:
 
-### 12.1 Runtime authority
+`Workbench → select worker → contextual action → talk directly / open surface / intervene`
 
-The runtime remains authoritative for:
+This preserves control without teaching casual users that they must decide whether to message Chef, a node, a Room, a terminal, or an inspector textarea for every request.
 
-- Mission state;
-- task state;
-- agent identity;
-- session lifecycle;
-- approvals;
-- artifacts;
-- events;
-- messages;
-- execution state.
+## 12. Rooms and messages
 
-UI components must not invent parallel lifecycle state when runtime state already exists.
+Rooms are useful for advanced collaboration and observability, but they are not top-level navigation in the default product experience.
 
-### 12.2 Derived presentation
+They should be reachable from Workbench or collaboration context when useful.
 
-Top-level labels, counters, and summaries should be derived from the same normalized runtime state.
+The event/message system remains durable and authoritative regardless of whether Rooms are visible.
 
-Do not independently compute Mission status in the Mission panel, graph node, inspector, and header.
+## 13. Automations
 
-### 12.3 One entity, one active identity
+Automations remain intentionally separate from normal Mission work.
 
-Selecting an agent, opening its surface, and inspecting its session must refer to the same underlying entity mapping.
+Normal Mission:
 
-A surface is a view of an entity. It is not a second entity with a separate lifecycle.
+`give outcome → Chef coordinates continuously`
 
-### 12.4 Event-driven updates
+Automation:
 
-Important state transitions should come from persisted runtime events or authoritative runtime queries. Avoid local optimistic state that can survive after the runtime disagrees.
+`define repeatable behavior → run / schedule / stop / retry`
 
-### 12.5 Friendly status is a projection
+Explicit Run/Stop controls belong to Automations and other intentionally executable processes, not to the default Chef goal loop.
 
-A user-facing status such as **Working** can summarize several valid runtime states. It must not become a second state machine that the runtime has to synchronize manually.
+## 14. UI architecture rules for reliability
 
-## 13. What should leave the default UI
+The new UI direction is also a reliability strategy.
 
-The next overhaul should remove or demote these elements from the default experience:
+### 14.1 No parallel lifecycle truth
 
-- duplicate global Chef inputs;
-- permanent Rooms navigation;
-- permanent Node Library;
-- permanent inspector;
-- permanent direct-intervention textarea;
-- raw task and session IDs;
-- raw permission chips;
-- raw event-stream state;
-- floating terminal/browser surfaces by default;
-- the hard Simple / Power mode toggle.
+Frontend components must not invent independent Mission, task, node, or session lifecycle state when the runtime already owns it.
 
-These capabilities are not deleted. They move to the depth where they are useful.
+Local state may control presentation such as:
 
-## 14. What must remain easy to reach
+- selected object
+- open panel
+- composer draft
+- viewport
+- temporary resize dimensions
 
-Simplification must not cripple Chef for developers.
+Local state must not independently decide whether authoritative work is running, failed, completed, blocked, or approved.
 
-From the Workbench, a power user should still be able to quickly:
+### 14.2 Derive status from one runtime snapshot
 
-- inspect any agent;
-- open a real terminal;
-- open a browser session;
-- inspect task relationships;
-- inspect artifacts;
-- message a worker directly;
-- stop or retry work;
-- inspect context;
-- inspect events and logs;
-- configure agents and tools;
-- understand why the Orchestrator made an important decision.
+Mission summaries, counters, node badges, activity, and inspectors should derive from the same authoritative runtime projection whenever possible.
 
-The goal is fewer competing controls, not fewer capabilities.
+Avoid multiple polling/subscription paths that independently infer the same status.
 
-## 15. UX acceptance tests
+### 14.3 Stable entity identity
 
-### 15.1 First-time user
+A node, task, session, and surface are related entities, not interchangeable IDs.
 
-Give Chef to a user who does not know what an agent harness, PTY, task graph, or event bus is.
+UI code must make that relationship explicit rather than storing whichever ID happens to be convenient in a generic selection field.
 
-Without documentation, the user should be able to:
+### 14.4 One owner for interactive process surfaces
 
-1. give Chef a goal;
-2. understand that work started;
-3. see meaningful progress;
-4. notice when Chef needs input;
-5. approve or reject the request;
-6. understand when the work is done;
-7. open the result.
+The component that owns an interactive terminal/browser surface owns its UI connection lifecycle.
 
-If the user asks which input they should use to talk to Chef, the design failed.
+Canvas selection may request a surface to open, but should not also implement a second stream/session lifecycle.
 
-### 15.2 Developer
+### 14.5 Do not persist presentation projections as runtime semantics
 
-A developer should be able to move from the same default experience into the Workbench and:
+Friendly layout, collapsed status, hidden details, Home cards, and activity grouping are presentation.
 
-1. identify which worker owns a task;
-2. inspect the live terminal or browser;
-3. send a direct intervention;
-4. inspect relevant logs and events;
-5. understand a failure;
-6. return to the high-level Mission without losing context.
+Do not write those projections back into runtime state unless the user actually changed an authoritative object.
 
-### 15.3 State consistency
+## 15. Visual direction
 
-For one Mission, the header, activity view, node cards, inspector, and surfaces must not report conflicting interpretations of whether the work is active, waiting, failed, or complete.
+Chef should feel like a modern desktop AI product, not a generic admin dashboard and not a purple agent-builder template.
 
-## 16. Implementation order
+Direction:
 
-The next UI overhaul should prefer interaction simplification before visual polish.
+- restrained dark or warm-neutral surfaces depending on context
+- deliberate red/coral Chef accent
+- strong typography hierarchy
+- fewer simultaneous borders and boxes
+- generous focus around the current outcome
+- compact dense Workbench when requested
+- polished, high-information UI without decorative AI-dashboard clutter
+- motion for state transitions, not constant ambient noise
 
-### Phase 1: establish one control plane
+Avoid visual treatment that implies every capability deserves a permanent panel.
 
-- keep one primary Chef composer;
-- create one Current Work surface;
-- create one Attention surface;
-- create one Results surface;
-- move secondary controls behind contextual actions.
+## 16. UX guardrails
 
-### Phase 2: make Workbench a deliberate depth
+Before adding a new visible control, ask:
 
-- move graph editing and runtime-heavy controls into Workbench;
-- make nodes compact;
-- separate nodes from interactive surfaces;
-- use stable docked work surfaces.
+1. Is this needed for the user's outcome, or only for runtime inspection?
+2. Does another UI already perform this action?
+3. Could this be contextual instead of permanent?
+4. Is this state already represented somewhere else?
+5. Would a non-technical user know which of the competing controls to choose?
 
-### Phase 3: normalize presentation state
+If two different top-level inputs can both plausibly answer "tell Chef what I want", remove or demote one.
 
-- derive top-level status from authoritative runtime state;
-- remove duplicated local lifecycle logic;
-- unify entity selection and surface identity;
-- test failure, retry, cancellation, and session-exit paths.
+## 17. First implementation slice
 
-### Phase 4: polish
+The first slice should prove the hierarchy without rewriting the runtime.
 
-Only after the interaction model is stable:
+### Phase A: Entry surface
 
-- refine motion;
-- refine spatial layout;
-- refine visual hierarchy;
-- add richer artifact previews;
-- add semantic zoom where it helps.
+- add Chef Home / Activity as the default entry
+- make the existing graph UI the Workbench
+- provide obvious navigation into and out of Workbench
+- reuse the existing Orchestrator chat/Mission API
 
-## 17. Decision rules
+### Phase B: Activity projection
 
-When a new UI feature is proposed, ask:
+- derive simple Working / Needs attention / Done presentation from runtime state
+- show current Mission goal and meaningful worker activity
+- show pending approvals prominently
+- remove raw counters from the default experience
 
-1. Does this create another place to tell Chef what to do?
-2. Does this create another copy of state the UI must synchronize?
-3. Does a normal user need this before they can get an outcome?
-4. Can this live one level deeper without reducing capability?
-5. Is this representing runtime truth, or inventing frontend truth?
-6. Does this make Chef feel more like a capable team, or more like infrastructure software?
+### Phase C: Workbench cleanup
 
-If a feature adds another control plane or another lifecycle state without a strong reason, do not add it.
+- demote permanent Node Library and Inspector where practical
+- move Rooms out of global/default navigation
+- make direct intervention contextual
+- replace the Simple/Power switch with deeper inspection affordances
 
-## 18. Final product mantra
+### Phase D: Surface cleanup
 
-> **Tell Chef the outcome. See what matters. Go deeper only when you need to.**
+- make terminal/browser/agent surfaces stable and docked
+- ensure each surface has a single runtime connection owner
+- remove overlapping floating-surface state machines
 
-And for implementation:
+## 18. Acceptance tests
 
-> **One control plane. One runtime truth. Many levels of detail.**
+### Casual-user test
+
+A user who has never heard of agents, harnesses, PTYs, nodes, or context buses should be able to:
+
+1. open Chef
+2. type an outcome
+3. understand that Chef is working
+4. see when Chef needs permission or input
+5. understand when the work is done
+
+They should not need to open Workbench.
+
+### Developer test
+
+A developer should be able to:
+
+1. give Chef an outcome from the same default surface
+2. open Workbench
+3. inspect workers and relationships
+4. open a terminal/browser/agent surface
+5. directly intervene when desired
+6. inspect runtime/debug detail when troubleshooting
+7. return to the normal Chef view without losing state
+
+### Reliability test
+
+The UI must not require several independently synchronized status models to explain one Mission.
+
+For a given runtime snapshot, the default surface must produce one coherent user-level state.
+
+## 19. Decision rule
+
+When UX convenience and runtime correctness conflict:
+
+> **Runtime state remains authoritative. Simplify the projection, not the runtime contract.**
+
+When advanced capability and default usability conflict:
+
+> **Keep the capability. Move it deeper.**
+
+When graph visibility and user intent conflict:
+
+> **Intent wins by default. Workbench remains one click away.**
+
+## 20. Implementation status
+
+The first bounded implementation slice now follows this document:
+
+- `IntentHome` is the default entry surface for fresh sessions.
+- the primary composer uses the existing `/api/chat` Orchestrator path.
+- current Mission/task state, approvals, and latest Chef output are projected on Home.
+- user-facing activity is collapsed to Ready, Working, Needs attention, and Work complete.
+- the existing graph UI and advanced feature overlays remain intact behind **Open Workbench**.
+- the selected product surface is presentation-only local state and does not mutate runtime lifecycle state.
+- a regression test guards the intent-first entry and keeps Workbench/runtime machinery out of the default Home component.
+
+This is intentionally the first slice, not the completion of Phases C and D. Workbench panel cleanup and interactive-surface ownership remain follow-up implementation work.
