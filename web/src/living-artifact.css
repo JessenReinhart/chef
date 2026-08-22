@@ -1,17 +1,20 @@
 .chef-result-cluster {
   position: absolute;
-  top: clamp(88px, 14vh, 150px);
-  right: clamp(20px, 4vw, 58px);
+  top: clamp(82px, 12vh, 132px);
+  right: clamp(18px, 3vw, 48px);
   z-index: 8;
-  width: min(300px, calc(100vw - 40px));
+  width: min(510px, calc(100vw - 36px));
+  height: 360px;
   pointer-events: none;
 }
 
 .chef-result-cluster__label {
+  position: absolute;
+  top: 8px;
+  right: 8px;
   display: flex;
   align-items: center;
   gap: 7px;
-  margin: 0 10px 10px auto;
   width: max-content;
   padding: 5px 9px;
   border: 1px solid rgba(137, 105, 94, 0.18);
@@ -39,15 +42,18 @@
 }
 
 .chef-result-card {
-  --chef-result-shift: calc(var(--chef-result-index) * 10px);
-  position: relative;
+  --chef-result-x: 150px;
+  --chef-result-y: 72px;
+  --chef-result-rotate: 0deg;
+  position: absolute;
+  top: var(--chef-result-y);
+  right: var(--chef-result-x);
   display: grid;
   grid-template-columns: 42px minmax(0, 1fr) 30px;
   align-items: center;
   gap: 10px;
+  width: min(270px, calc(100vw - 52px));
   min-height: 74px;
-  margin-top: -7px;
-  margin-left: var(--chef-result-shift);
   padding: 10px 11px;
   border: 1px solid rgba(137, 105, 94, 0.17);
   border-radius: 18px 18px 18px 7px;
@@ -56,15 +62,46 @@
   box-shadow: 0 16px 45px rgba(84, 58, 48, 0.11);
   backdrop-filter: blur(16px);
   pointer-events: auto;
+  transform: rotate(var(--chef-result-rotate));
   animation: chef-result-arrive 320ms cubic-bezier(.22,.9,.3,1) both;
   animation-delay: calc(var(--chef-result-index) * 45ms);
   transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
 }
 
-.chef-result-card:hover {
-  transform: translate(-5px, -2px) rotate(-0.4deg);
+.chef-result-card[data-result-slot="near"] {
+  --chef-result-x: 92px;
+  --chef-result-y: 108px;
+  --chef-result-rotate: -1deg;
+  z-index: 4;
+}
+
+.chef-result-card[data-result-slot="upper"] {
+  --chef-result-x: 12px;
+  --chef-result-y: 48px;
+  --chef-result-rotate: 1.2deg;
+  z-index: 3;
+}
+
+.chef-result-card[data-result-slot="outer"] {
+  --chef-result-x: 0px;
+  --chef-result-y: 192px;
+  --chef-result-rotate: -0.7deg;
+  z-index: 2;
+}
+
+.chef-result-card[data-result-slot="lower"] {
+  --chef-result-x: 154px;
+  --chef-result-y: 242px;
+  --chef-result-rotate: 0.8deg;
+  z-index: 1;
+}
+
+.chef-result-card:hover,
+.chef-result-card:focus-within {
+  transform: translate(-5px, -3px) rotate(0deg) scale(1.015);
   border-color: rgba(221, 101, 77, 0.31);
-  box-shadow: 0 20px 52px rgba(84, 58, 48, 0.15);
+  box-shadow: 0 22px 56px rgba(84, 58, 48, 0.16);
+  z-index: 6;
 }
 
 .chef-result-card__icon {
@@ -138,8 +175,10 @@
 }
 
 .chef-result-cluster__more {
+  position: absolute;
+  top: 44px;
+  right: 4px;
   display: block;
-  margin: 9px 4px 0 auto;
   padding: 7px 10px;
   border: 1px solid rgba(137, 105, 94, 0.15);
   border-radius: 999px;
@@ -159,8 +198,9 @@
 
 .chef-artifact-shelf {
   position: absolute;
-  top: 28px;
+  top: 78px;
   right: 0;
+  z-index: 10;
   width: min(390px, calc(100vw - 32px));
   max-height: min(560px, calc(100vh - 180px));
   overflow: hidden;
@@ -305,8 +345,55 @@
 }
 
 @keyframes chef-result-arrive {
-  from { opacity: 0; transform: translate(18px, 8px) scale(0.96); }
-  to { opacity: 1; transform: translate(0, 0) scale(1); }
+  from { opacity: 0; transform: translate(24px, 12px) rotate(var(--chef-result-rotate)) scale(0.94); }
+  to { opacity: 1; transform: translate(0, 0) rotate(var(--chef-result-rotate)) scale(1); }
+}
+
+@media (max-width: 980px) {
+  .chef-result-cluster {
+    width: min(360px, calc(100vw - 28px));
+    height: auto;
+  }
+
+  .chef-result-card {
+    position: relative;
+    top: auto;
+    right: auto;
+    width: min(290px, calc(100vw - 42px));
+    margin: 0 0 -7px auto;
+    transform: none;
+  }
+
+  .chef-result-card[data-result-slot] {
+    z-index: auto;
+  }
+
+  .chef-result-card:hover,
+  .chef-result-card:focus-within {
+    transform: translate(-4px, -2px);
+  }
+
+  .chef-result-cluster__label,
+  .chef-result-cluster__more,
+  .chef-artifact-shelf {
+    position: relative;
+    top: auto;
+    right: auto;
+    margin-left: auto;
+  }
+
+  .chef-result-cluster__label {
+    margin-bottom: 10px;
+  }
+
+  .chef-result-cluster__more {
+    width: max-content;
+    margin-top: 10px;
+  }
+
+  .chef-artifact-shelf {
+    margin-top: 10px;
+  }
 }
 
 @media (max-width: 760px) {
@@ -319,6 +406,7 @@
   .chef-result-card {
     grid-template-columns: 36px minmax(0, 1fr) 28px;
     min-height: 64px;
+    width: 100%;
   }
 
   .chef-result-card__icon {
