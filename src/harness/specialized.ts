@@ -12,6 +12,12 @@ export interface SpecializedCliOptions {
   name: string;
   binary: string;
   flags?: string[];
+  /**
+   * Build a one-shot CLI invocation for a Mission Task. When omitted the
+   * adapter remains interactive-only and must not be auto-routed for Mission
+   * execution.
+   */
+  taskArgs?: (prompt: string) => string[];
   env?: Record<string, string | undefined>;
   cwd?: string;
   workspaceId?: string;
@@ -19,7 +25,12 @@ export interface SpecializedCliOptions {
   pollIntervalMs?: number;
 }
 
-export type SpecializedSpawnOptions = SpawnOptions;
+export type SpecializedSpawnOptions = SpawnOptions & { taskPrompt?: string };
+
+export interface TaskLaunch {
+  command: string;
+  args: string[];
+}
 
 export class SpecializedCliHarness {
   readonly id: string;
@@ -27,6 +38,7 @@ export class SpecializedCliHarness {
   readonly name: string;
   readonly #binary: string;
   readonly #flags: string[];
+  readonly #taskArgs: ((prompt: string) => string[]) | undefined;
   readonly #env: Record<string, string | undefined>;
   readonly #cwd: string;
   readonly #harness: GenericTerminalHarness;
@@ -38,6 +50,7 @@ export class SpecializedCliHarness {
     this.name = options.name;
     this.#binary = options.binary;
     this.#flags = [...(options.flags ?? [])];
+    this.#taskArgs = options.taskArgs;
     this.#env = { ...(options.env ?? {}) };
     this.#cwd = options.cwd ?? process.cwd();
     this.#harness = new GenericTerminalHarness(
@@ -56,6 +69,14 @@ export class SpecializedCliHarness {
   get command(): string { return this.#binary; }
   get args(): string[] { return [...this.#flags]; }
   get cwd(): string { return this.#cwd; }
+  get taskCapable(): boolean { return this.#taskArgs !== undefined; }
+
+  taskLaunch(prompt: string): TaskLaunch {
+    if (!this.#taskArgs) {
+      throw new Error(`${this.name} does not support bounded Mission task execution`);
+    }
+    return { command: this.#binary, args: this.#taskArgs(prompt) };
+  }
 
   async detect(): Promise<boolean> {
     if (isAbsolute(this.#binary) || this.#binary.includes("/") || this.#binary.includes("\\")) {
@@ -83,10 +104,13 @@ export class SpecializedCliHarness {
   }
 
   spawn(options: SpecializedSpawnOptions = {}): Promise<HarnessSession> {
+    const args = options.taskPrompt !== undefined
+      ? this.taskLaunch(options.taskPrompt).args
+      : this.#flags;
     return this.#harness.spawn({
       sessionId: options.sessionId,
       command: this.#binary,
-      args: this.#flags,
+      args,
       cwd: options.cwd ?? this.#cwd,
       env: { ...this.#env, ...options.env },
       cols: options.cols ?? 120,
