@@ -63,12 +63,18 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
     return tasks.filter((task) => ids.has(task.id)).slice(-6).reverse();
   }, [latestMission, tasks]);
 
+  const missionApprovals = useMemo(() => {
+    if (!latestMission) return approvals;
+    const ids = new Set(latestMission.taskIds);
+    return approvals.filter((approval) => ids.has(approval.taskId));
+  }, [approvals, latestMission]);
+
   const homeState = useMemo<HomeState>(() => {
-    if (approvals.length > 0 || missionTasks.some((task) => task.status === "failed" || task.status === "blocked")) return "attention";
+    if (missionApprovals.length > 0 || missionTasks.some((task) => task.status === "failed" || task.status === "blocked")) return "attention";
     if (missionTasks.some((task) => task.status === "running" || task.status === "assigned" || task.status === "spawning")) return "working";
     if (latestMission?.status === "completed" || (missionTasks.length > 0 && missionTasks.every((task) => task.status === "completed"))) return "done";
     return "ready";
-  }, [approvals.length, latestMission?.status, missionTasks]);
+  }, [latestMission?.status, missionApprovals.length, missionTasks]);
 
   const status = missionPresentation(homeState);
   const latestAssistantMessage = useMemo(
@@ -181,7 +187,7 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
           )}
         </section>
 
-        {(latestMission || approvals.length > 0 || missionTasks.length > 0 || latestAssistantMessage || lastReport) && (
+        {(latestMission || missionApprovals.length > 0 || missionTasks.length > 0 || latestAssistantMessage || lastReport) && (
           <section className="mt-12 grid gap-4 lg:grid-cols-[1.25fr_0.75fr]">
             <div className="rounded-2xl border border-white/[0.08] bg-white/[0.025] p-5">
               <div className="flex items-start justify-between gap-4">
@@ -224,10 +230,10 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
             </div>
 
             <div className="space-y-4">
-              {approvals.length > 0 && (
+              {missionApprovals.length > 0 && (
                 <div className="rounded-2xl border border-amber-300/20 bg-amber-300/[0.05] p-5">
                   <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-amber-300/60">Needs your attention</div>
-                  {approvals.slice(0, 2).map((approval) => (
+                  {missionApprovals.slice(0, 2).map((approval) => (
                     <div key={approval.id} className="mt-3 border-t border-amber-200/10 pt-3 first:border-0 first:pt-0">
                       <p className="text-xs leading-5 text-zinc-300">{approval.reason}</p>
                       <div className="mt-3 flex gap-2">
