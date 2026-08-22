@@ -11,6 +11,7 @@ import { ChannelRoomsFeature } from "./ChannelRoomsFeature";
 import { AgentContextInspector } from "./AgentContextInspector";
 import "./index.css";
 import "./visual-audit.css";
+import "./advanced-workspace.css";
 
 function ChefRoot() {
   const [viewMode, setViewMode] = useState(() => localStorage.getItem("chef:view-mode") === "power" ? "power" : "simple");
