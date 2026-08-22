@@ -1,5 +1,8 @@
 import { strict as assert } from "node:assert";
-import { parseModelJsonObject } from "../src/orchestrator/llm-decision-provider.ts";
+import {
+	parseModelJsonObject,
+	parseOpenAICompatibleResponseBody,
+} from "../src/orchestrator/llm-decision-provider.ts";
 
 const plan = {
 	goal: "Fix the bug",
@@ -49,4 +52,43 @@ assert.throws(
 	"malformed JSON must not be repaired or accepted",
 );
 
-console.log("llm-json-output: ok — wrapped provider JSON is tolerated without repairing malformed JSON");
+const completionEnvelope = JSON.stringify({
+	id: "chatcmpl-test",
+	choices: [{ message: { role: "assistant", content: json } }],
+});
+assert.equal(
+	parseOpenAICompatibleResponseBody(completionEnvelope),
+	json,
+	"normal OpenAI-compatible completion responses should return message content",
+);
+
+const appendedMetadata = `${completionEnvelope}\n${JSON.stringify({ debug: { elapsedMs: 12 } })}`;
+assert.throws(
+	() => JSON.parse(appendedMetadata),
+	/JSON/,
+	"fixture must reproduce the response.json failure from trailing JSON",
+);
+assert.equal(
+	parseOpenAICompatibleResponseBody(appendedMetadata),
+	json,
+	"a valid completion followed by gateway metadata must remain usable",
+);
+
+const sseLikeBody = [
+	`data: ${JSON.stringify({ choices: [{ delta: { content: "hello " } }] })}`,
+	`data: ${JSON.stringify({ choices: [{ delta: { content: "world" } }] })}`,
+	"data: [DONE]",
+].join("\n\n");
+assert.equal(
+	parseOpenAICompatibleResponseBody(sseLikeBody),
+	"hello world",
+	"accidental SSE/streaming chunks should be reassembled when the gateway ignores stream=false",
+);
+
+assert.throws(
+	() => parseOpenAICompatibleResponseBody("gateway returned plain text"),
+	/no valid JSON object/,
+	"transport bodies without any JSON must still fail closed",
+);
+
+console.log("llm-json-output: ok — model JSON and nonstandard OpenAI-compatible transport wrappers are tolerated");
