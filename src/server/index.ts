@@ -23,6 +23,12 @@ const projectDir = resolve(process.env.CHEF_PROJECT_DIR ?? process.cwd());
 const dbPath = resolve(process.env.CHEF_DB_PATH ?? join(projectDir, ".chef", "chef.sqlite"));
 const chefRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const webDistDir = resolve(process.env.CHEF_WEB_DIST ?? join(chefRoot, "web", "dist"));
+const missionTimeoutMs = process.env.CHEF_MISSION_TIMEOUT_MS
+  ? Number(process.env.CHEF_MISSION_TIMEOUT_MS)
+  : 4 * 60 * 60 * 1000;
+if (!Number.isFinite(missionTimeoutMs) || missionTimeoutMs <= 0) {
+  throw new Error(`CHEF_MISSION_TIMEOUT_MS must be a positive number (received ${process.env.CHEF_MISSION_TIMEOUT_MS})`);
+}
 mkdirSync(dirname(dbPath), { recursive: true });
 
 // Chef's persisted orchestrator key must win during provider construction, but
@@ -33,7 +39,7 @@ if (process.env.CHEF_PROVIDER && process.env.CHEF_API_KEY) {
   delete process.env.ANTHROPIC_API_KEY;
   delete process.env.OPENAI_API_KEY;
 }
-const chef = createChef({ dbPath, projectDir });
+const chef = createChef({ dbPath, projectDir, orchestratorTimeoutMs: missionTimeoutMs });
 if (inheritedAnthropicKey === undefined) delete process.env.ANTHROPIC_API_KEY;
 else process.env.ANTHROPIC_API_KEY = inheritedAnthropicKey;
 if (inheritedOpenAIKey === undefined) delete process.env.OPENAI_API_KEY;
@@ -86,6 +92,7 @@ server.listen(port, "127.0.0.1", () => {
   console.log(`chef listening on http://127.0.0.1:${listeningPort}`);
   console.log(`  web client:        ${webDistDir}`);
   console.log(`  durable database:  ${dbPath}`);
+  console.log(`  mission timeout:   ${missionTimeoutMs} ms`);
   console.log(`  GET  /api/state    — workspace snapshot`);
   console.log(`  GET  /api/events   — live SSE event stream`);
   console.log(`  GET  /api/context-scopes — shared context scopes`);

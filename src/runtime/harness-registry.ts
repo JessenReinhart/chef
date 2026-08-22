@@ -11,6 +11,7 @@ import type { HarnessLike } from "./scheduler.ts";
 export interface DetectableHarness extends HarnessLike {
   readonly type: string;
   readonly name: string;
+  readonly taskCapable?: boolean;
   detect(): Promise<boolean>;
 }
 export interface HarnessDetection {
@@ -19,6 +20,7 @@ export interface HarnessDetection {
   type: string;
   command: string;
   available: boolean;
+  taskCapable: boolean;
 }
 export interface HarnessRegistryOptions { workspaceId?: string; cwd?: string; includeDefaults?: boolean; }
 
@@ -57,6 +59,7 @@ export class HarnessRegistry {
           type: harness.type,
           command: harness.command,
           available,
+          taskCapable: harness.taskCapable === true,
         });
       } catch {
         if (harness) await harness.close().catch(() => undefined);
@@ -66,6 +69,7 @@ export class HarnessRegistry {
           type: harness?.type ?? candidate.id,
           command: harness?.command ?? candidate.id,
           available: false,
+          taskCapable: harness?.taskCapable === true,
         });
       }
     }
@@ -75,6 +79,11 @@ export class HarnessRegistry {
   get(id: string): DetectableHarness | undefined { return this.#available.get(id); }
   values(): Iterable<DetectableHarness> { return this.#available.values(); }
   availableIds(): string[] { return [...this.#available.keys()]; }
+  taskCapableIds(): string[] {
+    return [...this.#available.entries()]
+      .filter(([, harness]) => harness.taskCapable === true)
+      .map(([id]) => id);
+  }
   detections(): HarnessDetection[] { return this.#detections.map((result) => ({ ...result })); }
   async close(): Promise<void> { await Promise.allSettled([...this.#available.values()].map((h) => h.close())); }
 }

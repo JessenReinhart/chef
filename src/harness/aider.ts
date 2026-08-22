@@ -17,6 +17,7 @@ export class AiderHarness extends SpecializedCliHarness {
       type: "aider",
       name: "Aider",
       binary,
+      taskArgs: (prompt) => ["--message", prompt],
       ...runtime,
     });
   }

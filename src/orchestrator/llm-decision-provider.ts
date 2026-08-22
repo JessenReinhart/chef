@@ -138,6 +138,118 @@ export function parseModelJsonObject(text: string): Record<string, unknown> {
 	}
 }
 
+function parseTopLevelJsonObjects(text: string): Record<string, unknown>[] {
+	const objects: Record<string, unknown>[] = [];
+	const trimmed = text.trim();
+	if (!trimmed) return objects;
+
+	try {
+		objects.push(asJsonObject(JSON.parse(trimmed) as unknown));
+		return objects;
+	} catch {
+		// Compatibility path below handles wrappers, NDJSON, SSE and concatenated objects.
+	}
+
+	let searchFrom = 0;
+	while (searchFrom < text.length) {
+		const start = text.indexOf("{", searchFrom);
+		if (start < 0) break;
+		const end = findBalancedObjectEnd(text, start);
+		if (end === null) {
+			searchFrom = start + 1;
+			continue;
+		}
+		const candidate = text.slice(start, end + 1);
+		try {
+			objects.push(asJsonObject(JSON.parse(candidate) as unknown));
+			searchFrom = end + 1;
+		} catch {
+			searchFrom = start + 1;
+		}
+	}
+	return objects;
+}
+
+function readChoiceContent(envelope: Record<string, unknown>, field: "message" | "delta"): string | null {
+	const choices = envelope.choices;
+	if (!Array.isArray(choices) || choices.length === 0) return null;
+	const choice = choices[0];
+	if (typeof choice !== "object" || choice === null || Array.isArray(choice)) return null;
+	const container = (choice as Record<string, unknown>)[field];
+	if (typeof container !== "object" || container === null || Array.isArray(container)) return null;
+	const content = (container as Record<string, unknown>).content;
+	return typeof content === "string" ? content : null;
+}
+
+/**
+ * Decode the HTTP body returned by an OpenAI-compatible provider.
+ *
+ * The OpenAI contract is one JSON object when `stream: false`, but local
+ * gateways sometimes append metadata, emit NDJSON, or return SSE-like chunks
+ * even for a non-streaming request. Parsing the body with `response.json()`
+ * makes those otherwise usable responses fail before Chef can inspect them.
+ */
+export function parseOpenAICompatibleResponseBody(text: string): string {
+	const objects = parseTopLevelJsonObjects(text);
+	if (objects.length === 0) {
+		throw new Error("OpenAI-compatible provider returned a body with no valid JSON object");
+	}
+
+	// Prefer a complete message if any envelope contains one. Search from the
+	// end because some gateways append a final normalized completion envelope.
+	for (let index = objects.length - 1; index >= 0; index -= 1) {
+		const content = readChoiceContent(objects[index], "message");
+		if (content) return content;
+	}
+
+	// Compatibility with accidental streaming/NDJSON responses.
+	let streamedContent = "";
+	for (const object of objects) {
+		streamedContent += readChoiceContent(object, "delta") ?? "";
+	}
+	if (streamedContent) return streamedContent;
+
+	const providerError = objects.find((object) => object.error !== undefined)?.error;
+	if (providerError !== undefined) {
+		let detail: string;
+		try {
+			detail = JSON.stringify(providerError);
+		} catch {
+			detail = String(providerError);
+		}
+		throw new Error(`OpenAI-compatible provider returned an error payload: ${detail.slice(0, 800)}`);
+	}
+
+	throw new Error(`OpenAI-compatible provider returned ${objects.length} JSON object(s) but no message content`);
+}
+
+function isLLMDebugEnabled(): boolean {
+	return ["1", "true", "yes", "on"].includes((process.env.CHEF_LLM_DEBUG ?? "").toLowerCase());
+}
+
+function debugPreview(text: string, limit = 1200): string {
+	const normalized = text.replace(/\s+/g, " ").trim();
+	return normalized.length > limit ? `${normalized.slice(0, limit)}…` : normalized;
+}
+
+function sanitizeEndpoint(endpoint: string): string {
+	try {
+		const url = new URL(endpoint);
+		url.username = "";
+		url.password = "";
+		url.search = "";
+		url.hash = "";
+		return url.toString();
+	} catch {
+		return "<invalid endpoint>";
+	}
+}
+
+function llmDebug(event: string, details: Record<string, unknown>): void {
+	if (!isLLMDebugEnabled()) return;
+	console.error(`[chef:llm] ${event} ${JSON.stringify(details)}`);
+}
+
 // ---------------------------------------------------------------------------
 // LLM Decision Provider
 // ---------------------------------------------------------------------------
@@ -179,15 +291,24 @@ export class LLMDecisionProvider implements DecisionProvider {
 			return this.#fallback.proposePlan(input);
 		}
 
-		const nodeTypes = this.#getNodeTypeInfos();
-		const systemPrompt = this.#buildSystemPrompt(nodeTypes);
+		const workers = input.availableWorkers ?? [];
+		if (workers.length === 0) {
+			throw new Error("LLM plan proposal failed: no task-capable AI workers are available");
+		}
+		const nodeTypes = this.#getMissionNodeTypeInfos();
+		const systemPrompt = this.#buildSystemPrompt(nodeTypes, workers);
 		const userPrompt = this.#buildUserPrompt(input);
 
 		try {
 			const response = await this.#callLLM(systemPrompt, userPrompt);
-			return this.#parsePlan(response, input.workspaceId, input.goal);
+			return this.#parsePlan(response, input.workspaceId, input.goal, workers.map((worker) => worker.id));
 		} catch (error) {
 			const errorMessage = error instanceof Error ? error.message : String(error);
+			llmDebug("plan.error", {
+				provider: this.#config.provider,
+				model: this.#config.model,
+				error: errorMessage,
+			});
 			throw new Error(`LLM plan proposal failed: ${errorMessage}`);
 		}
 	}
@@ -242,55 +363,60 @@ Return a JSON object with:
 		}
 	}
 
-	#getNodeTypeInfos(): NodeTypeInfo[] {
-		return nodeRegistry.list().map((def: NodeDefinition) => ({
-			type: def.type,
-			category: def.category,
-			label: def.label,
-			description: def.description,
-			inputs: def.inputs.map((port) => ({
-				id: port.id,
-				label: port.label,
-				type: port.type,
-				required: port.required,
-			})),
-			outputs: def.outputs.map((port) => ({
-				id: port.id,
-				label: port.label,
-				type: port.type,
-				required: port.required,
-			})),
-			configSchema: {},
-			configDefaults: def.config.defaults(),
-		}));
+	#getMissionNodeTypeInfos(): NodeTypeInfo[] {
+		return nodeRegistry.list()
+			.filter((def: NodeDefinition) => def.type === "agent.llm")
+			.map((def: NodeDefinition) => ({
+				type: def.type,
+				category: def.category,
+				label: def.label,
+				description: def.description,
+				inputs: def.inputs.map((port) => ({
+					id: port.id,
+					label: port.label,
+					type: port.type,
+					required: port.required,
+				})),
+				outputs: def.outputs.map((port) => ({
+					id: port.id,
+					label: port.label,
+					type: port.type,
+					required: port.required,
+				})),
+				configSchema: {},
+				configDefaults: def.config.defaults(),
+			}));
 	}
 
-	#buildSystemPrompt(nodeTypes: NodeTypeInfo[]): string {
+	#buildSystemPrompt(nodeTypes: NodeTypeInfo[], workers: NonNullable<PlanProposalContext["availableWorkers"]>): string {
 		const typesList = nodeTypes
 			.map(
 				(nodeType) =>
-					`- ${nodeType.type} (${nodeType.category}): ${nodeType.label} — ${nodeType.description}\n` +
-					`  Inputs: ${nodeType.inputs.map((input) => `${input.id}${input.required ? " (required)" : ""}`).join(", ")}\n` +
-					`  Outputs: ${nodeType.outputs.map((output) => `${output.id}${output.required ? " (required)" : ""}`).join(", ")}`,
+					`- ${nodeType.type} (${nodeType.category}): ${nodeType.label} — ${nodeType.description}`,
 			)
-			.join("\n\n");
+			.join("\n");
+		const workersList = workers.map((worker) => `- ${worker.id}: ${worker.name} (${worker.type})`).join("\n");
 
-		return `You are Chef, an AI workflow planner. You decompose user goals into structured plans using the available node types.
+		return `You are Chef, an AI Mission planner. Decompose the user's goal into bounded tasks that the runtime can execute.
 
-Available node types:
+Mission task types available in this runtime slice:
 ${typesList}
+
+Task-capable workers currently available:
+${workersList}
 
 Rules:
 1. Output ONLY valid JSON matching the Plan schema.
-2. Every task must use a valid node type from the list above.
-3. Task IDs must be unique strings (use UUIDs).
-4. Dependencies must reference other task IDs in the same plan.
-5. Priority: higher numbers run first (1 = normal, 0 = last).
-6. assignedTo should match a known agent type or be omitted.
-7. If a task requires human approval, add approvalId (UUID).
-8. Prefer linear chains; add branching only when necessary.
-9. Use human.approval nodes for gating; human.input for collecting user input.
-10. The plan must be executable by the runtime.`;
+2. Every task MUST include nodeType and it MUST be one of the Mission task types above.
+3. nodeType describes the kind of work. assignedTo is a worker identity. Never put a node type in assignedTo.
+4. assignedTo may be omitted to let the runtime route deterministically. If supplied, it MUST be one of the worker IDs above.
+5. Task IDs must be unique strings (use UUIDs).
+6. Dependencies must reference other task IDs in the same plan and must not reference the task itself.
+7. Priority: higher numbers run first (1 = normal, 0 = last).
+8. If a task requires human approval, add approvalId (UUID) to that task instead of creating a fake worker.
+9. Prefer the smallest useful plan. Add parallel branches only when they are genuinely independent.
+10. Tool/browser/file Mission nodes are not auto-executable in this runtime slice. Delegate such work to an agent.llm worker that can use its own tools.
+11. The plan must be executable by the runtime.`;
 	}
 
 	#buildUserPrompt(input: PlanProposalContext): string {
@@ -312,30 +438,55 @@ Return a Plan with tasks that achieve this goal.`;
 		try {
 			if (this.#config.provider === "openai" || this.#config.provider === "custom") {
 				const base = (this.#config.baseUrl ?? "https://api.openai.com/v1").replace(/\/$/, "");
-				const response = await fetch(`${base}/chat/completions`, {
+				const endpoint = `${base}/chat/completions`;
+				const requestBody = {
+					model: this.#config.model,
+					temperature: this.#config.temperature,
+					max_tokens: this.#config.maxTokens ?? 4096,
+					stream: false,
+					response_format: { type: "json_object" },
+					messages: [
+						{ role: "system", content: systemPrompt },
+						{ role: "user", content: `${userPrompt}\nReturn only valid JSON.` },
+					],
+				};
+				llmDebug("request", {
+					provider: this.#config.provider,
+					model: this.#config.model,
+					endpoint: sanitizeEndpoint(endpoint),
+					timeoutMs: this.#config.timeoutMs,
+					systemPromptChars: systemPrompt.length,
+					userPromptChars: userPrompt.length,
+				});
+				const response = await fetch(endpoint, {
 					method: "POST",
 					signal: controller.signal,
 					headers: {
 						"content-type": "application/json",
 						authorization: `Bearer ${this.#config.apiKey}`,
 					},
-					body: JSON.stringify({
-						model: this.#config.model,
-						temperature: this.#config.temperature,
-						max_tokens: this.#config.maxTokens ?? 4096,
-						response_format: { type: "json_object" },
-						messages: [
-							{ role: "system", content: systemPrompt },
-							{ role: "user", content: `${userPrompt}\nReturn only valid JSON.` },
-						],
-					}),
+					body: JSON.stringify(requestBody),
+				});
+				const responseBody = await response.text();
+				llmDebug("response", {
+					provider: this.#config.provider,
+					model: this.#config.model,
+					endpoint: sanitizeEndpoint(endpoint),
+					status: response.status,
+					contentType: response.headers.get("content-type"),
+					bodyChars: responseBody.length,
+					bodyPreview: debugPreview(responseBody),
 				});
 				if (!response.ok) {
-					throw new Error(`OpenAI-compatible request failed: HTTP ${response.status} ${await response.text()}`);
+					throw new Error(`OpenAI-compatible request failed: HTTP ${response.status} ${debugPreview(responseBody, 800)}`);
 				}
-				const data = await response.json() as { choices?: Array<{ message?: { content?: string | null } }> };
-				const content = data.choices?.[0]?.message?.content;
-				if (!content) throw new Error("OpenAI-compatible provider returned no message content");
+				const content = parseOpenAICompatibleResponseBody(responseBody);
+				llmDebug("content", {
+					provider: this.#config.provider,
+					model: this.#config.model,
+					contentChars: content.length,
+					contentPreview: debugPreview(content),
+				});
 				return content;
 			}
 
@@ -348,7 +499,7 @@ Return a Plan with tasks that achieve this goal.`;
 				messages: [{ role: "user", content: userPrompt }],
 				tools: [{
 					name: "propose_plan",
-					description: "Propose a structured workflow plan",
+					description: "Propose a structured Mission plan",
 					input_schema: {
 						type: "object",
 						properties: {
@@ -363,10 +514,11 @@ Return a Plan with tasks that achieve this goal.`;
 										description: { type: "string" },
 										dependencies: { type: "array", items: { type: "string" } },
 										priority: { type: "number" },
+										nodeType: { type: "string", enum: ["agent.llm"] },
 										assignedTo: { type: "string" },
 										approvalId: { type: "string" },
 									},
-									required: ["id", "title", "description", "dependencies", "priority"],
+									required: ["id", "title", "description", "dependencies", "priority", "nodeType"],
 									additionalProperties: false,
 								},
 							},
@@ -390,34 +542,59 @@ Return a Plan with tasks that achieve this goal.`;
 		}
 	}
 
-	#parsePlan(jsonStr: string, workspaceId: WorkspaceId, goal: string): Plan {
+	#parsePlan(jsonStr: string, workspaceId: WorkspaceId, goal: string, availableWorkerIds: string[]): Plan {
 		const parsed = parseModelJsonObject(jsonStr);
 		const rawTasks = parsed.tasks;
 
 		if (!Array.isArray(rawTasks)) {
 			throw new Error("Invalid plan: missing tasks array");
 		}
+		if (availableWorkerIds.length === 0) {
+			throw new Error("Invalid plan: no task-capable AI workers are available");
+		}
 
+		const workerIds = new Set(availableWorkerIds);
 		const tasks: PlanTask[] = rawTasks.map((value: unknown) => {
 			const task = value as Record<string, unknown>;
+			const nodeType = typeof task.nodeType === "string" ? task.nodeType : "";
+			if (!nodeType) throw new Error("Invalid plan: every task requires nodeType");
+			const definition = nodeRegistry.get(nodeType);
+			if (!definition) throw new Error(`Unknown Mission node type: ${nodeType}`);
+			if (nodeType !== "agent.llm") {
+				throw new Error(`Mission node type is not executable in V1: ${nodeType}`);
+			}
+			const explicitWorker = task.assignedTo ? String(task.assignedTo) : undefined;
+			if (explicitWorker && !workerIds.has(explicitWorker)) {
+				throw new Error(`Worker is not available for Mission execution: ${explicitWorker}`);
+			}
 			return {
 				id: String(task.id ?? crypto.randomUUID()),
 				title: String(task.title ?? "Untitled"),
 				description: String(task.description ?? ""),
 				dependencies: Array.isArray(task.dependencies) ? task.dependencies.map(String) : [],
 				priority: typeof task.priority === "number" ? task.priority : 0,
-				assignedTo: task.assignedTo ? String(task.assignedTo) : undefined,
+				nodeType,
+				assignedTo: explicitWorker ?? availableWorkerIds[0],
 				approvalId: task.approvalId ? String(task.approvalId) : undefined,
 			};
 		});
 
+		const ids = new Set<string>();
 		for (const task of tasks) {
-			if (!task.assignedTo) continue;
-			const definition = nodeRegistry.get(task.assignedTo);
-			if (!definition) {
-				throw new Error(`Unknown node type assigned: ${task.assignedTo}`);
+			if (ids.has(task.id)) throw new Error(`Invalid plan: duplicate task id ${task.id}`);
+			ids.add(task.id);
+		}
+		for (const task of tasks) {
+			for (const dependency of task.dependencies) {
+				if (dependency === task.id) throw new Error(`Invalid plan: task ${task.id} depends on itself`);
+				if (!ids.has(dependency)) throw new Error(`Invalid plan: task ${task.id} depends on unknown task ${dependency}`);
 			}
 		}
+
+		llmDebug("plan.routed", {
+			taskCount: tasks.length,
+			routes: tasks.map((task) => ({ taskId: task.id, nodeType: task.nodeType, worker: task.assignedTo })),
+		});
 
 		const createdAt = Date.now();
 		return {

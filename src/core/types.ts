@@ -270,11 +270,20 @@ export interface Decision {
   status: DecisionStatus;
 }
 
+/** Runtime-discovered worker that can execute one bounded Mission task. */
+export interface AvailableWorker {
+  id: AgentId;
+  name: string;
+  type: string;
+}
+
 export interface PlanProposalContext {
   workspaceId: WorkspaceId;
   goal: string;
   contextRefs?: ContextReference[];
   events?: RuntimeEvent[];
+  /** Live, task-capable workers that the runtime allows the planner to target. */
+  availableWorkers?: AvailableWorker[];
 }
 
 export interface PlanTaskOutcome {
@@ -308,6 +317,9 @@ export interface PlanTask {
   description: string;
   dependencies: string[];
   priority: number;
+  /** Kind of runtime work. New LLM Mission plans must supply this explicitly. */
+  nodeType?: string;
+  /** Logical worker identity. This is not a node type or process/session id. */
   assignedTo?: AgentId;
   /** Durable approval request id: the task holds until the human resolves it. */
   approvalId?: ApprovalId;
@@ -428,7 +440,7 @@ export interface CanvasNode {
   updatedAt: Timestamp;
 }
 
-/** Durable blueprint canvas edge. */
+/** Durable blueprint node exposed via runtime API. */
 export interface CanvasEdge {
   id: string;
   workspaceId: WorkspaceId;
