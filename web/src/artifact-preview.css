@@ -1,8 +1,10 @@
 .chef-result-card__inspect {
   display: grid;
+  grid-column: 1 / 3;
   grid-template-columns: 42px minmax(0, 1fr);
   align-items: center;
   gap: 10px;
+  width: 100%;
   min-width: 0;
   padding: 0;
   border: 0;
@@ -14,9 +16,11 @@
 
 .chef-artifact-shelf__inspect {
   display: grid;
+  grid-column: 1 / 3;
   grid-template-columns: 36px minmax(0, 1fr);
   align-items: center;
   gap: 9px;
+  width: 100%;
   min-width: 0;
   padding: 0;
   border: 0;
