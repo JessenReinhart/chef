@@ -1,4 +1,6 @@
-# Chef — Living Workspace UI Overhaul
+# Chef - Living Workspace UI Overhaul
+
+> **Superseded UI direction:** The current authoritative UI North Star is [`UI_NORTH_STAR_INTENT_FIRST.md`](./UI_NORTH_STAR_INTENT_FIRST.md). This document remains as historical context for the living-workspace iteration. Where the two documents conflict, follow the Intent First North Star.
 
 ## North star
 
