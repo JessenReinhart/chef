@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { ContextScopeFeature } from "./ContextScopeFeature";
@@ -15,21 +15,15 @@ import { IntentOnboarding } from "./IntentOnboarding";
 import "./index.css";
 import "./visual-audit.css";
 import "./advanced-workspace.css";
+import "./workbench-depth.css";
 
 type ProductSurface = "home" | "workbench";
 
+type WorkbenchDepth = "simple" | "power";
+
 function ChefRoot() {
   const [surface, setSurface] = useState<ProductSurface>(() => localStorage.getItem("chef:surface") === "workbench" ? "workbench" : "home");
-  const [viewMode, setViewMode] = useState(() => localStorage.getItem("chef:view-mode") === "power" ? "power" : "simple");
-
-  useEffect(() => {
-    if (surface !== "workbench") return;
-    const timer = window.setInterval(() => {
-      const next = localStorage.getItem("chef:view-mode") === "power" ? "power" : "simple";
-      setViewMode((current) => current === next ? current : next);
-    }, 200);
-    return () => window.clearInterval(timer);
-  }, [surface]);
+  const [viewMode, setViewMode] = useState<WorkbenchDepth>(() => localStorage.getItem("chef:view-mode") === "power" ? "power" : "simple");
 
   const openWorkbench = () => {
     localStorage.setItem("chef:surface", "workbench");
@@ -41,6 +35,12 @@ function ChefRoot() {
     setSurface("home");
   };
 
+  const toggleRuntimeDetails = () => {
+    const next: WorkbenchDepth = viewMode === "power" ? "simple" : "power";
+    localStorage.setItem("chef:view-mode", next);
+    setViewMode(next);
+  };
+
   if (surface === "home") {
     return <>
       <IntentHome onOpenWorkbench={openWorkbench} />
@@ -48,15 +48,31 @@ function ChefRoot() {
     </>;
   }
 
+  const runtimeDetailsVisible = viewMode === "power";
+
   return <>
-    <button
-      type="button"
-      onClick={openHome}
-      className="fixed left-[132px] top-[9px] z-[80] rounded-md border border-white/10 bg-[#0d1117]/90 px-2.5 py-1 text-[10px] font-medium text-[#8b949e] backdrop-blur transition hover:border-white/20 hover:text-[#e6edf3]"
-      aria-label="Return to Chef home"
-    >
-      ← Home
-    </button>
+    <div className="workbench-depth-controls" aria-label="Workbench navigation and depth">
+      <button
+        type="button"
+        onClick={openHome}
+        className="workbench-depth-controls__home"
+        aria-label="Return to Chef home"
+      >
+        ← Home
+      </button>
+      <button
+        type="button"
+        onClick={toggleRuntimeDetails}
+        className="workbench-depth-controls__runtime"
+        aria-pressed={runtimeDetailsVisible}
+        title="Reveal runtime and debugging detail only when you need it"
+      >
+        <span>Runtime details</span>
+        <span className="workbench-depth-controls__state" aria-hidden="true">
+          {runtimeDetailsVisible ? "Shown" : "Hidden"}
+        </span>
+      </button>
+    </div>
     <App key={viewMode} />
     <ContextScopeFeature />
     <CanvasNodeDeleteFeature />
