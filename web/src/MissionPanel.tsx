@@ -19,6 +19,12 @@ type Props = {
   onRedirect: () => void;
 };
 
+type VerificationSummary = {
+  label: string;
+  detail: string;
+  tone: string;
+};
+
 const TERMINAL_STATUSES = new Set(["completed", "cancelled", "failed"]);
 
 function statusLabel(status: UiMission["status"]): string {
@@ -75,6 +81,58 @@ function readSuccessCriteria(mission: UiMission): string[] {
   return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
 }
 
+function buildVerificationSummary(
+  mission: UiMission,
+  missionTasks: UiTask[],
+  successCriteria: string[],
+): VerificationSummary {
+  const attentionCount = missionTasks.filter((task) => task.status === "failed" || task.status === "blocked").length;
+  const criteriaDetail = successCriteria.length > 0
+    ? `${successCriteria.length} explicit success ${successCriteria.length === 1 ? "criterion" : "criteria"}`
+    : "No explicit success criteria recorded";
+
+  if (mission.status === "verifying") {
+    return {
+      label: "Checking outcome",
+      detail: successCriteria.length > 0 ? `${criteriaDetail} under review.` : "Chef is checking the Mission outcome before completion.",
+      tone: "border-cyan-500/25 bg-cyan-500/5 text-cyan-200",
+    };
+  }
+  if (mission.status === "completed") {
+    return {
+      label: "Outcome verified",
+      detail: successCriteria.length > 0 ? `${criteriaDetail} · Mission completed.` : "Mission completed after the runtime verification phase.",
+      tone: "border-green-500/25 bg-green-500/5 text-green-200",
+    };
+  }
+  if (mission.status === "failed") {
+    return {
+      label: "Verification failed",
+      detail: attentionCount > 0 ? `${attentionCount} work ${attentionCount === 1 ? "item needs" : "items need"} attention.` : "Mission ended without a verified successful outcome.",
+      tone: "border-red-500/25 bg-red-500/5 text-red-200",
+    };
+  }
+  if (mission.status === "cancelled") {
+    return {
+      label: "Not verified",
+      detail: "Mission was cancelled before a successful outcome was verified.",
+      tone: "border-[#30363d] bg-[#161b22]/75 text-[#8b949e]",
+    };
+  }
+  if (attentionCount > 0 || mission.status === "blocked") {
+    return {
+      label: "Blocked before verification",
+      detail: `${attentionCount || 1} work ${attentionCount === 1 ? "item needs" : "items need"} attention first.`,
+      tone: "border-amber-500/25 bg-amber-500/5 text-amber-200",
+    };
+  }
+  return {
+    label: "Pending",
+    detail: successCriteria.length > 0 ? `${criteriaDetail} will be checked before completion.` : "Verification begins after planned work is ready to evaluate.",
+    tone: "border-[#30363d] bg-[#161b22]/75 text-[#8b949e]",
+  };
+}
+
 export function MissionPanel({
   mission,
   tasks,
@@ -111,6 +169,7 @@ export function MissionPanel({
   const progress = totalTaskCount > 0 ? Math.round((completedCount / totalTaskCount) * 100) : 0;
   const owners = Array.from(new Set(missionTasks.map((task) => task.assignedTo).filter((owner): owner is string => Boolean(owner))));
   const canControl = !TERMINAL_STATUSES.has(mission.status);
+  const verification = buildVerificationSummary(mission, missionTasks, successCriteria);
 
   const beginCriteriaEdit = () => {
     setCriteriaDraft(successCriteria.join("\n"));
@@ -280,6 +339,15 @@ export function MissionPanel({
         </div>
 
         <div className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-1">
+          <div className={`rounded-xl border p-3 ${verification.tone}`} aria-label="Mission verification state">
+            <div className="mb-1 flex items-center justify-between gap-2">
+              <h3 className="text-[10px] font-semibold uppercase tracking-[0.12em]">Verification</h3>
+              <span className="text-[10px] opacity-70">{mission.status === "verifying" ? "Live" : "State"}</span>
+            </div>
+            <div className="text-[11px] font-medium">{verification.label}</div>
+            <p className="mt-1 text-[10px] leading-4 opacity-80">{verification.detail}</p>
+          </div>
+
           <div className="rounded-xl border border-[#30363d] bg-[#010409]/55 p-3">
             <div className="mb-2 flex items-center justify-between gap-2">
               <h3 className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#8b949e]">Worker roster</h3>
