@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { GraphNode } from "../../src/core/graph.ts";
+import { api } from "./api";
 
 interface WideInspectorProps {
   selectedNode: GraphNode | null;
@@ -63,6 +64,21 @@ function formToConfig(form: NodeConfigForm): Record<string, unknown> {
       args: form.harnessArgs ? form.harnessArgs.split(/\s+/) : undefined,
       cwd: form.harnessCwd || undefined,
     },
+  };
+}
+
+function mergeConfig(existing: Record<string, unknown>, next: Record<string, unknown>): Record<string, unknown> {
+  const existingRetry = existing.retry && typeof existing.retry === "object"
+    ? existing.retry as Record<string, unknown>
+    : {};
+  const existingHarness = existing.harness && typeof existing.harness === "object"
+    ? existing.harness as Record<string, unknown>
+    : {};
+  return {
+    ...existing,
+    ...next,
+    retry: { ...existingRetry, ...(next.retry as Record<string, unknown>) },
+    harness: { ...existingHarness, ...(next.harness as Record<string, unknown>) },
   };
 }
 
@@ -139,7 +155,6 @@ export function WideInspector({ selectedNode }: WideInspectorProps) {
       return;
     }
 
-    const config = formToConfig(form);
     const taskId = selectedNode.taskId;
 
     if (!taskId) {
@@ -150,14 +165,10 @@ export function WideInspector({ selectedNode }: WideInspectorProps) {
     }
 
     setSaveState("saving");
+    setSaveError(null);
     try {
-      const res = await fetch(`/api/nodes/${taskId}/status`, {
-        method: "GET",
-        headers: { "content-type": "application/json" },
-      });
-      if (!res.ok) {
-        throw new Error(`Node status check failed (${res.status})`);
-      }
+      const config = mergeConfig(selectedNode.config, formToConfig(form));
+      await api.patchNode(taskId, { config });
       setSaveState("saved");
     } catch (err) {
       setSaveState("error");
