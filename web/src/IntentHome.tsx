@@ -30,6 +30,7 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [goal, setGoal] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [retryingTaskId, setRetryingTaskId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lastReport, setLastReport] = useState<string | null>(null);
 
@@ -69,6 +70,11 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
     return approvals.filter((approval) => ids.has(approval.taskId));
   }, [approvals, latestMission]);
 
+  const approvalTaskIds = useMemo(
+    () => new Set(missionApprovals.map((approval) => approval.taskId)),
+    [missionApprovals],
+  );
+
   const homeState = useMemo<HomeState>(() => {
     if (missionApprovals.length > 0 || missionTasks.some((task) => task.status === "failed" || task.status === "blocked")) return "attention";
     if (missionTasks.some((task) => task.status === "running" || task.status === "assigned" || task.status === "spawning")) return "working";
@@ -105,6 +111,20 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Chef could not update the approval");
+    }
+  }
+
+  async function retryTask(taskId: string) {
+    if (retryingTaskId) return;
+    setRetryingTaskId(taskId);
+    setError(null);
+    try {
+      await api.retryNode(taskId);
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Chef could not retry this work");
+    } finally {
+      setRetryingTaskId(null);
     }
   }
 
@@ -206,11 +226,23 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
               <div className="mt-5 space-y-1">
                 {missionTasks.length > 0 ? missionTasks.map((task) => {
                   const presentation = taskPresentation(task.status);
+                  const canRetry = task.status === "failed" || (task.status === "blocked" && !approvalTaskIds.has(task.id));
                   return (
                     <div key={task.id} className="flex items-center gap-3 rounded-xl px-3 py-2.5 transition hover:bg-white/[0.025]">
                       <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${presentation.dot}`} />
                       <span className="min-w-0 flex-1 truncate text-xs text-zinc-300">{task.title}</span>
-                      <span className={`text-[10px] font-medium ${presentation.text}`}>{presentation.label}</span>
+                      {canRetry ? (
+                        <button
+                          type="button"
+                          onClick={() => void retryTask(task.id)}
+                          disabled={retryingTaskId !== null}
+                          className="rounded-lg border border-rose-300/20 bg-rose-300/[0.05] px-2.5 py-1 text-[10px] font-semibold text-rose-200 transition hover:bg-rose-300/[0.1] disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          {retryingTaskId === task.id ? "Retrying…" : "Retry"}
+                        </button>
+                      ) : (
+                        <span className={`text-[10px] font-medium ${presentation.text}`}>{presentation.label}</span>
+                      )}
                     </div>
                   );
                 }) : (
