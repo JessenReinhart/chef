@@ -17,6 +17,7 @@ export class CodexHarness extends SpecializedCliHarness {
       type: "codex",
       name: "Codex",
       binary,
+      taskArgs: (prompt) => ["exec", prompt],
       ...runtime,
     });
   }
