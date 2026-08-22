@@ -41,7 +41,7 @@ assert.match(missionFeature, /fetch\("\/api\/decisions"\)/, "Mission decisions s
 assert.match(missionFeature, /function decisionTaskId/, "Mission decision scope should require explicit task provenance");
 assert.match(missionFeature, /const taskId = payload\.taskId/, "Mission decision provenance should come from the durable decision payload");
 assert.match(missionFeature, /taskId !== null && taskIds\.has\(taskId\)/, "workspace decisions should be filtered to durable Mission task membership");
-assert.match(missionFeature, /EventSource\("\/api\/events\?types=orchestrator\.task\.evaluated"\)/, "Mission decisions should refresh when task evaluations are recorded");
+assert.match(missionFeature, /EventSource\("\/api\/events\?types=artifact\.\*,orchestrator\.task\.evaluated"\)/, "Mission work records should refresh from artifact and task-evaluation events through one stream");
 assert.doesNotMatch(missionFeature, /mission\.createdAt.*decision\.timestamp|decision\.timestamp.*mission\.createdAt/, "Mission decisions must not be inferred from timestamps");
 assert.doesNotMatch(missionFeature, /patchCanvas|updateArtifact|POST|dangerouslySetInnerHTML/, "Mission work-record projection must remain read-only and text-safe");
 
