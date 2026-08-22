@@ -69,11 +69,7 @@ export function MissionArtifactsFeature() {
     if (!nextTarget) return;
 
     try {
-      const [stateResponse, artifactsResponse, decisionsResponse] = await Promise.all([
-        fetch("/api/state"),
-        fetch("/api/artifacts"),
-        fetch("/api/decisions"),
-      ]);
+      const stateResponse = await fetch("/api/state");
       if (!stateResponse.ok) throw new Error("Mission work record is temporarily unavailable");
 
       const state = await stateResponse.json() as StateSnapshot;
@@ -81,9 +77,14 @@ export function MissionArtifactsFeature() {
       setMission(latestMission);
       setStateError(null);
 
-      if (artifactsResponse.ok) {
+      const [artifactsResult, decisionsResult] = await Promise.allSettled([
+        fetch("/api/artifacts"),
+        fetch("/api/decisions"),
+      ]);
+
+      if (artifactsResult.status === "fulfilled" && artifactsResult.value.ok) {
         try {
-          const artifactBody = await artifactsResponse.json() as { ok?: boolean; data?: MissionArtifact[] };
+          const artifactBody = await artifactsResult.value.json() as { ok?: boolean; data?: MissionArtifact[] };
           setArtifacts(artifactBody.ok && Array.isArray(artifactBody.data) ? artifactBody.data : []);
           setArtifactError(null);
         } catch {
@@ -95,9 +96,9 @@ export function MissionArtifactsFeature() {
         setArtifactError("Mission artifacts are temporarily unavailable");
       }
 
-      if (decisionsResponse.ok) {
+      if (decisionsResult.status === "fulfilled" && decisionsResult.value.ok) {
         try {
-          const decisionBody = await decisionsResponse.json() as { ok?: boolean; data?: MissionDecision[] };
+          const decisionBody = await decisionsResult.value.json() as { ok?: boolean; data?: MissionDecision[] };
           setDecisions(decisionBody.ok && Array.isArray(decisionBody.data) ? decisionBody.data : []);
           setDecisionError(null);
         } catch {
