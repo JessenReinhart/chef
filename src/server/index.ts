@@ -9,6 +9,7 @@ import { createDecisionServer } from "./decision-http.ts";
 import { createHarnessReadinessServer } from "./harness-readiness-http.ts";
 import { createBlockerServer } from "./blocker-http.ts";
 import { createProjectServer } from "./project-http.ts";
+import { createThreadServer } from "./thread-http.ts";
 import { createOrchestratorConfigServer } from "./orchestrator-config-http.ts";
 import { createWebUiServer } from "./web-ui-http.ts";
 import { applyOrchestratorProviderEnv } from "./orchestrator-config.ts";
@@ -61,6 +62,7 @@ const lineageServer = createArtifactLineageServer(chef, messageServer);
 const decisionServer = createDecisionServer(chef, lineageServer);
 const readinessServer = createHarnessReadinessServer(chef, decisionServer);
 const blockerServer = createBlockerServer(chef, readinessServer);
+const threadServer = createThreadServer(chef, blockerServer);
 let server: ReturnType<typeof createWebUiServer>;
 let switchingProject = false;
 const relaunch = async (nextProjectDir = projectDir) => {
@@ -83,7 +85,7 @@ const relaunch = async (nextProjectDir = projectDir) => {
   child.unref();
   process.exit(0);
 };
-const projectServer = createProjectServer(chef, blockerServer, { onOpenProject: relaunch });
+const projectServer = createProjectServer(chef, threadServer, { onOpenProject: relaunch });
 const configuredServer = createOrchestratorConfigServer(projectServer, () => relaunch(projectDir));
 server = createWebUiServer(configuredServer, { distDir: webDistDir });
 server.listen(port, "127.0.0.1", () => {
@@ -104,6 +106,9 @@ server.listen(port, "127.0.0.1", () => {
   console.log(`  GET  /api/messages — structured collaboration messages`);
   console.log(`  GET  /api/harnesses/readiness — detected CLI harness readiness`);
   console.log(`  GET  /api/blockers — pending approvals and blocked/failed tasks`);
+  console.log(`  GET/POST /api/threads — durable conversation threads`);
+  console.log(`  GET/PATCH /api/threads/:id — inspect or rename/update a Thread`);
+  console.log(`  POST /api/threads/:id/archive — archive a Thread`);
   console.log(`  GET  /api/project   — active project + recent projects`);
   console.log(`  POST /api/project/pick — native Windows folder picker + runtime reopen`);
   console.log(`  GET/PUT /api/orchestrator/provider — orchestrator direct LLM settings`);
