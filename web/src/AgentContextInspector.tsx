@@ -8,7 +8,7 @@ const MAX_CONTEXT_ROWS = 12;
 
 type ContextRow = {
   key: string;
-  source: string;
+  sources: string[];
   ref: ContextReferenceLike;
 };
 
@@ -75,21 +75,30 @@ export function AgentContextInspector() {
     () => snapshot?.zones.filter((zone) => selectedNodeId !== null && zone.memberNodeIds.includes(selectedNodeId)) ?? [],
     [snapshot, selectedNodeId],
   );
-  const rows = useMemo(() => {
-    if (!snapshot) return [] as ContextRow[];
-    const result: ContextRow[] = [];
+  const contextAttachments = useMemo(() => {
+    const attachments: Array<{ source: string; ref: ContextReferenceLike }> = [];
     for (const zone of inheritedZones) {
-      for (const ref of zone.contextRefs) {
-        result.push({ key: `zone:${zone.id}:${ref.type}:${ref.id}`, source: `Shared Context: ${zone.name}`, ref });
+      for (const ref of zone.contextRefs) attachments.push({ source: `Shared Context: ${zone.name}`, ref });
+    }
+    for (const ref of selectedTask?.contextRefs ?? []) attachments.push({ source: "Direct task context", ref });
+    return attachments;
+  }, [inheritedZones, selectedTask]);
+  const rows = useMemo(() => {
+    const deduped = new Map<string, ContextRow>();
+    for (const attachment of contextAttachments) {
+      const key = `${attachment.ref.type}:${attachment.ref.id}`;
+      const existing = deduped.get(key);
+      if (existing) {
+        if (!existing.sources.includes(attachment.source)) existing.sources.push(attachment.source);
+        continue;
       }
+      deduped.set(key, { key, sources: [attachment.source], ref: attachment.ref });
     }
-    for (const ref of selectedTask?.contextRefs ?? []) {
-      result.push({ key: `task:${selectedTask?.id}:${ref.type}:${ref.id}`, source: "Direct task context", ref });
-    }
-    return result.slice(0, MAX_CONTEXT_ROWS);
-  }, [snapshot, inheritedZones, selectedTask]);
+    return [...deduped.values()].slice(0, MAX_CONTEXT_ROWS);
+  }, [contextAttachments]);
 
-  const totalCount = inheritedZones.reduce((sum, zone) => sum + zone.contextRefs.length, 0) + (selectedTask?.contextRefs?.length ?? 0);
+  const uniqueCount = new Set(contextAttachments.map(({ ref }) => `${ref.type}:${ref.id}`)).size;
+  const attachmentCount = contextAttachments.length;
 
   if (!target || !selectedNodeId || (snapshot && selectedNode?.kind !== "agent")) return null;
 
@@ -109,14 +118,15 @@ export function AgentContextInspector() {
         <>
           <div className="power-inspector__chips" style={{ marginBottom: 8 }}>
             <code>{inheritedZones.length} shared zone{inheritedZones.length === 1 ? "" : "s"}</code>
-            <code>{totalCount} reference{totalCount === 1 ? "" : "s"}</code>
+            <code>{uniqueCount} unique reference{uniqueCount === 1 ? "" : "s"}</code>
+            {attachmentCount !== uniqueCount && <code>{attachmentCount} attachments</code>}
           </div>
           <div style={{ display: "grid", gap: 8 }}>
             {rows.map((row) => {
               const description = describeContextReference(row.ref, snapshot.provenance);
               return (
                 <div key={row.key} style={{ padding: 8, border: "1px solid #30363d", borderRadius: 6, background: "#010409" }}>
-                  <div style={{ fontSize: 10, color: "#8b949e", marginBottom: 3 }}>{row.source}</div>
+                  <div style={{ fontSize: 10, color: "#8b949e", marginBottom: 3 }}>{row.sources.join(" · ")}</div>
                   <strong style={{ display: "block", fontSize: 11 }}>{description.label}</strong>
                   <span style={{ display: "block", marginTop: 2, fontSize: 10, color: description.stale ? "#fbbf24" : "#8b949e" }}>
                     {row.ref.type} · {description.detail}
@@ -127,7 +137,7 @@ export function AgentContextInspector() {
               );
             })}
           </div>
-          {totalCount > MAX_CONTEXT_ROWS && <span style={{ display: "block", marginTop: 6 }}>Showing {MAX_CONTEXT_ROWS} of {totalCount} references.</span>}
+          {uniqueCount > MAX_CONTEXT_ROWS && <span style={{ display: "block", marginTop: 6 }}>Showing {MAX_CONTEXT_ROWS} of {uniqueCount} unique references.</span>}
         </>
       )}
     </section>,
