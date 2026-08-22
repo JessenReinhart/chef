@@ -1,0 +1,71 @@
+import { strict as assert } from "node:assert";
+import { mkdtemp, rm } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+
+import { Repository } from "../src/persistence/database.ts";
+import { createChatRepository } from "../src/persistence/chat.ts";
+import { createThreadRepository } from "../src/persistence/threads.ts";
+
+const dir = await mkdtemp(join(tmpdir(), "chef-thread-chat-"));
+const dbPath = join(dir, "chef.sqlite");
+
+try {
+  const repo = new Repository(dbPath);
+  repo.createWorkspace({ id: "workspace-a", name: "Workspace A" });
+  repo.createWorkspace({ id: "workspace-b", name: "Workspace B" });
+
+  const threads = createThreadRepository(repo);
+  threads.create({ id: "thread-auth", workspaceId: "workspace-a", title: "Authentication" });
+  threads.create({ id: "thread-dashboard", workspaceId: "workspace-a", title: "Dashboard" });
+  threads.create({ id: "thread-other", workspaceId: "workspace-b", title: "Other workspace" });
+
+  const chat = createChatRepository(repo);
+  chat.insert({ workspaceId: "workspace-a", threadId: "thread-auth", role: "user", content: "Add login" });
+  chat.insert({ workspaceId: "workspace-a", threadId: "thread-auth", role: "assistant", content: "Planning login" });
+  chat.insert({ workspaceId: "workspace-a", threadId: "thread-dashboard", role: "user", content: "Redesign dashboard" });
+  chat.insert({ workspaceId: "workspace-a", role: "user", content: "Legacy global chat" });
+
+  assert.deepEqual(
+    chat.list("workspace-a", "thread-auth").map((message) => message.content),
+    ["Add login", "Planning login"],
+    "Thread A must only read Thread A chat history",
+  );
+  assert.deepEqual(
+    chat.list("workspace-a", "thread-dashboard").map((message) => message.content),
+    ["Redesign dashboard"],
+    "Thread B must not receive Thread A chat history",
+  );
+  assert.deepEqual(
+    chat.list("workspace-a").map((message) => message.content),
+    ["Legacy global chat"],
+    "legacy workspace chat must stay separate from Thread-scoped history",
+  );
+  assert.equal(chat.count("workspace-a", "thread-auth"), 2);
+
+  assert.throws(
+    () => chat.insert({ workspaceId: "workspace-a", threadId: "thread-other", role: "user", content: "leak" }),
+    /Thread not found in workspace/,
+    "a Thread from another workspace must not accept chat writes",
+  );
+  assert.throws(
+    () => chat.list("workspace-a", "thread-other"),
+    /Thread not found in workspace/,
+    "a Thread from another workspace must not expose chat history",
+  );
+
+  repo.close();
+
+  const reopenedRepo = new Repository(dbPath);
+  const reopenedChat = createChatRepository(reopenedRepo);
+  assert.deepEqual(
+    reopenedChat.list("workspace-a", "thread-auth").map((message) => message.content),
+    ["Add login", "Planning login"],
+    "Thread chat continuity must survive repository reopen",
+  );
+  reopenedRepo.close();
+
+  console.log("thread-chat-persistence: ok — sibling Threads remain isolated and history survives reopen");
+} finally {
+  await rm(dir, { recursive: true, force: true });
+}
