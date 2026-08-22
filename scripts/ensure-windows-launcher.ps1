@@ -8,7 +8,7 @@ $ErrorActionPreference = "Stop"
 if ($env:OS -ne "Windows_NT") { exit 0 }
 
 $root = Split-Path -Parent $PSScriptRoot
-$asset = Join-Path $root "assets\chef-icon.svg"
+$asset = Join-Path $root "assets\chef-icon.png"
 $cmd = Join-Path $root "Chef.cmd"
 $brandDir = Join-Path $env:LOCALAPPDATA "Chef\branding"
 $iconPath = Join-Path $brandDir "chef.ico"
@@ -23,17 +23,9 @@ if (-not (Test-Path $cmd)) { throw "Chef launcher was not found: $cmd" }
 
 New-Item -ItemType Directory -Force -Path $brandDir | Out-Null
 
-# The repository keeps one canonical SVG wrapper around the selected raster
-# artwork. Extract its embedded image and materialize a Windows .ico locally.
-$svg = [System.IO.File]::ReadAllText($asset)
-$match = [System.Text.RegularExpressions.Regex]::Match($svg, 'base64,([^"'']+)')
-if (-not $match.Success) { throw "Chef brand asset does not contain embedded image data." }
-
-$bytes = [Convert]::FromBase64String($match.Groups[1].Value)
-$stream = [System.IO.MemoryStream]::new($bytes)
-
+# Materialize a Windows .ico from the same canonical PNG used by README and web.
 Add-Type -AssemblyName System.Drawing
-$source = [System.Drawing.Image]::FromStream($stream)
+$source = [System.Drawing.Image]::FromFile($asset)
 $bitmap = [System.Drawing.Bitmap]::new(256, 256)
 $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
 $graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
@@ -50,7 +42,6 @@ $icon.Dispose()
 $graphics.Dispose()
 $bitmap.Dispose()
 $source.Dispose()
-$stream.Dispose()
 
 $shell = New-Object -ComObject WScript.Shell
 
