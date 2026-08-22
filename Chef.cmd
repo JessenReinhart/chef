@@ -8,6 +8,8 @@ if errorlevel 1 goto :missing_node
 where npm >nul 2>nul
 if errorlevel 1 goto :missing_npm
 
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\ensure-windows-launcher.ps1" -Quiet >nul 2>nul
+
 npm run chef
 if errorlevel 1 goto :failed
 exit /b 0
