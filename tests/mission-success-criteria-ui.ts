@@ -15,4 +15,12 @@ assert.match(panel, /canControl && !editingCriteria/, "terminal Missions should 
 assert.match(server, /mission\.success_criteria\.updated/, "criteria updates should remain event-auditable");
 assert.doesNotMatch(panel, /dangerouslySetInnerHTML/, "criteria must render as text, not executable HTML");
 
-console.log("mission-success-criteria-ui: ok — Mission completion intent is inspectable and editable");
+assert.match(panel, /!TERMINAL_STATUSES\.has\(mission\.status\) \? \(/, "active Missions should keep redirect while terminal Missions get a separate continuation path");
+assert.match(panel, /aria-label="Continue with a follow-up Mission"/, "terminal Missions should expose a follow-up surface");
+assert.match(panel, /fetch\("\/api\/chat"/, "follow-up should use Chef's existing Mission-creating chat path");
+assert.match(panel, /Previous Mission goal: \$\{mission\.goal\}/, "follow-up should carry the previous Mission goal into the new request");
+assert.match(panel, /Follow-up request: \$\{request\}/, "follow-up should keep the user's next request distinct from the previous goal");
+assert.match(panel, /keeping this finished run intact/, "follow-up copy should state that the terminal Mission remains intact");
+assert.match(panel, /Start follow-up/, "terminal Missions should offer an outcome-oriented continuation action");
+
+console.log("mission-success-criteria-ui: ok — Mission completion intent and follow-up are inspectable");
