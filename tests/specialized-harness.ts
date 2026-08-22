@@ -24,6 +24,7 @@ try {
       name: "Test CLI",
       binary: process.execPath,
       flags: [workerPath],
+      taskArgs: (prompt) => ["-e", "console.log('TASK:' + process.argv[1])", prompt],
       workspaceId: "workspace-test",
       cwd: process.cwd(),
       sidebandRoot: root,
@@ -33,9 +34,14 @@ try {
   });
 
   const detection = await registry.initialize();
-  assert.deepEqual(detection, [{ id: "test-cli", name: "Test CLI", type: "test-cli", command: process.execPath, available: true }]);
+  assert.deepEqual(detection, [{ id: "test-cli", name: "Test CLI", type: "test-cli", command: process.execPath, available: true, taskCapable: true }]);
+  assert.deepEqual(registry.taskCapableIds(), ["test-cli"]);
   const harness = registry.get("test-cli");
   assert.ok(harness, "detected specialized harness is scheduler-addressable");
+
+  const launch = created!.taskLaunch("do the bounded task");
+  assert.equal(launch.command, process.execPath);
+  assert.equal(launch.args.at(-1), "do the bounded task");
 
   const session = await harness.spawn({ sessionId, cols: 90, rows: 30 });
   assert.equal(session.id, sessionId, "spawn preserves the scheduler's persisted session id");
@@ -102,6 +108,21 @@ try {
 
   await harness.forget(sessionId);
   assert.throws(() => harness.events(sessionId), /No active session/, "forget releases the finished session queue");
+
+  const taskSessionId = "task-mode-session";
+  await harness.spawn({ sessionId: taskSessionId, taskPrompt: "bounded prompt" });
+  const taskEvents: HarnessEvent[] = [];
+  for await (const event of harness.events(taskSessionId)) {
+    taskEvents.push(event);
+    if (event.type === "exit" || event.type === "crash") break;
+  }
+  assert.ok(
+    taskEvents.some((event) => event.type === "data" && event.data.includes("TASK:bounded prompt")),
+    "task mode passes the Mission instruction to the one-shot CLI invocation",
+  );
+  assert.ok(taskEvents.some((event) => event.type === "exit"), "one-shot task mode reaches a terminal exit");
+  await harness.forget(taskSessionId);
+
   await registry.close();
 
   console.log("specialized-harness: ok");
@@ -164,6 +185,7 @@ chef.specializedHarnesses.register("test-cli", "Test CLI", () => new Specialized
   name: "Test CLI",
   binary: process.execPath,
   flags: [artifactWorker],
+  taskArgs: () => [artifactWorker],
   workspaceId: chef.workspaceId,
   cwd: runtimeRoot,
   pollIntervalMs: 10,

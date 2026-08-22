@@ -30,6 +30,9 @@ export interface SchedulerOptions {
   onEvent?: (event: RuntimeEvent) => void;
 }
 
+export type TaskSpawnOptions = SpawnOptions & { taskPrompt?: string };
+export interface TaskLaunch { command: string; args: string[]; }
+
 /**
  * Minimal structural subset of a harness the scheduler drives. Any concrete
  * harness (e.g. GenericTerminalHarness) satisfies this by shape. The harness
@@ -40,7 +43,10 @@ export interface HarnessLike {
   readonly command: string;
   readonly args: string[];
   readonly cwd: string;
-  spawn(options?: SpawnOptions): Promise<{ id: string; pid?: number }>;
+  /** True only when the adapter has a bounded one-shot Mission invocation. */
+  readonly taskCapable?: boolean;
+  taskLaunch?(prompt: string): TaskLaunch;
+  spawn(options?: TaskSpawnOptions): Promise<{ id: string; pid?: number }>;
   events(sessionId: string): AsyncIterable<HarnessEvent>;
   send(sessionId: string, input: string): Promise<void>;
   interrupt(sessionId: string): Promise<void>;
@@ -67,6 +73,31 @@ export interface HarnessRegistry {
 /** Receives each successfully spawned session before dispatch scans again. */
 export type SessionDispatchOwner = (session: Session) => void;
 
+function runtimeDebugEnabled(): boolean {
+  return ["1", "true", "yes", "on"].includes((process.env.CHEF_RUNTIME_DEBUG ?? "").toLowerCase());
+}
+
+function debugPreview(text: string, limit = 800): string {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  return normalized.length > limit ? `${normalized.slice(0, limit)}…` : normalized;
+}
+
+function runtimeDebug(event: string, details: Record<string, unknown>): void {
+  if (!runtimeDebugEnabled()) return;
+  console.error(`[chef:runtime] ${event} ${JSON.stringify(details)}`);
+}
+
+function missionTaskPrompt(task: Task): string {
+  return [
+    "You are a Chef worker executing one bounded Mission task in the current project.",
+    "Complete the task, use the tools available to you, and exit when the task is finished.",
+    "Do not wait for additional chat input unless the task itself explicitly requires it.",
+    "",
+    `Task: ${task.title}`,
+    task.description,
+  ].filter(Boolean).join("\n");
+}
+
 // ---------------------------------------------------------------------------
 // Scheduler
 // ---------------------------------------------------------------------------
@@ -80,6 +111,8 @@ export class Scheduler {
 
   /** sessionId → { taskId, agentId } for running sessions. */
   readonly #sessions = new Map<SessionId, { taskId: TaskId; agentId: AgentId }>();
+  readonly #sessionStartedAt = new Map<SessionId, number>();
+  readonly #sessionOutputTail = new Map<SessionId, string>();
 
   constructor(
     repository: Repository,
@@ -194,6 +227,7 @@ export class Scheduler {
    */
   async #dispatchOne(workspaceId: WorkspaceId, task: Task): Promise<Session | null> {
     let harness: HarnessLike | undefined;
+    let taskPrompt: string | undefined;
     const session = this.#repo.transaction(() => {
       const current = this.#repo.getTask(task.id);
       if (!current || !["pending", "assigned", "failed", "blocked"].includes(current.status)) {
@@ -207,6 +241,9 @@ export class Scheduler {
       harness = this.#registry.get(agentId);
       if (!harness) {
         throw new Error(`No harness registered for agent ${agentId}`);
+      }
+      if (current.missionId && harness.taskCapable === false) {
+        throw new Error(`Agent ${agentId} is interactive-only and cannot execute Mission tasks`);
       }
       if (this.#repo.countLiveSessions(workspaceId) >= this.#maxConcurrency) return null;
 
@@ -247,31 +284,58 @@ export class Scheduler {
         this.#appendEvent(workspaceId, runEvt);
       }
 
+      taskPrompt = dispatchTask.missionId && harness.taskCapable === true
+        ? missionTaskPrompt(dispatchTask)
+        : undefined;
+      const launch = taskPrompt !== undefined
+        ? harness.taskLaunch?.(taskPrompt)
+        : undefined;
+      if (taskPrompt !== undefined && !launch) {
+        throw new Error(`Agent ${agentId} declares task capability without a task launch contract`);
+      }
+
       const sessionInput: SessionInput = {
         workspaceId,
         harnessId: harness.id,
         agentId,
         taskId: dispatchTask.id,
         status: "spawning",
-        command: harness.command,
-        args: harness.args,
+        command: launch?.command ?? harness.command,
+        args: launch?.args ?? harness.args,
         cwd: harness.cwd,
         cols: 120,
         rows: 40,
       };
+      runtimeDebug("task.routed", {
+        taskId: dispatchTask.id,
+        missionId: dispatchTask.missionId,
+        worker: agentId,
+        command: sessionInput.command,
+        args: sessionInput.args,
+      });
       return this.#repo.insertSession(sessionInput);
     });
 
     if (!session || !harness) return null;
 
     this.#sessions.set(session.id, { taskId: session.taskId, agentId: session.agentId });
+    this.#sessionStartedAt.set(session.id, now());
+    this.#sessionOutputTail.set(session.id, "");
     const freshTask = this.#repo.getTask(task.id)!;
 
     try {
+      runtimeDebug("session.spawn", {
+        taskId: freshTask.id,
+        sessionId: session.id,
+        worker: session.agentId,
+        command: session.command,
+        args: session.args,
+      });
       const spawned = await harness.spawn({
         sessionId: session.id,
         cols: 120,
         rows: 40,
+        taskPrompt,
       });
       this.#repo.updateSession(session.id, { status: "running", pid: spawned.pid });
 
@@ -280,6 +344,12 @@ export class Scheduler {
       }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
+      runtimeDebug("session.spawn_failed", {
+        taskId: freshTask.id,
+        sessionId: session.id,
+        worker: session.agentId,
+        error: message,
+      });
       this.#repo.transaction(() => {
         this.#repo.updateSession(session.id, { status: "crashed", endedAt: now() });
         const currentTask = this.#repo.getTask(task.id)!;
@@ -297,6 +367,8 @@ export class Scheduler {
         this.#appendEvent(workspaceId, failEvt);
       });
       this.#sessions.delete(session.id);
+      this.#sessionStartedAt.delete(session.id);
+      this.#sessionOutputTail.delete(session.id);
       return null;
     }
 
@@ -318,14 +390,21 @@ export class Scheduler {
   ): Promise<void> {
     const tracking = this.#sessions.get(sessionId);
     if (!tracking) {
-      console.error(`[sched] handleSessionEvent ${event.type} NO-TRACKING session=${sessionId.slice(0,8)}`);
+      runtimeDebug("session.event_untracked", { event: event.type, sessionId });
       return;
     }
-    const { taskId } = tracking;
-    console.error(`[sched] handleSessionEvent ${event.type} task=${taskId.slice(0,8)} session=${sessionId.slice(0,8)}`);
+    const { taskId, agentId } = tracking;
 
     if (event.type === "data") {
       const payload = event.data;
+      const previous = this.#sessionOutputTail.get(sessionId) ?? "";
+      this.#sessionOutputTail.set(sessionId, `${previous}${payload}`.slice(-4000));
+      runtimeDebug("session.data", {
+        taskId,
+        sessionId,
+        worker: agentId,
+        preview: debugPreview(payload, 300),
+      });
       this.#repo.transaction(() => {
         this.#appendEvent(workspaceId, {
           type: "session.data",
@@ -338,11 +417,22 @@ export class Scheduler {
     }
 
     if (event.type === "structured") {
+      runtimeDebug("session.structured", { taskId, sessionId, worker: agentId });
       await this.#handleStructured(workspaceId, sessionId, taskId, event.payload);
       return;
     }
 
     if (event.type === "exit" || event.type === "crash") {
+      const startedAt = this.#sessionStartedAt.get(sessionId);
+      const outputTail = this.#sessionOutputTail.get(sessionId) ?? "";
+      runtimeDebug(`session.${event.type}`, {
+        taskId,
+        sessionId,
+        worker: agentId,
+        exitCode: event.exitCode,
+        durationMs: startedAt === undefined ? undefined : Math.max(0, now() - startedAt),
+        outputPreview: debugPreview(outputTail),
+      });
       this.#repo.transaction(() => {
         // CAS the session from a live state: a session already marked
         // terminated (cancelTask) or completed must not be overwritten by a
@@ -365,6 +455,7 @@ export class Scheduler {
             resultSummary: `exited with code ${event.exitCode}`,
           });
           this.#appendEvent(workspaceId, doneEvt);
+          runtimeDebug("task.completed", { taskId, worker: agentId, sessionId });
         } else {
           // Bound retryCount at maxRetries+1 so the budget check in
           // retryTask/dispatch stays authoritative for re-dispatch.
@@ -380,9 +471,12 @@ export class Scheduler {
             retryCount,
           });
           this.#appendEvent(workspaceId, failEvt);
+          runtimeDebug("task.failed", { taskId, worker: agentId, sessionId, exitCode: event.exitCode });
         }
       });
       this.#sessions.delete(sessionId);
+      this.#sessionStartedAt.delete(sessionId);
+      this.#sessionOutputTail.delete(sessionId);
     }
   }
 
@@ -535,6 +629,9 @@ export class Scheduler {
       if (!claimed) return;
       for (const { sessionId } of targets) {
         this.#repo.casSessionStatus(sessionId, ["spawning", "running"], "terminated", now());
+        this.#sessions.delete(sessionId);
+        this.#sessionStartedAt.delete(sessionId);
+        this.#sessionOutputTail.delete(sessionId);
       }
       const { event } = TaskMachine.transition(current, "cancelled");
       this.#appendEvent(workspaceId, event);

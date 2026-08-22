@@ -18,6 +18,7 @@ export class PiHarness extends SpecializedCliHarness {
       name: "Pi",
       binary,
       flags: [],
+      taskArgs: (prompt) => ["-p", "--no-session", prompt],
       ...runtime,
     });
   }
