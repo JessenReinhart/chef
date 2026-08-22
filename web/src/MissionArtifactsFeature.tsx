@@ -120,14 +120,9 @@ export function MissionArtifactsFeature() {
   }, [refresh]);
 
   useEffect(() => {
-    const artifactStream = new EventSource("/api/events?types=artifact.*");
-    const decisionStream = new EventSource("/api/events?types=orchestrator.task.evaluated");
-    artifactStream.onmessage = () => void refresh();
-    decisionStream.onmessage = () => void refresh();
-    return () => {
-      artifactStream.close();
-      decisionStream.close();
-    };
+    const stream = new EventSource("/api/events?types=artifact.*,orchestrator.task.evaluated");
+    stream.onmessage = () => void refresh();
+    return () => stream.close();
   }, [refresh]);
 
   const missionArtifacts = useMemo(() => {
