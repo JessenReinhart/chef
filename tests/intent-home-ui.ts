@@ -14,6 +14,8 @@ assert.match(home, /What are we doing\?/, "the home should lead with user intent
 assert.match(home, /api\.chat\(message\)/, "the primary composer must use the existing Orchestrator chat path");
 assert.match(home, /Open Workbench/, "advanced inspection should stay deliberately reachable");
 assert.match(home, /Needs your attention/, "approval and failure states should be surfaced in plain language");
+assert.match(home, /const missionApprovals = useMemo/, "Home approvals should be projected from the current Mission instead of all workspace approvals");
+assert.match(home, /approvals\.filter\(\(approval\) => ids\.has\(approval\.taskId\)\)/, "unrelated Mission approvals must not pollute the current Home status");
 assert.match(home, /Chef is working/, "active work should collapse to a human-readable status");
 assert.match(home, /Work complete/, "completed work should collapse to a human-readable status");
 assert.doesNotMatch(home, /NodePalette|ChannelRooms|AgentContextInspector|Power Mode|PTY|sessionId/, "default home must not expose Workbench/runtime machinery");
