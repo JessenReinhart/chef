@@ -2,46 +2,53 @@
 
 This guide describes the setup behavior that exists in the current Chef runtime.
 
+For the shortest end-user walkthrough, see [`INSTALL.md`](INSTALL.md).
+
 ## Requirements
 
 - Node.js 24 or later
 - npm
 - Windows is the primary supported desktop environment for local development
 
-Install runtime and web dependencies:
-
-```bash
-npm install
-npm run web:install
-```
+You do not need to install Chef's npm dependencies manually for normal use. The friendly launcher installs missing runtime and web dependencies on first launch.
 
 ## Local web mode
 
 Chef is a local-first runtime with a browser-based UI. The browser is a control surface; the authoritative runtime, project files, PTY sessions, Git operations, artifacts, and SQLite database remain on the local machine.
 
-Build the web client once:
-
-```bash
-npm run web:build
-```
-
-Then start Chef from the repository root:
+Start Chef from the repository root:
 
 ```bash
 npm run chef
 ```
 
-Open:
+On Windows, you can also double-click:
+
+```text
+Chef.cmd
+```
+
+The launcher:
+
+1. validates Node.js 24+;
+2. installs missing root dependencies;
+3. installs missing web dependencies;
+4. rebuilds the web UI when it is missing or stale;
+5. checks whether a Chef runtime is already running;
+6. starts the local runtime when necessary;
+7. opens the workbench in the default browser.
+
+Chef opens at:
 
 ```text
 http://127.0.0.1:4321
 ```
 
-The Chef runtime serves the built web client from `web/dist` and exposes its runtime API on the same origin under `/api`. A separate Vite process is not required for this mode.
+The Chef runtime serves the built web client from `web/dist` and exposes its runtime API on the same origin under `/api`. A separate Vite process is not required for normal use.
 
 This mode remains usable without internet access for local capabilities. Any configured remote LLM provider, web research, or other network-backed integration still requires its own network connection.
 
-Set `CHEF_WEB_DIST` only when you need to serve a web build from a different directory.
+Set `CHEF_WEB_DIST` only when you need to serve a web build from a different directory. Set `CHEF_NO_OPEN=1` when you want the launcher to start Chef without opening a browser automatically.
 
 ## Web development mode
 
@@ -57,6 +64,7 @@ Start the web workbench in another terminal:
 
 ```bash
 cd web
+npm install
 npm run dev
 ```
 
@@ -125,6 +133,7 @@ CHEF_API_KEY
 CHEF_BASE_URL
 CHEF_TIMEOUT_MS
 CHEF_WEB_DIST
+CHEF_NO_OPEN
 ```
 
 The provider adapter also reads these provider-specific API key variables:
@@ -168,25 +177,24 @@ A reported `available: true` value means that Chef found the executable. It does
 
 For a CLI-first setup:
 
-1. Install and authenticate the CLI that you want to use, such as Claude Code, Codex, or OMP.
-2. Build the web client with `npm run web:build`.
-3. Start Chef with `npm run chef`.
-4. Open `http://127.0.0.1:4321`.
-5. Open the target project.
+1. Install Node.js 24+.
+2. Clone or download Chef.
+3. Launch with `npm run chef` or double-click `Chef.cmd` on Windows.
+4. Open the target project in Chef.
+5. Install and authenticate the CLI that you want to use, such as Claude Code, Codex, or OMP.
 6. Confirm that the CLI works in a normal terminal.
-7. Use `GET /api/harnesses/readiness` when you need to inspect Chef's executable detection result.
+7. Run `npm run doctor` when you need to inspect Chef's environment and harness readiness.
 8. Use the generic terminal if a specialized harness is not available.
 9. Configure **AI** only if you also want the Chef Orchestrator to use a direct provider.
 
 For a direct-provider setup:
 
-1. Build the web client and start Chef.
-2. Open `http://127.0.0.1:4321`.
-3. Open the target project.
-4. Open **AI**.
-5. Select the provider and model.
-6. Add the API key and base URL when required.
-7. Save the settings and let Chef restart the runtime.
+1. Launch Chef.
+2. Open the target project.
+3. Open **AI**.
+4. Select the provider and model.
+5. Add the API key and base URL when required.
+6. Save the settings and let Chef restart the runtime.
 
 ## Validation commands
 
