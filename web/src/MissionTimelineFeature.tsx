@@ -185,9 +185,12 @@ function buildMissionProgressSummary(plan: MissionPlan): MissionProgressSummary 
   if (TERMINAL_PLAN_STATUSES.has(plan.status)) return null;
 
   const tasks = new Map(plan.tasks.map((task) => [task.id, task]));
-  const states = plan.taskStates.length > 0
-    ? plan.taskStates
-    : plan.tasks.map((task) => ({ id: task.id, status: "pending", assignedTo: task.assignedTo }));
+  const runtimeStates = new Map(plan.taskStates.map((state) => [state.id, state]));
+  const states: MissionPlanTaskState[] = plan.tasks.map((task) => runtimeStates.get(task.id) ?? {
+    id: task.id,
+    status: "pending",
+    assignedTo: task.assignedTo,
+  });
   const completed = states.filter((state) => state.status === "completed").length;
   const activeStates = states.filter((state) => ACTIVE_TASK_STATUSES.has(state.status));
   const attentionStates = states.filter((state) => ATTENTION_TASK_STATUSES.has(state.status));
