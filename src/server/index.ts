@@ -33,6 +33,8 @@ if (!Number.isFinite(missionTimeoutMs) || missionTimeoutMs <= 0) {
 }
 mkdirSync(dirname(dbPath), { recursive: true });
 
+// Chef's persisted orchestrator key must win during provider construction, but
+// machine-level Anthropic/OpenAI env vars must remain intact for CLI workers.
 const inheritedAnthropicKey = process.env.ANTHROPIC_API_KEY;
 const inheritedOpenAIKey = process.env.OPENAI_API_KEY;
 if (process.env.CHEF_PROVIDER && process.env.CHEF_API_KEY) {
