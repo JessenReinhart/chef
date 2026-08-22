@@ -55,7 +55,11 @@ function normalizeTitle(title: string): string {
 
 /** Durable Thread persistence. Runtime/API ownership checks build on this layer. */
 export class ThreadRepository {
-  constructor(private readonly repo: Repository) {}
+  private readonly repo: Repository;
+
+  constructor(repo: Repository) {
+    this.repo = repo;
+  }
 
   create(input: ThreadInput): Thread {
     const id = input.id ?? randomUUID();
