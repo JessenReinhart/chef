@@ -2,6 +2,7 @@ import { strict as assert } from "node:assert";
 import { readFile } from "node:fs/promises";
 
 const feature = await readFile(new URL("../web/src/LivingArtifactFeature.tsx", import.meta.url), "utf8");
+const missionFeature = await readFile(new URL("../web/src/MissionArtifactsFeature.tsx", import.meta.url), "utf8");
 const styles = await readFile(new URL("../web/src/living-artifact.css", import.meta.url), "utf8");
 const previewStyles = await readFile(new URL("../web/src/artifact-preview.css", import.meta.url), "utf8");
 
@@ -27,4 +28,12 @@ assert.match(previewStyles, /\.chef-artifact-preview\s*\{/, "artifact preview sh
 assert.doesNotMatch(feature, /patchCanvas|updateArtifact|POST/, "friendly result placement must remain projection-only");
 assert.doesNotMatch(feature, /dangerouslySetInnerHTML/, "artifact metadata and previews must render as text");
 
-console.log("artifact-shelf-ui: ok - Simple Mode keeps durable outputs spatial, previewable, and inspectable without owning runtime geometry");
+assert.match(missionFeature, /Mission artifacts/, "Mission overview should expose Mission-scoped durable outputs");
+assert.match(missionFeature, /MAX_MISSION_ARTIFACTS = 6/, "Mission artifact disclosure should remain bounded");
+assert.match(missionFeature, /new Set\(mission\.taskIds\)/, "Mission artifacts should derive scope from durable Mission task membership");
+assert.match(missionFeature, /taskIds\.has\(artifact\.taskId\)/, "workspace artifacts should be filtered to the current Mission");
+assert.match(missionFeature, /fetch\("\/api\/artifacts"\)/, "Mission artifacts should reuse the runtime-owned artifact projection");
+assert.match(missionFeature, /\/api\/artifacts\/\$\{encodeURIComponent\(artifact\.id\)\}\/download/, "Mission file artifacts should preserve runtime-owned downloads");
+assert.doesNotMatch(missionFeature, /patchCanvas|updateArtifact|POST|dangerouslySetInnerHTML/, "Mission artifact projection must remain read-only and text-safe");
+
+console.log("artifact-shelf-ui: ok - durable outputs remain bounded, inspectable, and Mission-scoped without owning runtime state");
