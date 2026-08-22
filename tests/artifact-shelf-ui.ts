@@ -30,10 +30,19 @@ assert.doesNotMatch(feature, /dangerouslySetInnerHTML/, "artifact metadata and p
 
 assert.match(missionFeature, /Mission artifacts/, "Mission overview should expose Mission-scoped durable outputs");
 assert.match(missionFeature, /MAX_MISSION_ARTIFACTS = 6/, "Mission artifact disclosure should remain bounded");
-assert.match(missionFeature, /new Set\(mission\.taskIds\)/, "Mission artifacts should derive scope from durable Mission task membership");
+assert.match(missionFeature, /new Set\(mission\.taskIds\)/, "Mission work records should derive scope from durable Mission task membership");
 assert.match(missionFeature, /taskIds\.has\(artifact\.taskId\)/, "workspace artifacts should be filtered to the current Mission");
 assert.match(missionFeature, /fetch\("\/api\/artifacts"\)/, "Mission artifacts should reuse the runtime-owned artifact projection");
 assert.match(missionFeature, /\/api\/artifacts\/\$\{encodeURIComponent\(artifact\.id\)\}\/download/, "Mission file artifacts should preserve runtime-owned downloads");
-assert.doesNotMatch(missionFeature, /patchCanvas|updateArtifact|POST|dangerouslySetInnerHTML/, "Mission artifact projection must remain read-only and text-safe");
 
-console.log("artifact-shelf-ui: ok - durable outputs remain bounded, inspectable, and Mission-scoped without owning runtime state");
+assert.match(missionFeature, /Mission decisions/, "Mission overview should expose durable decisions tied to its tasks");
+assert.match(missionFeature, /MAX_MISSION_DECISIONS = 6/, "Mission decision disclosure should remain bounded");
+assert.match(missionFeature, /fetch\("\/api\/decisions"\)/, "Mission decisions should reuse the runtime-owned decision projection");
+assert.match(missionFeature, /function decisionTaskId/, "Mission decision scope should require explicit task provenance");
+assert.match(missionFeature, /const taskId = payload\.taskId/, "Mission decision provenance should come from the durable decision payload");
+assert.match(missionFeature, /taskId !== null && taskIds\.has\(taskId\)/, "workspace decisions should be filtered to durable Mission task membership");
+assert.match(missionFeature, /EventSource\("\/api\/events\?types=orchestrator\.task\.evaluated"\)/, "Mission decisions should refresh when task evaluations are recorded");
+assert.doesNotMatch(missionFeature, /mission\.createdAt.*decision\.timestamp|decision\.timestamp.*mission\.createdAt/, "Mission decisions must not be inferred from timestamps");
+assert.doesNotMatch(missionFeature, /patchCanvas|updateArtifact|POST|dangerouslySetInnerHTML/, "Mission work-record projection must remain read-only and text-safe");
+
+console.log("artifact-shelf-ui: ok - durable outputs and decisions remain bounded, inspectable, and Mission-scoped without owning runtime state");
