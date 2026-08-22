@@ -41,31 +41,29 @@ function ChefRoot() {
   };
 
   if (surface === "home") {
-    return <><IntentHome onOpenWorkbench={openWorkbench} /><SetupChrome /></>;
+    return <IntentHome onOpenWorkbench={openWorkbench} />;
   }
 
-  return (
-    <div className="relative h-screen w-screen overflow-hidden">
-      <button
-        type="button"
-        onClick={openHome}
-        className="fixed left-[132px] top-[9px] z-[80] rounded-md border border-white/10 bg-[#0d1117]/90 px-2.5 py-1 text-[10px] font-medium text-[#8b949e] backdrop-blur transition hover:border-white/20 hover:text-[#e6edf3]"
-        aria-label="Return to Chef home"
-      >
-        ← Home
-      </button>
-      <App key={viewMode} />
-      <ContextScopeFeature />
-      <CanvasNodeDeleteFeature />
-      <SetupChrome />
-      <DecisionLibraryFeature />
-      <LivingWorkspaceFeature />
-      <LivingArtifactFeature />
-      <MissionArtifactsFeature />
-      <ChannelRoomsFeature />
-      <AgentContextInspector />
-    </div>
-  );
+  return <>
+    <button
+      type="button"
+      onClick={openHome}
+      className="fixed left-[132px] top-[9px] z-[80] rounded-md border border-white/10 bg-[#0d1117]/90 px-2.5 py-1 text-[10px] font-medium text-[#8b949e] backdrop-blur transition hover:border-white/20 hover:text-[#e6edf3]"
+      aria-label="Return to Chef home"
+    >
+      ← Home
+    </button>
+    <App key={viewMode} />
+    <ContextScopeFeature />
+    <CanvasNodeDeleteFeature />
+    <SetupChrome />
+    <DecisionLibraryFeature />
+    <LivingWorkspaceFeature />
+    <LivingArtifactFeature />
+    <MissionArtifactsFeature />
+    <ChannelRoomsFeature />
+    <AgentContextInspector />
+  </>;
 }
 
 const root = document.getElementById("root");
