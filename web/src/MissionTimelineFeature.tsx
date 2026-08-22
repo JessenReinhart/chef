@@ -53,6 +53,23 @@ type MissionPlanResponse = {
   error?: string;
 };
 
+type OutcomeHighlight = {
+  id: string;
+  title: string;
+  detail: string;
+  status: string;
+};
+
+type MissionOutcome = {
+  status: string;
+  completed: number;
+  failed: number;
+  blocked: number;
+  cancelled: number;
+  total: number;
+  highlights: OutcomeHighlight[];
+};
+
 const FRIENDLY_EVENT_LABELS: Record<string, string> = {
   "mission.created": "Mission started",
   "mission.status": "Mission status changed",
@@ -70,6 +87,8 @@ const FRIENDLY_EVENT_LABELS: Record<string, string> = {
 };
 
 const PLAN_TASK_LIMIT = 12;
+const OUTCOME_HIGHLIGHT_LIMIT = 4;
+const TERMINAL_PLAN_STATUSES = new Set(["completed", "failed", "cancelled"]);
 
 function friendlyEventLabel(event: UiRuntimeEvent): string {
   return FRIENDLY_EVENT_LABELS[event.type]
@@ -109,6 +128,44 @@ function planTaskTone(status: string): string {
   if (status === "blocked") return "border-amber-500/25 bg-amber-500/5 text-amber-200";
   if (["assigned", "spawning", "running"].includes(status)) return "border-cyan-500/25 bg-cyan-500/5 text-cyan-200";
   return "border-[#21262d] bg-[#0d1117] text-[#8b949e]";
+}
+
+function outcomeTone(status: string): string {
+  if (status === "completed") return "border-green-500/25 bg-green-500/5";
+  if (status === "failed" || status === "cancelled") return "border-red-500/25 bg-red-500/5";
+  return "border-amber-500/25 bg-amber-500/5";
+}
+
+function buildMissionOutcome(plan: MissionPlan): MissionOutcome | null {
+  if (!TERMINAL_PLAN_STATUSES.has(plan.status)) return null;
+
+  const tasks = new Map(plan.tasks.map((task) => [task.id, task]));
+  const counts = { completed: 0, failed: 0, blocked: 0, cancelled: 0 };
+  const highlights: OutcomeHighlight[] = [];
+
+  for (const state of plan.taskStates) {
+    if (state.status === "completed") counts.completed += 1;
+    if (state.status === "failed") counts.failed += 1;
+    if (state.status === "blocked") counts.blocked += 1;
+    if (state.status === "cancelled") counts.cancelled += 1;
+
+    const detail = state.error ?? state.resultSummary;
+    if (!detail || highlights.length >= OUTCOME_HIGHLIGHT_LIMIT) continue;
+    const task = tasks.get(state.id);
+    highlights.push({
+      id: state.id,
+      title: task?.title ?? "Work item",
+      detail,
+      status: state.status,
+    });
+  }
+
+  return {
+    status: plan.status,
+    ...counts,
+    total: plan.tasks.length,
+    highlights,
+  };
 }
 
 export function MissionTimelineFeature({ missionId, mode }: Props) {
@@ -179,8 +236,49 @@ export function MissionTimelineFeature({ missionId, mode }: Props) {
     }));
   }, [currentPlan]);
 
+  const outcome = useMemo(() => currentPlan ? buildMissionOutcome(currentPlan) : null, [currentPlan]);
+
   return (
     <>
+      {outcome && (
+        <div className={`rounded-xl border p-3 xl:col-span-2 ${outcomeTone(outcome.status)}`} aria-label="Mission outcome summary">
+          <div className="mb-2 flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#8b949e]">Mission outcome</h3>
+              <p className="mt-0.5 text-[11px] font-medium text-[#c9d1d9]">
+                {outcome.status === "completed" ? "Chef finished this Mission." : outcome.status === "failed" ? "This Mission finished with unresolved failures." : "This Mission was cancelled before completion."}
+              </p>
+            </div>
+            <span className="rounded-full border border-[#30363d] bg-[#161b22]/80 px-2 py-0.5 text-[9px] capitalize text-[#8b949e]">{outcome.status}</span>
+          </div>
+
+          <div className="mb-2 flex flex-wrap gap-1.5" aria-label="Mission outcome counts">
+            <span className="rounded-full border border-green-500/20 bg-green-500/5 px-2 py-0.5 text-[9px] text-green-200">{outcome.completed} done</span>
+            {outcome.failed > 0 && <span className="rounded-full border border-red-500/20 bg-red-500/5 px-2 py-0.5 text-[9px] text-red-200">{outcome.failed} failed</span>}
+            {outcome.blocked > 0 && <span className="rounded-full border border-amber-500/20 bg-amber-500/5 px-2 py-0.5 text-[9px] text-amber-200">{outcome.blocked} blocked</span>}
+            {outcome.cancelled > 0 && <span className="rounded-full border border-red-500/20 bg-red-500/5 px-2 py-0.5 text-[9px] text-red-200">{outcome.cancelled} cancelled</span>}
+            <span className="rounded-full border border-[#30363d] bg-[#161b22]/60 px-2 py-0.5 text-[9px] text-[#8b949e]">{outcome.total} planned</span>
+          </div>
+
+          {outcome.highlights.length > 0 ? (
+            <div className="grid gap-1.5 sm:grid-cols-2">
+              {outcome.highlights.map((highlight) => (
+                <div key={highlight.id} className="min-w-0 rounded-md border border-[#30363d]/70 bg-[#0d1117]/55 px-2.5 py-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <strong className="truncate text-[10px] text-[#c9d1d9]" title={highlight.title}>{highlight.title}</strong>
+                    <span className="shrink-0 text-[9px] capitalize text-[#8b949e]">{planTaskStatusLabel(highlight.status)}</span>
+                  </div>
+                  <p className="mt-1 line-clamp-2 text-[9px] leading-4 text-[#8b949e]" title={highlight.detail}>{highlight.detail}</p>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-[10px] text-[#6e7681]">No task result summaries were recorded for this finished plan.</p>
+          )}
+          {mode === "power" && <p className="mt-2 text-[9px] text-[#484f58]">Summary derived from durable plan and task state. plan:{currentPlan?.id.slice(0, 8)}</p>}
+        </div>
+      )}
+
       <div className="rounded-xl border border-[#30363d] bg-[#010409]/55 p-3 xl:col-span-2" aria-label="Mission plan">
         <div className="mb-2 flex items-start justify-between gap-3">
           <div>
