@@ -70,6 +70,16 @@ type MissionOutcome = {
   highlights: OutcomeHighlight[];
 };
 
+type MissionProgressSummary = {
+  headline: string;
+  detail: string;
+  completed: number;
+  active: number;
+  waiting: number;
+  attention: number;
+  highlights: OutcomeHighlight[];
+};
+
 const FRIENDLY_EVENT_LABELS: Record<string, string> = {
   "mission.created": "Mission started",
   "mission.status": "Mission status changed",
@@ -88,7 +98,10 @@ const FRIENDLY_EVENT_LABELS: Record<string, string> = {
 
 const PLAN_TASK_LIMIT = 12;
 const OUTCOME_HIGHLIGHT_LIMIT = 4;
+const PROGRESS_HIGHLIGHT_LIMIT = 3;
 const TERMINAL_PLAN_STATUSES = new Set(["completed", "failed", "cancelled"]);
+const ACTIVE_TASK_STATUSES = new Set(["assigned", "spawning", "running"]);
+const ATTENTION_TASK_STATUSES = new Set(["failed", "blocked"]);
 
 function friendlyEventLabel(event: UiRuntimeEvent): string {
   return FRIENDLY_EVENT_LABELS[event.type]
@@ -168,6 +181,78 @@ function buildMissionOutcome(plan: MissionPlan): MissionOutcome | null {
   };
 }
 
+function buildMissionProgressSummary(plan: MissionPlan): MissionProgressSummary | null {
+  if (TERMINAL_PLAN_STATUSES.has(plan.status)) return null;
+
+  const tasks = new Map(plan.tasks.map((task) => [task.id, task]));
+  const states = plan.taskStates.length > 0
+    ? plan.taskStates
+    : plan.tasks.map((task) => ({ id: task.id, status: "pending", assignedTo: task.assignedTo }));
+  const completed = states.filter((state) => state.status === "completed").length;
+  const activeStates = states.filter((state) => ACTIVE_TASK_STATUSES.has(state.status));
+  const attentionStates = states.filter((state) => ATTENTION_TASK_STATUSES.has(state.status));
+  const waitingStates = states.filter((state) => state.status === "pending");
+  const focusStates = attentionStates.length > 0 ? attentionStates : activeStates.length > 0 ? activeStates : waitingStates;
+  const highlights = focusStates.slice(0, PROGRESS_HIGHLIGHT_LIMIT).map((state) => {
+    const task = tasks.get(state.id);
+    return {
+      id: state.id,
+      title: task?.title ?? "Work item",
+      detail: state.error ?? state.resultSummary ?? task?.description ?? "Waiting for the next runtime update.",
+      status: state.status,
+    };
+  });
+
+  if (attentionStates.length > 0) {
+    return {
+      headline: `${attentionStates.length} work item${attentionStates.length === 1 ? "" : "s"} need attention.`,
+      detail: "Chef is blocked on unresolved work before the Mission can move forward.",
+      completed,
+      active: activeStates.length,
+      waiting: waitingStates.length,
+      attention: attentionStates.length,
+      highlights,
+    };
+  }
+
+  if (activeStates.length > 0) {
+    const workers = new Set(activeStates.map((state) => state.assignedTo).filter(Boolean));
+    return {
+      headline: `Chef is working on ${activeStates.length} item${activeStates.length === 1 ? "" : "s"}.`,
+      detail: workers.size > 0
+        ? `${workers.size} worker${workers.size === 1 ? " is" : "s are"} active right now.`
+        : "The current plan has active work in progress.",
+      completed,
+      active: activeStates.length,
+      waiting: waitingStates.length,
+      attention: 0,
+      highlights,
+    };
+  }
+
+  if (waitingStates.length > 0) {
+    return {
+      headline: "Chef is preparing the next work item.",
+      detail: `${waitingStates.length} planned item${waitingStates.length === 1 ? " is" : "s are"} still queued.`,
+      completed,
+      active: 0,
+      waiting: waitingStates.length,
+      attention: 0,
+      highlights,
+    };
+  }
+
+  return {
+    headline: "Chef is waiting for the next runtime update.",
+    detail: "No active, queued, or blocked work is currently projected for this plan.",
+    completed,
+    active: 0,
+    waiting: 0,
+    attention: 0,
+    highlights: [],
+  };
+}
+
 export function MissionTimelineFeature({ missionId, mode }: Props) {
   const [events, setEvents] = useState<UiRuntimeEvent[]>([]);
   const [timelineError, setTimelineError] = useState<string | null>(null);
@@ -237,9 +322,43 @@ export function MissionTimelineFeature({ missionId, mode }: Props) {
   }, [currentPlan]);
 
   const outcome = useMemo(() => currentPlan ? buildMissionOutcome(currentPlan) : null, [currentPlan]);
+  const progressSummary = useMemo(() => currentPlan ? buildMissionProgressSummary(currentPlan) : null, [currentPlan]);
 
   return (
     <>
+      {progressSummary && (
+        <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/5 p-3 xl:col-span-2" aria-label="Mission progress summary">
+          <div className="mb-2 flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#8b949e]">What Chef is doing now</h3>
+              <p className="mt-0.5 text-[11px] font-medium text-[#c9d1d9]">{progressSummary.headline}</p>
+              <p className="mt-0.5 text-[10px] text-[#6e7681]">{progressSummary.detail}</p>
+            </div>
+            <div className="flex flex-wrap gap-1.5" aria-label="Mission progress counts">
+              <span className="rounded-full border border-green-500/20 bg-green-500/5 px-2 py-0.5 text-[9px] text-green-200">{progressSummary.completed} done</span>
+              {progressSummary.active > 0 && <span className="rounded-full border border-cyan-500/20 bg-cyan-500/5 px-2 py-0.5 text-[9px] text-cyan-200">{progressSummary.active} active</span>}
+              {progressSummary.waiting > 0 && <span className="rounded-full border border-[#30363d] bg-[#161b22]/60 px-2 py-0.5 text-[9px] text-[#8b949e]">{progressSummary.waiting} queued</span>}
+              {progressSummary.attention > 0 && <span className="rounded-full border border-amber-500/20 bg-amber-500/5 px-2 py-0.5 text-[9px] text-amber-200">{progressSummary.attention} attention</span>}
+            </div>
+          </div>
+
+          {progressSummary.highlights.length > 0 && (
+            <div className="grid gap-1.5 sm:grid-cols-2 xl:grid-cols-3">
+              {progressSummary.highlights.map((highlight) => (
+                <div key={highlight.id} className={`min-w-0 rounded-md border px-2.5 py-2 ${planTaskTone(highlight.status)}`}>
+                  <div className="flex items-start justify-between gap-2">
+                    <strong className="truncate text-[10px]" title={highlight.title}>{highlight.title}</strong>
+                    <span className="shrink-0 text-[9px] opacity-75">{planTaskStatusLabel(highlight.status)}</span>
+                  </div>
+                  <p className="mt-1 line-clamp-2 text-[9px] leading-4 opacity-75" title={highlight.detail}>{highlight.detail}</p>
+                </div>
+              ))}
+            </div>
+          )}
+          {mode === "power" && <p className="mt-2 text-[9px] text-[#484f58]">Summary derived from the current durable plan and task state. plan:{currentPlan?.id.slice(0, 8)}</p>}
+        </div>
+      )}
+
       {outcome && (
         <div className={`rounded-xl border p-3 xl:col-span-2 ${outcomeTone(outcome.status)}`} aria-label="Mission outcome summary">
           <div className="mb-2 flex flex-wrap items-start justify-between gap-3">
