@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { api } from "./api";
 import { describeContextReference, type ContextProvenanceSnapshot, type ContextReferenceLike } from "./contextProvenance";
-import type { ContextZone, UiTask } from "./types";
+import type { ContextZone, UiCanvasNode, UiTask } from "./types";
 
 const MAX_CONTEXT_ROWS = 12;
 
@@ -13,101 +14,123 @@ type ContextRow = {
 
 type Snapshot = {
   zones: ContextZone[];
+  nodes: UiCanvasNode[];
   tasks: UiTask[];
   provenance: ContextProvenanceSnapshot;
 };
 
-export function AgentContextInspector({ nodeId, taskId }: { nodeId: string; taskId?: string }) {
+export function AgentContextInspector() {
+  const [target, setTarget] = useState<Element | null>(null);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      try {
-        const [zones, state] = await Promise.all([api.contextZones(), api.stateRaw()]);
-        if (cancelled) return;
-        const raw = state as typeof state & Pick<ContextProvenanceSnapshot, "artifacts" | "decisions">;
-        setSnapshot({
-          zones,
-          tasks: state.tasks,
-          provenance: { artifacts: raw.artifacts, decisions: raw.decisions, events: state.events, tasks: state.tasks },
-        });
-        setError(null);
-      } catch (caught) {
-        if (!cancelled) setError(caught instanceof Error ? caught.message : "Could not load context");
-      }
+    const syncSelection = () => {
+      const selected = document.querySelector<HTMLElement>(".react-flow__node.selected");
+      setSelectedNodeId(selected?.dataset.id ?? null);
+      setTarget(document.querySelector(".power-inspector"));
     };
-    void load();
-    const timer = window.setInterval(() => void load(), 2000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [nodeId, taskId]);
+    syncSelection();
+    const timer = window.setInterval(syncSelection, 250);
+    return () => window.clearInterval(timer);
+  }, []);
 
+  const refresh = useCallback(async () => {
+    if (!selectedNodeId || !target) return;
+    try {
+      const [zones, state] = await Promise.all([api.contextZones(), api.stateRaw()]);
+      const raw = state as typeof state & Partial<Pick<ContextProvenanceSnapshot, "artifacts" | "decisions">>;
+      setSnapshot({
+        zones,
+        nodes: state.canvasNodes,
+        tasks: state.tasks,
+        provenance: {
+          artifacts: raw.artifacts ?? [],
+          decisions: raw.decisions ?? [],
+          events: state.events,
+          tasks: state.tasks,
+        },
+      });
+      setError(null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not load context");
+    }
+  }, [selectedNodeId, target]);
+
+  useEffect(() => {
+    setSnapshot(null);
+    setError(null);
+    if (!selectedNodeId || !target) return;
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 2000);
+    return () => window.clearInterval(timer);
+  }, [selectedNodeId, target, refresh]);
+
+  const selectedNode = snapshot?.nodes.find((node) => node.id === selectedNodeId);
+  const selectedTask = selectedNode?.taskId
+    ? snapshot?.tasks.find((task) => task.id === selectedNode.taskId)
+    : undefined;
+  const inheritedZones = useMemo(
+    () => snapshot?.zones.filter((zone) => selectedNodeId !== null && zone.memberNodeIds.includes(selectedNodeId)) ?? [],
+    [snapshot, selectedNodeId],
+  );
   const rows = useMemo(() => {
     if (!snapshot) return [] as ContextRow[];
     const result: ContextRow[] = [];
-    for (const zone of snapshot.zones.filter((candidate) => candidate.memberNodeIds.includes(nodeId))) {
+    for (const zone of inheritedZones) {
       for (const ref of zone.contextRefs) {
         result.push({ key: `zone:${zone.id}:${ref.type}:${ref.id}`, source: `Shared Context: ${zone.name}`, ref });
       }
     }
-    const task = taskId ? snapshot.tasks.find((candidate) => candidate.id === taskId) : undefined;
-    for (const ref of task?.contextRefs ?? []) {
-      result.push({ key: `task:${task?.id}:${ref.type}:${ref.id}`, source: "Direct task context", ref });
+    for (const ref of selectedTask?.contextRefs ?? []) {
+      result.push({ key: `task:${selectedTask?.id}:${ref.type}:${ref.id}`, source: "Direct task context", ref });
     }
     return result.slice(0, MAX_CONTEXT_ROWS);
-  }, [snapshot, nodeId, taskId]);
+  }, [snapshot, inheritedZones, selectedTask]);
 
-  const zoneCount = snapshot?.zones.filter((candidate) => candidate.memberNodeIds.includes(nodeId)).length ?? 0;
-  const totalCount = useMemo(() => {
-    if (!snapshot) return 0;
-    const inherited = snapshot.zones
-      .filter((candidate) => candidate.memberNodeIds.includes(nodeId))
-      .reduce((sum, zone) => sum + zone.contextRefs.length, 0);
-    const task = taskId ? snapshot.tasks.find((candidate) => candidate.id === taskId) : undefined;
-    return inherited + (task?.contextRefs?.length ?? 0);
-  }, [snapshot, nodeId, taskId]);
+  const totalCount = inheritedZones.reduce((sum, zone) => sum + zone.contextRefs.length, 0) + (selectedTask?.contextRefs?.length ?? 0);
 
-  return (
-    <div className="wb-inspector__section" aria-label="What this agent knows">
-      <div className="wb-inspector__section-title">What this agent knows</div>
-      <p style={{ margin: "0 0 8px", fontSize: 12, color: "var(--fg-secondary)" }}>
-        Runtime-owned context references currently available to this agent through explicit Shared Context membership or its task.
+  if (!target || !selectedNodeId || (snapshot && selectedNode?.kind !== "agent")) return null;
+
+  return createPortal(
+    <section aria-label="What this agent knows">
+      <h3>What this agent knows</h3>
+      <p style={{ margin: "0 0 8px", fontSize: 11, color: "#8b949e" }}>
+        Explicit context available through Shared Context membership and this agent's current task.
       </p>
       {error ? (
-        <span className="wb-inspector__field-value" style={{ color: "var(--danger, #c44)" }}>{error}</span>
+        <span style={{ color: "#f87171" }}>{error}</span>
       ) : !snapshot ? (
-        <span className="wb-inspector__field-value">Loading context…</span>
+        <span>Loading context…</span>
       ) : rows.length === 0 ? (
-        <span className="wb-inspector__field-value">No explicit context references are attached to this agent yet.</span>
+        <span>No explicit context references are attached to this agent yet.</span>
       ) : (
         <>
-          <div className="wb-inspector__field">
-            <span className="wb-inspector__field-label">Sources</span>
-            <span className="wb-inspector__field-value">{zoneCount} Shared Context zone{zoneCount === 1 ? "" : "s"} · {totalCount} reference{totalCount === 1 ? "" : "s"}</span>
+          <div className="power-inspector__chips" style={{ marginBottom: 8 }}>
+            <code>{inheritedZones.length} shared zone{inheritedZones.length === 1 ? "" : "s"}</code>
+            <code>{totalCount} reference{totalCount === 1 ? "" : "s"}</code>
           </div>
-          {rows.map((row) => {
-            const description = describeContextReference(row.ref, snapshot.provenance);
-            return (
-              <div key={row.key} className="wb-inspector__field">
-                <span className="wb-inspector__field-label">{row.source}</span>
-                <span className="wb-inspector__field-value">
-                  <strong>{description.label}</strong>
-                  <br />
-                  <span>{row.ref.type} · {description.detail}{description.relevance !== undefined ? ` · relevance ${description.relevance.toFixed(2)}` : ""}</span>
-                  {description.stale && <><br /><span style={{ color: "var(--warning, #b88700)" }}>Stale or missing source</span></>}
-                </span>
-              </div>
-            );
-          })}
-          {totalCount > MAX_CONTEXT_ROWS && (
-            <span className="wb-inspector__field-value">Showing {MAX_CONTEXT_ROWS} of {totalCount} references.</span>
-          )}
+          <div style={{ display: "grid", gap: 8 }}>
+            {rows.map((row) => {
+              const description = describeContextReference(row.ref, snapshot.provenance);
+              return (
+                <div key={row.key} style={{ padding: 8, border: "1px solid #30363d", borderRadius: 6, background: "#010409" }}>
+                  <div style={{ fontSize: 10, color: "#8b949e", marginBottom: 3 }}>{row.source}</div>
+                  <strong style={{ display: "block", fontSize: 11 }}>{description.label}</strong>
+                  <span style={{ display: "block", marginTop: 2, fontSize: 10, color: description.stale ? "#fbbf24" : "#8b949e" }}>
+                    {row.ref.type} · {description.detail}
+                    {description.relevance !== undefined ? ` · relevance ${description.relevance.toFixed(2)}` : ""}
+                  </span>
+                  {description.stale && <span style={{ display: "block", marginTop: 2, fontSize: 10, color: "#fbbf24" }}>Stale or missing source</span>}
+                </div>
+              );
+            })}
+          </div>
+          {totalCount > MAX_CONTEXT_ROWS && <span style={{ display: "block", marginTop: 6 }}>Showing {MAX_CONTEXT_ROWS} of {totalCount} references.</span>}
         </>
       )}
-    </div>
+    </section>,
+    target,
   );
 }
