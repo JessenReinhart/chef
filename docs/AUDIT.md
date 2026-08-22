@@ -2,7 +2,7 @@
 
 Audit of `AI_Engineering_OS_Specification_v0.1.pdf` against the current codebase. Status per requirement: **implemented** (verified by tests/usage), **partial** (works but incomplete), **deferred** (intentionally not shipped; future capability), **absent** (not started).
 
-> Reconciled against the v0.2 living-workspace baseline on `master`. This audit should describe shipped repository state rather than roadmap work that has already landed.
+> Reconciled against the current living-workspace baseline on `master`. This audit should describe shipped repository state rather than roadmap work that has already landed.
 
 ## Product Model (§1–3)
 
@@ -68,7 +68,7 @@ Audit of `AI_Engineering_OS_Specification_v0.1.pdf` against the current codebase
 |---|---|---|
 | Message envelope with type/channel/refs | implemented | `AgentMessage`; `messages` table |
 | Event envelope (id, workspace, timestamp, source, type, payload) | implemented | `RuntimeEvent` |
-| IRC-like channels | partial | durable channel messages, `GET /api/messages/channels`, and an Advanced-mode read-only Rooms browser ship; subscription/write semantics are not implemented |
+| IRC-like channels | partial | durable channel messages, `GET /api/messages/channels`, an Advanced-mode Rooms browser, and bounded human-authored channel writes through `POST /api/messages`; explicit room subscriptions are not implemented |
 | Channel is projection; events are system of record | implemented | events table authoritative |
 
 ## Context System (§8)
@@ -100,7 +100,7 @@ Audit of `AI_Engineering_OS_Specification_v0.1.pdf` against the current codebase
 | Artifact model with version/provenance | implemented | `Artifact`; `artifacts` table |
 | Reference over copy | implemented | context refs; URIs |
 | Durable decisions | implemented | `decisions` table; `Decision` type |
-| Project memory | partial | deterministic `GET /api/memory` projection plus the read-only Knowledge Library expose categorized durable records with provenance; summarization/promotion lifecycle is not implemented |
+| Project memory | partial | deterministic `GET /api/memory`, the Knowledge Library, and bounded human-authored capture through `POST /api/decisions` expose categorized durable records with provenance; summarization/promotion lifecycle is not implemented |
 
 ## Permissions & Approvals (§11)
 
@@ -128,6 +128,7 @@ Audit of `AI_Engineering_OS_Specification_v0.1.pdf` against the current codebase
 | Chat with Orchestrator (intent, not low-level) | implemented | Chat with Chef SSE; LLM decision provider |
 | Plan/squad state/progress/blockers display | implemented | workbench; console timeline; approval queue |
 | Mission activity history | implemented | runtime-owned `/api/missions/:id/timeline` projection surfaced in `MissionTimelineFeature` with Simple/Power disclosure |
+| Mission success criteria | implemented | durable `Mission.metadata.successCriteria` surfaced and editable for non-terminal Missions through the existing success-criteria endpoint |
 | Direct worker interaction | implemented | terminal send/interrupt; `direct-worker-interaction` test |
 | Squad state dashboard | implemented | `App.tsx` state strip; inspector |
 
@@ -140,6 +141,7 @@ Audit of `AI_Engineering_OS_Specification_v0.1.pdf` against the current codebase
 | Git operations | implemented | tool-runner git; scoped to repo root |
 | Filesystem scoped | implemented | `validateFilePath` root scoping; out-of-root denial |
 | Terminal deterministic execution | implemented | PTY harness + `runCommand` |
+| Environment preflight | implemented | `npm run doctor` checks Node, project access, Git, and known harness executables with blocking vs warning diagnostics |
 
 ## Persistence (§15)
 
@@ -221,9 +223,9 @@ Audit of `AI_Engineering_OS_Specification_v0.1.pdf` against the current codebase
 
 1. **Drizzle ORM** — repo convention uses raw `node:sqlite` (documented divergence).
 2. **Hierarchical squads (P4)** — Orchestrator acts as squad lead; multi-level tech/QA/research leads not implemented.
-3. **IRC channel subscriptions/writes** — the Advanced-mode read-only Rooms browser ships; explicit room subscription and channel write UI are still deferred.
+3. **IRC channel subscriptions** — channel discovery, browsing, and bounded human writes ship; explicit subscription/membership semantics are still deferred.
 4. **Context hierarchy depth** — workspace/task refs work; full global→session hierarchy not surfaced.
 5. **Event-sourced projection rebuild** — events append-only; rebuild-from-events not implemented.
 6. **Playwright hard dependency** — optional; browser tool degrades honestly.
 7. **LLM provider live integration** — `LLMDecisionProvider` implemented and tested with mocks; real API call requires `ANTHROPIC_API_KEY`/`OPENAI_API_KEY` at runtime.
-8. **Wide Inspector config persistence** — inspector validates and drafts; runtime node-config update endpoint not yet wired.
+8. **Wide Inspector config persistence** — the legacy inspector can validate/draft config, but the current living-workspace Power inspector does not yet expose a runtime-backed general config editor.
