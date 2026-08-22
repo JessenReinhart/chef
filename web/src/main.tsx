@@ -11,6 +11,7 @@ import { DecisionLibraryFeature } from "./DecisionLibraryFeature";
 import { ChannelRoomsFeature } from "./ChannelRoomsFeature";
 import { AgentContextInspector } from "./AgentContextInspector";
 import { IntentHome } from "./IntentHome";
+import { IntentOnboarding } from "./IntentOnboarding";
 import "./index.css";
 import "./visual-audit.css";
 import "./advanced-workspace.css";
@@ -41,7 +42,10 @@ function ChefRoot() {
   };
 
   if (surface === "home") {
-    return <IntentHome onOpenWorkbench={openWorkbench} />;
+    return <>
+      <IntentHome onOpenWorkbench={openWorkbench} />
+      <IntentOnboarding />
+    </>;
   }
 
   return <>
