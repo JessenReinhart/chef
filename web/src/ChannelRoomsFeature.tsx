@@ -52,7 +52,6 @@ function formatTime(timestamp: number): string {
 }
 
 export function ChannelRoomsFeature() {
-  const [enabled, setEnabled] = useState(() => localStorage.getItem("chef:view-mode") === "power");
   const [open, setOpen] = useState(false);
   const [channels, setChannels] = useState<ChannelSummary[]>([]);
   const [selectedChannel, setSelectedChannel] = useState<string | null>(null);
@@ -61,15 +60,6 @@ export function ChannelRoomsFeature() {
   const [sending, setSending] = useState(false);
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      const next = localStorage.getItem("chef:view-mode") === "power";
-      setEnabled(next);
-      if (!next) setOpen(false);
-    }, 250);
-    return () => window.clearInterval(timer);
-  }, []);
 
   const loadChannels = useCallback(async () => {
     const response = await fetch("/api/messages/channels");
@@ -115,7 +105,7 @@ export function ChannelRoomsFeature() {
   }, [draft, selectedChannel, sending, loadMessages, loadChannels]);
 
   useEffect(() => {
-    if (!enabled || !open) return;
+    if (!open) return;
     let cancelled = false;
     const refresh = async () => {
       setLoading(true);
@@ -134,10 +124,10 @@ export function ChannelRoomsFeature() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [enabled, open, loadChannels]);
+  }, [open, loadChannels]);
 
   useEffect(() => {
-    if (!enabled || !open || !selectedChannel) {
+    if (!open || !selectedChannel) {
       if (!selectedChannel) setMessages([]);
       return;
     }
@@ -156,14 +146,12 @@ export function ChannelRoomsFeature() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [enabled, open, selectedChannel, loadMessages]);
+  }, [open, selectedChannel, loadMessages]);
 
   const orderedMessages = useMemo(
     () => [...messages].sort((a, b) => a.timestamp - b.timestamp),
     [messages],
   );
-
-  if (!enabled) return null;
 
   return (
     <section className={`chef-rooms ${open ? "is-open" : ""}`} aria-label="Agent rooms">
