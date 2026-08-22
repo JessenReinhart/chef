@@ -6,3 +6,5 @@ Thumbs.db
 .env.*
 dist/
 *.tsbuildinfo
+Chef.lnk
+web/public/chef-icon.svg
