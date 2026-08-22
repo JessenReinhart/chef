@@ -36,6 +36,13 @@ export function createRecoveryServer(runtime: ChefRuntime, baseServer: Server): 
           sendJson(res, 409, { error: `task is not retryable from status ${task.status}` });
           return;
         }
+        if (task.status === "blocked" && task.approvalId) {
+          const approval = runtime.repository.getApproval(task.approvalId);
+          if (approval?.status === "pending") {
+            sendJson(res, 409, { error: "task is waiting for approval and cannot be retried" });
+            return;
+          }
+        }
 
         try {
           await runtime.retryTask(taskId);
