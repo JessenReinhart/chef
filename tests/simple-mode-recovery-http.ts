@@ -18,6 +18,20 @@ const tasks = new Map<string, Task>([
     createdAt: 1,
     updatedAt: 1,
   }],
+  ["approval-task", {
+    id: "approval-task",
+    workspaceId: "workspace-a",
+    title: "Wait for approval",
+    description: "blocked by a human gate",
+    status: "blocked",
+    approvalId: "approval-pending",
+    dependencies: [],
+    contextRefs: [],
+    priority: 0,
+    retryCount: 0,
+    createdAt: 1,
+    updatedAt: 1,
+  }],
   ["done-task", {
     id: "done-task",
     workspaceId: "workspace-a",
@@ -53,6 +67,9 @@ const runtime = {
     getTask(taskId: string) {
       return tasks.get(taskId) ?? null;
     },
+    getApproval(approvalId: string) {
+      return approvalId === "approval-pending" ? { id: approvalId, status: "pending" } : null;
+    },
   },
   async retryTask(taskId: string) {
     retryCalls.push(taskId);
@@ -87,6 +104,11 @@ try {
   assert.equal(success.json.data?.status, "running");
   assert.deepEqual(retryCalls, ["failed-task"]);
 
+  const approvalBlocked = await post("/api/nodes/approval-task/retry");
+  assert.equal(approvalBlocked.status, 409);
+  assert.match(approvalBlocked.json.error ?? "", /waiting for approval/);
+  assert.deepEqual(retryCalls, ["failed-task"], "pending approval must remain authoritative over retry");
+
   const completed = await post("/api/nodes/done-task/retry");
   assert.equal(completed.status, 409);
   assert.match(completed.json.error ?? "", /not retryable/);
@@ -100,7 +122,7 @@ try {
   assert.equal(fallbackResult.status, 418);
   assert.equal(fallbackResult.json.fallback, true);
 
-  console.log("simple-mode-recovery-http: ok — retry is reachable, bounded, and workspace-scoped");
+  console.log("simple-mode-recovery-http: ok — retry is reachable, bounded, approval-safe, and workspace-scoped");
 } finally {
   if (server.listening) await new Promise<void>((resolve) => server.close(() => resolve()));
 }
