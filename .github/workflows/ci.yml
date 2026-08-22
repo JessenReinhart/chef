@@ -21,6 +21,8 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm install
+      - name: Check friendly launcher syntax
+        run: node --check scripts/chef.mjs
       - name: Run runtime tests
         run: npm test
       - name: Run artifact HTTP acceptance test
