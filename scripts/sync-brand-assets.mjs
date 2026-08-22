@@ -3,9 +3,9 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const source = resolve(root, "assets", "chef-icon.svg");
+const source = resolve(root, "assets", "chef-icon.png");
 const targetDir = resolve(root, "web", "public");
-const target = resolve(targetDir, "chef-icon.svg");
+const target = resolve(targetDir, "chef-icon.png");
 
 await mkdir(targetDir, { recursive: true });
 await copyFile(source, target);
