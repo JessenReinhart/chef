@@ -18,6 +18,7 @@ export class OmpHarness extends SpecializedCliHarness {
       name: "OMP",
       binary,
       flags: ["run"],
+      taskArgs: (prompt) => ["--print", "--no-session", "--", prompt],
       ...runtime,
     });
   }
