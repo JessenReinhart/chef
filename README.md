@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/chef-icon.svg" alt="Chef icon" width="148" />
+  <img src="assets/chef-icon.png" alt="Chef icon" width="148" />
 </p>
 
 <h1 align="center">Chef</h1>
@@ -241,7 +241,7 @@ Unknown capabilities fail closed.
 
 ```text
 assets/
-  chef-icon.svg            canonical Chef app icon
+  chef-icon.png            canonical Chef app icon
 
 src/
   main.ts                  runtime wiring and ChefRuntime facade
