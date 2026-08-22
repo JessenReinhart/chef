@@ -111,7 +111,7 @@ function findListeningPids() {
   for (const [command, args] of candidates) {
     const result = spawnSync(command, args, { encoding: "utf8" });
     if (result.error || result.status !== 0) continue;
-    const pids = [...new Set(`${result.stdout ?? ""} ${result.stderr ?? ""}`.match(/\b\d+\b/g)?.map(Number) ?? [])]
+    const pids = [...new Set((result.stdout ?? "").match(/\b\d+\b/g)?.map(Number) ?? [])]
       .filter((pid) => Number.isInteger(pid) && pid > 0);
     if (pids.length > 0) return pids;
   }
