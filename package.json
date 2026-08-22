@@ -6,8 +6,8 @@
   "engines": { "node": ">=24.0.0" },
   "scripts": {
     "server": "node --experimental-strip-types src/server/index.ts",
-    "start": "node --experimental-strip-types src/server/index.ts",
-    "chef": "node --experimental-strip-types src/server/index.ts",
+    "start": "node scripts/chef.mjs",
+    "chef": "node scripts/chef.mjs",
     "web:install": "npm --prefix web install",
     "web:build": "npm --prefix web run build",
     "doctor": "node --experimental-strip-types src/doctor-cli.ts",

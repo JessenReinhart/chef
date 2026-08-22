@@ -1,6 +1,10 @@
-# Chef
+<p align="center">
+  <img src="assets/chef-icon.svg" alt="Chef icon" width="148" />
+</p>
 
-**A living AI workspace where people, agents, tools, and context collaborate in real time.**
+<h1 align="center">Chef</h1>
+
+<p align="center"><strong>A living AI workspace where people, agents, tools, and context collaborate in real time.</strong></p>
 
 Chef is a local-first Node/TypeScript runtime and visual workbench for coordinating AI agents, terminal tools, durable context, Missions, and repeatable Automations.
 
@@ -70,28 +74,59 @@ Chef's runtime owns durable entities and execution state. The web app reads that
 
 ## Getting started
 
-Chef currently requires **Node.js 24+**.
+Chef currently requires **Node.js 24+ with npm**.
 
-```bash
-npm install
-npm test
+### Windows
+
+Clone or download Chef, then either double-click:
+
+```text
+Chef.cmd
 ```
 
-Run the server:
+or run:
+
+```powershell
+npm run chef
+```
+
+On the first Windows launch, `Chef.cmd` also prepares a branded `Chef.lnk` shortcut beside it using the Chef app icon. You can use that shortcut for later launches.
+
+### macOS / Linux
+
+From the Chef repository:
 
 ```bash
+npm run chef
+```
+
+The friendly launcher handles normal startup for you. On first launch it installs missing runtime and web dependencies, builds the web UI, starts the local runtime, and opens Chef in your default browser.
+
+Later launches reuse the installed dependencies and only rebuild the UI when the web source is newer than the current build.
+
+Chef opens at:
+
+```text
+http://127.0.0.1:4321
+```
+
+If a Chef runtime is already running on that port, the launcher opens the existing instance instead of starting a duplicate.
+
+For a step-by-step user guide, see [`docs/INSTALL.md`](docs/INSTALL.md).
+
+### Developer mode
+
+UI development can still run the runtime and Vite separately for hot reload:
+
+```bash
+# terminal 1
 npm run server
-```
 
-Run the web workbench in another terminal:
-
-```bash
+# terminal 2
 cd web
 npm install
 npm run dev
 ```
-
-The runtime API listens on `http://127.0.0.1:4321`; the Vite dev server proxies `/api` requests to it.
 
 Useful validation commands:
 
@@ -103,7 +138,10 @@ npm test
 npm run typecheck
 
 # web TypeScript + production build
-cd web && npm run build
+npm run web:build
+
+# environment and harness diagnostics
+npm run doctor
 
 # handle-leak diagnostic
 node --experimental-strip-types diag-handles.mjs
@@ -202,6 +240,9 @@ Unknown capabilities fail closed.
 ## Project layout
 
 ```text
+assets/
+  chef-icon.svg            canonical Chef app icon
+
 src/
   main.ts                  runtime wiring and ChefRuntime facade
   core/                    durable domain contracts and graph types
@@ -235,6 +276,7 @@ Current known limitations include:
 - hierarchical squads, richer long-lived agent identity/presence, and broader collaboration UX remain later-stage work
 - resume/replay and richer artifact UX can still be expanded beyond the current durable execution history
 - Windows currently uses the winpty compatibility path (`useConpty: false`)
+- the current friendly installation still requires Node.js and a repository checkout; a packaged Windows installer/Winget distribution is a later milestone
 
 For implementation-level detail and remaining divergences, see `docs/AUDIT.md` and the repository's active product/spec documents.
 
