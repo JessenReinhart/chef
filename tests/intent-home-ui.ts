@@ -18,6 +18,9 @@ assert.match(home, /Open Workbench/, "advanced inspection should stay deliberate
 assert.match(home, /Needs your attention/, "approval and failure states should be surfaced in plain language");
 assert.match(home, /const missionApprovals = useMemo/, "Home approvals should be projected from the current Mission instead of all workspace approvals");
 assert.match(home, /approvals\.filter\(\(approval\) => ids\.has\(approval\.taskId\)\)/, "unrelated Mission approvals must not pollute the current Home status");
+assert.match(home, /api\.retryNode\(taskId\)/, "failed work must be retryable directly from Simple Mode");
+assert.match(home, />\s*Retry\s*</, "Simple Mode must present a plain-language retry action");
+assert.match(home, /task\.status === "blocked" && !approvalTaskIds\.has\(task\.id\)/, "retry must not bypass a pending approval gate");
 assert.match(home, /Chef is working/, "active work should collapse to a human-readable status");
 assert.match(home, /Work complete/, "completed work should collapse to a human-readable status");
 assert.doesNotMatch(home, /NodePalette|ChannelRooms|AgentContextInspector|Power Mode|PTY|sessionId/, "default home must not expose Workbench/runtime machinery");
@@ -36,4 +39,4 @@ assert.match(rooms, /if \(!open \|\| !selectedChannel\)/, "closed Rooms should n
 const chatCalls = home.match(/api\.chat\(/g) ?? [];
 assert.equal(chatCalls.length, 1, "the default home should have one authoritative Chef intent submission path");
 
-console.log("intent-home-ui: ok — Chef teaches one intent-first happy path with Workbench capabilities behind progressive depth");
+console.log("intent-home-ui: ok — Chef teaches one intent-first happy path with recovery and Workbench behind progressive depth");
