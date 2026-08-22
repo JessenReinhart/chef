@@ -19,7 +19,7 @@ assert.match(home, /Needs your attention/, "approval and failure states should b
 assert.match(home, /const missionApprovals = useMemo/, "Home approvals should be projected from the current Mission instead of all workspace approvals");
 assert.match(home, /approvals\.filter\(\(approval\) => ids\.has\(approval\.taskId\)\)/, "unrelated Mission approvals must not pollute the current Home status");
 assert.match(home, /api\.retryNode\(taskId\)/, "failed work must be retryable directly from Simple Mode");
-assert.match(home, />\s*Retry\s*</, "Simple Mode must present a plain-language retry action");
+assert.match(home, /"Retry"/, "Simple Mode must present a plain-language retry action");
 assert.match(home, /task\.status === "blocked" && !approvalTaskIds\.has\(task\.id\)/, "retry must not bypass a pending approval gate");
 assert.match(home, /Chef is working/, "active work should collapse to a human-readable status");
 assert.match(home, /Work complete/, "completed work should collapse to a human-readable status");
