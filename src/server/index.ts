@@ -10,15 +10,19 @@ import { createHarnessReadinessServer } from "./harness-readiness-http.ts";
 import { createBlockerServer } from "./blocker-http.ts";
 import { createProjectServer } from "./project-http.ts";
 import { createOrchestratorConfigServer } from "./orchestrator-config-http.ts";
+import { createWebUiServer } from "./web-ui-http.ts";
 import { applyOrchestratorProviderEnv } from "./orchestrator-config.ts";
 import { createChef } from "../main.ts";
 import { mkdirSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 await applyOrchestratorProviderEnv();
 const projectDir = resolve(process.env.CHEF_PROJECT_DIR ?? process.cwd());
 const dbPath = resolve(process.env.CHEF_DB_PATH ?? join(projectDir, ".chef", "chef.sqlite"));
+const chefRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+const webDistDir = resolve(process.env.CHEF_WEB_DIST ?? join(chefRoot, "web", "dist"));
 mkdirSync(dirname(dbPath), { recursive: true });
 
 // Chef's persisted orchestrator key must win during provider construction, but
@@ -51,7 +55,7 @@ const lineageServer = createArtifactLineageServer(chef, messageServer);
 const decisionServer = createDecisionServer(chef, lineageServer);
 const readinessServer = createHarnessReadinessServer(chef, decisionServer);
 const blockerServer = createBlockerServer(chef, readinessServer);
-let server: ReturnType<typeof createProjectServer>;
+let server: ReturnType<typeof createWebUiServer>;
 let switchingProject = false;
 const relaunch = async (nextProjectDir = projectDir) => {
   if (switchingProject) return;
@@ -74,12 +78,14 @@ const relaunch = async (nextProjectDir = projectDir) => {
   process.exit(0);
 };
 const projectServer = createProjectServer(chef, blockerServer, { onOpenProject: relaunch });
-server = createOrchestratorConfigServer(projectServer, () => relaunch(projectDir));
+const configuredServer = createOrchestratorConfigServer(projectServer, () => relaunch(projectDir));
+server = createWebUiServer(configuredServer, { distDir: webDistDir });
 server.listen(port, "127.0.0.1", () => {
   const address = server.address();
   const listeningPort = typeof address === "object" && address ? address.port : port;
-  console.log(`chef inspector listening on http://127.0.0.1:${listeningPort}`);
-  console.log(`  durable database: ${dbPath}`);
+  console.log(`chef listening on http://127.0.0.1:${listeningPort}`);
+  console.log(`  web client:        ${webDistDir}`);
+  console.log(`  durable database:  ${dbPath}`);
   console.log(`  GET  /api/state    — workspace snapshot`);
   console.log(`  GET  /api/events   — live SSE event stream`);
   console.log(`  GET  /api/context-scopes — shared context scopes`);
