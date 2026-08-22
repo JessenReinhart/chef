@@ -7,15 +7,12 @@
  */
 
 import type {
-	AgentId,
 	Decision,
 	DecisionProvider,
 	Plan,
-	PlanId,
 	PlanProposalContext,
 	PlanTask,
 	PlanTaskOutcome,
-	Timestamp,
 	WorkspaceId,
 } from "../core/types.ts";
 import type { NodeDefinition } from "../core/nodes.ts";
@@ -45,7 +42,7 @@ export interface LLMDecisionProviderConfig {
 }
 
 // ---------------------------------------------------------------------------
-// Internal types
+// Internal types / parsing
 // ---------------------------------------------------------------------------
 
 interface NodeTypeInfo {
@@ -59,30 +56,86 @@ interface NodeTypeInfo {
 	configDefaults: Record<string, unknown>;
 }
 
-interface PlanSchema {
-	type: "object";
-	properties: {
-		goal: { type: "string" };
-		tasks: {
-			type: "array";
-			items: {
-				type: "object";
-				properties: {
-					id: { type: "string" };
-					title: { type: "string" };
-					description: { type: "string" };
-					dependencies: { type: "array"; items: { type: "string" } };
-					priority: { type: "number" };
-					assignedTo: { type: "string" };
-					approvalId: { type: "string" };
-				};
-				required: ["id", "title", "description", "dependencies", "priority"];
-				additionalProperties: false;
-			};
-		};
-	};
-	required: ["goal", "tasks"];
-	additionalProperties: false;
+function asJsonObject(value: unknown): Record<string, unknown> {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) {
+		throw new Error("LLM response JSON must be an object");
+	}
+	return value as Record<string, unknown>;
+}
+
+function findBalancedObjectEnd(text: string, start: number): number | null {
+	let depth = 0;
+	let inString = false;
+	let escaped = false;
+
+	for (let index = start; index < text.length; index += 1) {
+		const char = text[index];
+
+		if (inString) {
+			if (escaped) {
+				escaped = false;
+				continue;
+			}
+			if (char === "\\") {
+				escaped = true;
+				continue;
+			}
+			if (char === '"') inString = false;
+			continue;
+		}
+
+		if (char === '"') {
+			inString = true;
+			continue;
+		}
+		if (char === "{") {
+			depth += 1;
+			continue;
+		}
+		if (char === "}") {
+			depth -= 1;
+			if (depth === 0) return index;
+			if (depth < 0) return null;
+		}
+	}
+
+	return null;
+}
+
+/**
+ * Parse one JSON object from model output.
+ *
+ * Some OpenAI-compatible/custom providers ignore JSON-only instructions and
+ * wrap an otherwise valid object in markdown fences or explanatory text. We
+ * tolerate only that outer wrapper. The JSON object itself must still parse
+ * cleanly and downstream runtime validation remains authoritative.
+ */
+export function parseModelJsonObject(text: string): Record<string, unknown> {
+	const trimmed = text.trim();
+	if (!trimmed) throw new Error("LLM response was empty");
+
+	try {
+		return asJsonObject(JSON.parse(trimmed) as unknown);
+	} catch (directError) {
+		let searchFrom = 0;
+		while (searchFrom < text.length) {
+			const start = text.indexOf("{", searchFrom);
+			if (start < 0) break;
+			const end = findBalancedObjectEnd(text, start);
+			if (end !== null) {
+				const candidate = text.slice(start, end + 1);
+				try {
+					return asJsonObject(JSON.parse(candidate) as unknown);
+				} catch {
+					// This balanced object was not valid JSON. Try the next opening brace.
+				}
+			}
+			searchFrom = start + 1;
+		}
+
+		const message = directError instanceof Error ? directError.message : String(directError);
+		throw new Error(`LLM response did not contain a valid JSON object: ${message}`);
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -132,10 +185,8 @@ export class LLMDecisionProvider implements DecisionProvider {
 
 		try {
 			const response = await this.#callLLM(systemPrompt, userPrompt);
-			const plan = this.#parsePlan(response, input.workspaceId, input.goal);
-			return plan;
+			return this.#parsePlan(response, input.workspaceId, input.goal);
 		} catch (error) {
-			// Provider failure → structured error decision with status: "rejected"
 			const errorMessage = error instanceof Error ? error.message : String(error);
 			throw new Error(`LLM plan proposal failed: ${errorMessage}`);
 		}
@@ -159,22 +210,22 @@ Return a JSON object with:
 		try {
 			const response = await this.#callLLM(
 				"You are a task evaluator. Return only valid JSON.",
-				prompt
+				prompt,
 			);
-			const parsed = JSON.parse(response);
+			const parsed = parseModelJsonObject(response);
 			const accepted = parsed.status === "accepted";
 			return {
 				id: crypto.randomUUID(),
 				workspaceId: taskResult.taskId, // best effort
 				type: "task.evaluation",
-				summary: parsed.summary ?? (accepted ? "Task completed" : "Task failed"),
+				summary: typeof parsed.summary === "string" ? parsed.summary : (accepted ? "Task completed" : "Task failed"),
 				payload: taskResult,
 				madeBy: this.name,
 				timestamp: Date.now(),
 				status: accepted ? "accepted" : "rejected",
 			};
 		} catch {
-			// On LLM failure, use simple heuristic
+			// On LLM failure, use simple heuristic.
 			const accepted = taskResult.status === "completed";
 			return {
 				id: crypto.randomUUID(),
@@ -191,27 +242,23 @@ Return a JSON object with:
 		}
 	}
 
-	// -------------------------------------------------------------------------
-	// Private helpers
-	// -------------------------------------------------------------------------
-
 	#getNodeTypeInfos(): NodeTypeInfo[] {
 		return nodeRegistry.list().map((def: NodeDefinition) => ({
 			type: def.type,
 			category: def.category,
 			label: def.label,
 			description: def.description,
-			inputs: def.inputs.map((p) => ({
-				id: p.id,
-				label: p.label,
-				type: p.type,
-				required: p.required,
+			inputs: def.inputs.map((port) => ({
+				id: port.id,
+				label: port.label,
+				type: port.type,
+				required: port.required,
 			})),
-			outputs: def.outputs.map((p) => ({
-				id: p.id,
-				label: p.label,
-				type: p.type,
-				required: p.required,
+			outputs: def.outputs.map((port) => ({
+				id: port.id,
+				label: port.label,
+				type: port.type,
+				required: port.required,
 			})),
 			configSchema: {},
 			configDefaults: def.config.defaults(),
@@ -221,10 +268,10 @@ Return a JSON object with:
 	#buildSystemPrompt(nodeTypes: NodeTypeInfo[]): string {
 		const typesList = nodeTypes
 			.map(
-				(nt) =>
-					`- ${nt.type} (${nt.category}): ${nt.label} — ${nt.description}\n` +
-					`  Inputs: ${nt.inputs.map((i) => `${i.id}${i.required ? " (required)" : ""}`).join(", ")}\n` +
-					`  Outputs: ${nt.outputs.map((o) => `${o.id}${o.required ? " (required)" : ""}`).join(", ")}`
+				(nodeType) =>
+					`- ${nodeType.type} (${nodeType.category}): ${nodeType.label} — ${nodeType.description}\n` +
+					`  Inputs: ${nodeType.inputs.map((input) => `${input.id}${input.required ? " (required)" : ""}`).join(", ")}\n` +
+					`  Outputs: ${nodeType.outputs.map((output) => `${output.id}${output.required ? " (required)" : ""}`).join(", ")}`,
 			)
 			.join("\n\n");
 
@@ -248,10 +295,10 @@ Rules:
 
 	#buildUserPrompt(input: PlanProposalContext): string {
 		const contextRefs = input.contextRefs?.length
-			? `\nContext references:\n${input.contextRefs.map((r) => `- ${r.type}:${r.id} (relevance ${r.relevance})`).join("\n")}`
+			? `\nContext references:\n${input.contextRefs.map((ref) => `- ${ref.type}:${ref.id} (relevance ${ref.relevance})`).join("\n")}`
 			: "";
 		const events = input.events?.length
-			? `\nRecent events:\n${input.events.slice(-5).map((e) => `- ${e.type}: ${JSON.stringify(e.payload)}`).join("\n")}`
+			? `\nRecent events:\n${input.events.slice(-5).map((event) => `- ${event.type}: ${JSON.stringify(event.payload)}`).join("\n")}`
 			: "";
 
 		return `Goal: ${input.goal}${contextRefs}${events}
@@ -266,15 +313,26 @@ Return a Plan with tasks that achieve this goal.`;
 			if (this.#config.provider === "openai" || this.#config.provider === "custom") {
 				const base = (this.#config.baseUrl ?? "https://api.openai.com/v1").replace(/\/$/, "");
 				const response = await fetch(`${base}/chat/completions`, {
-					method: "POST", signal: controller.signal,
-					headers: { "content-type": "application/json", authorization: `Bearer ${this.#config.apiKey}` },
+					method: "POST",
+					signal: controller.signal,
+					headers: {
+						"content-type": "application/json",
+						authorization: `Bearer ${this.#config.apiKey}`,
+					},
 					body: JSON.stringify({
-						model: this.#config.model, temperature: this.#config.temperature, max_tokens: this.#config.maxTokens ?? 4096,
+						model: this.#config.model,
+						temperature: this.#config.temperature,
+						max_tokens: this.#config.maxTokens ?? 4096,
 						response_format: { type: "json_object" },
-						messages: [{ role: "system", content: systemPrompt }, { role: "user", content: `${userPrompt}\nReturn only valid JSON.` }],
+						messages: [
+							{ role: "system", content: systemPrompt },
+							{ role: "user", content: `${userPrompt}\nReturn only valid JSON.` },
+						],
 					}),
 				});
-				if (!response.ok) throw new Error(`OpenAI-compatible request failed: HTTP ${response.status} ${await response.text()}`);
+				if (!response.ok) {
+					throw new Error(`OpenAI-compatible request failed: HTTP ${response.status} ${await response.text()}`);
+				}
 				const data = await response.json() as { choices?: Array<{ message?: { content?: string | null } }> };
 				const content = data.choices?.[0]?.message?.content;
 				if (!content) throw new Error("OpenAI-compatible provider returned no message content");
@@ -283,19 +341,49 @@ Return a Plan with tasks that achieve this goal.`;
 
 			if (!this.#client) throw new Error("LLM client not initialized");
 			const message = await this.#client.messages.create({
-				model: this.#config.model, max_tokens: this.#config.maxTokens ?? 4096, temperature: this.#config.temperature,
-				system: systemPrompt, messages: [{ role: "user", content: userPrompt }],
-				tools: [{ name: "propose_plan", description: "Propose a structured workflow plan", input_schema: {
-					type: "object", properties: { goal: { type: "string" }, tasks: { type: "array", items: { type: "object", properties: {
-						id: { type: "string" }, title: { type: "string" }, description: { type: "string" }, dependencies: { type: "array", items: { type: "string" } }, priority: { type: "number" }, assignedTo: { type: "string" }, approvalId: { type: "string" },
-					}, required: ["id", "title", "description", "dependencies", "priority"], additionalProperties: false } } }, required: ["goal", "tasks"], additionalProperties: false,
-				} }], tool_choice: { type: "tool", name: "propose_plan" },
+				model: this.#config.model,
+				max_tokens: this.#config.maxTokens ?? 4096,
+				temperature: this.#config.temperature,
+				system: systemPrompt,
+				messages: [{ role: "user", content: userPrompt }],
+				tools: [{
+					name: "propose_plan",
+					description: "Propose a structured workflow plan",
+					input_schema: {
+						type: "object",
+						properties: {
+							goal: { type: "string" },
+							tasks: {
+								type: "array",
+								items: {
+									type: "object",
+									properties: {
+										id: { type: "string" },
+										title: { type: "string" },
+										description: { type: "string" },
+										dependencies: { type: "array", items: { type: "string" } },
+										priority: { type: "number" },
+										assignedTo: { type: "string" },
+										approvalId: { type: "string" },
+									},
+									required: ["id", "title", "description", "dependencies", "priority"],
+									additionalProperties: false,
+								},
+							},
+						},
+						required: ["goal", "tasks"],
+						additionalProperties: false,
+					},
+				}],
+				tool_choice: { type: "tool", name: "propose_plan" },
 			});
-			const toolUse = message.content.find((c) => c.type === "tool_use");
+			const toolUse = message.content.find((content) => content.type === "tool_use");
 			if (!toolUse) throw new Error("LLM did not call propose_plan tool");
 			return JSON.stringify(toolUse.input);
 		} catch (error) {
-			if (error instanceof Error && error.name === "AbortError") throw new Error(`LLM request timed out after ${this.#config.timeoutMs}ms`);
+			if (error instanceof Error && error.name === "AbortError") {
+				throw new Error(`LLM request timed out after ${this.#config.timeoutMs}ms`);
+			}
 			throw error;
 		} finally {
 			clearTimeout(timeout);
@@ -303,15 +391,15 @@ Return a Plan with tasks that achieve this goal.`;
 	}
 
 	#parsePlan(jsonStr: string, workspaceId: WorkspaceId, goal: string): Plan {
-		const parsed = JSON.parse(jsonStr);
+		const parsed = parseModelJsonObject(jsonStr);
+		const rawTasks = parsed.tasks;
 
-		// Validate structure
-		if (!parsed.tasks || !Array.isArray(parsed.tasks)) {
+		if (!Array.isArray(rawTasks)) {
 			throw new Error("Invalid plan: missing tasks array");
 		}
 
-		const tasks: PlanTask[] = parsed.tasks.map((t: unknown) => {
-			const task = t as Record<string, unknown>;
+		const tasks: PlanTask[] = rawTasks.map((value: unknown) => {
+			const task = value as Record<string, unknown>;
 			return {
 				id: String(task.id ?? crypto.randomUUID()),
 				title: String(task.title ?? "Untitled"),
@@ -324,11 +412,10 @@ Return a Plan with tasks that achieve this goal.`;
 		});
 
 		for (const task of tasks) {
-			if (task.assignedTo) {
-				const def = nodeRegistry.get(task.assignedTo);
-				if (!def) {
-					throw new Error(`Unknown node type assigned: ${task.assignedTo}`);
-				}
+			if (!task.assignedTo) continue;
+			const definition = nodeRegistry.get(task.assignedTo);
+			if (!definition) {
+				throw new Error(`Unknown node type assigned: ${task.assignedTo}`);
 			}
 		}
 
@@ -339,7 +426,7 @@ Return a Plan with tasks that achieve this goal.`;
 			goal,
 			status: "proposed",
 			tasks,
-			taskIds: tasks.map((t) => t.id),
+			taskIds: tasks.map((task) => task.id),
 			createdAt,
 		};
 	}
@@ -369,7 +456,6 @@ export function readLLMProviderConfig(): LLMProviderConfig {
 
 export function createLLMDecisionProvider(): DecisionProvider | null {
 	const { provider, apiKey, model, baseUrl, timeoutMs } = readLLMProviderConfig();
-
 
 	if (!provider || !apiKey) {
 		return null; // No provider configured → caller uses ScriptedDecisionProvider
