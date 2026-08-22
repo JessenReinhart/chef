@@ -1,5 +1,7 @@
 # Chef — Living Workspace UI Overhaul
 
+> **Superseded where conflicting:** The current authoritative interaction direction is [`UI_NORTH_STAR_INTENT_FIRST.md`](./UI_NORTH_STAR_INTENT_FIRST.md). This document remains useful historical visual direction, but Chef now defaults to an intent/activity surface with the graph available as the Workbench.
+
 ## North star
 
 Chef should feel like giving work to a small, capable team, not programming a workflow engine.
