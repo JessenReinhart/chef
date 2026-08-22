@@ -30,11 +30,11 @@ $match = [System.Text.RegularExpressions.Regex]::Match($svg, 'base64,([^"'']+)')
 if (-not $match.Success) { throw "Chef brand asset does not contain embedded image data." }
 
 $bytes = [Convert]::FromBase64String($match.Groups[1].Value)
-$stream = New-Object System.IO.MemoryStream(,$bytes)
+$stream = [System.IO.MemoryStream]::new($bytes)
 
 Add-Type -AssemblyName System.Drawing
 $source = [System.Drawing.Image]::FromStream($stream)
-$bitmap = New-Object System.Drawing.Bitmap 256, 256
+$bitmap = [System.Drawing.Bitmap]::new(256, 256)
 $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
 $graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
 $graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
