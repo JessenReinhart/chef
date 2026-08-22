@@ -11,13 +11,20 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.end(JSON.stringify(body));
 }
 
-function readBody(req: IncomingMessage): Promise<unknown> {
+function readBody(req: IncomingMessage): Promise<Record<string, unknown>> {
   return new Promise((resolveBody, reject) => {
     let raw = "";
     req.on("data", (chunk: Buffer) => { raw += chunk.toString("utf8"); });
     req.on("end", () => {
-      try { resolveBody(raw ? JSON.parse(raw) : {}); }
-      catch (error) { reject(error); }
+      try {
+        const parsed = raw ? JSON.parse(raw) : {};
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+          throw new SyntaxError("request body must be a JSON object");
+        }
+        resolveBody(parsed as Record<string, unknown>);
+      } catch (error) {
+        reject(error);
+      }
     });
     req.on("error", reject);
   });
@@ -41,15 +48,15 @@ export function createThreadServer(runtime: ChefRuntime, baseServer: Server): Se
 
   return createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
-    const target = parseThreadId(url.pathname);
     try {
+      const target = parseThreadId(url.pathname);
       if (req.method === "GET" && url.pathname === "/api/threads") {
         sendJson(res, 200, { ok: true, data: threads.list(runtime.workspaceId) });
         return;
       }
 
       if (req.method === "POST" && url.pathname === "/api/threads") {
-        const body = await readBody(req) as { title?: unknown };
+        const body = await readBody(req);
         if (typeof body.title !== "string" || !body.title.trim()) {
           sendJson(res, 400, { error: "title is required" });
           return;
@@ -69,7 +76,7 @@ export function createThreadServer(runtime: ChefRuntime, baseServer: Server): Se
       if (target && req.method === "PATCH" && !target.archive) {
         const thread = ownedThread(target.id);
         if (!thread) { sendJson(res, 404, { error: "thread not found" }); return; }
-        const body = await readBody(req) as Record<string, unknown>;
+        const body = await readBody(req);
         const patch: ThreadPatch = {};
         if (body.title !== undefined) {
           if (typeof body.title !== "string" || !body.title.trim()) { sendJson(res, 400, { error: "title must not be empty" }); return; }
@@ -94,7 +101,7 @@ export function createThreadServer(runtime: ChefRuntime, baseServer: Server): Se
       await baseHandler(req, res);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      const status = /must not be empty|Unexpected end of JSON|JSON/i.test(message) ? 400 : 500;
+      const status = error instanceof SyntaxError || error instanceof URIError || /must not be empty/i.test(message) ? 400 : 500;
       sendJson(res, status, { error: message });
     }
   });
