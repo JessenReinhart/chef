@@ -1,0 +1,349 @@
+/* Chef Advanced workspace polish
+   Keeps the Power/Advanced information density, but brings it into the same
+   warm, friendly visual family as the Living Workspace. Presentation only. */
+
+:root {
+  --chef-power-bg: #15110f;
+  --chef-power-canvas: #1a1512;
+  --chef-power-surface: #211a17;
+  --chef-power-surface-2: #29211d;
+  --chef-power-surface-3: #332824;
+  --chef-power-border: rgba(255, 226, 211, 0.10);
+  --chef-power-border-strong: rgba(255, 226, 211, 0.17);
+  --chef-power-ink: #f7eee9;
+  --chef-power-muted: #ad9d95;
+  --chef-power-faint: #746760;
+  --chef-power-red: #ef6d5a;
+  --chef-power-red-soft: rgba(239, 109, 90, 0.13);
+  --chef-power-green: #78b994;
+  --chef-power-green-soft: rgba(120, 185, 148, 0.12);
+  --chef-power-amber: #d6a35f;
+  --chef-power-shadow: 0 22px 60px rgba(0, 0, 0, 0.28), 0 2px 10px rgba(0, 0, 0, 0.18);
+}
+
+/* Remap the old GitHub-dark utility palette when the detailed workbench is visible. */
+.h-screen {
+  background:
+    radial-gradient(circle at 8% 0%, rgba(239, 109, 90, 0.08), transparent 25%),
+    radial-gradient(circle at 94% 100%, rgba(214, 163, 95, 0.06), transparent 28%),
+    var(--chef-power-bg) !important;
+  color: var(--chef-power-ink) !important;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.h-screen [class*="bg-[#0d1117]"],
+.h-screen [class*="bg-[#010409]"] { background-color: var(--chef-power-surface) !important; }
+.h-screen [class*="bg-[#161b22]"] { background-color: var(--chef-power-surface-2) !important; }
+.h-screen [class*="bg-[#21262d]"] { background-color: var(--chef-power-surface-3) !important; }
+.h-screen [class*="text-[#e6edf3]"],
+.h-screen [class*="text-[#f0f6fc]"],
+.h-screen [class*="text-[#c9d1d9]"],
+.h-screen [class*="text-[#cbd5e1]"] { color: var(--chef-power-ink) !important; }
+.h-screen [class*="text-[#8b949e]"],
+.h-screen [class*="text-[#6e7681]"] { color: var(--chef-power-muted) !important; }
+.h-screen [class*="text-[#484f58]"] { color: var(--chef-power-faint) !important; }
+.h-screen [class*="border-[#30363d]"],
+.h-screen [class*="border-[#21262d]"] { border-color: var(--chef-power-border) !important; }
+
+/* Cyan was the old system accent. In Advanced it becomes the same coral-red identity as Simple. */
+.h-screen [class*="text-cyan-"] { color: #f28a79 !important; }
+.h-screen [class*="border-cyan-"] { border-color: rgba(239, 109, 90, 0.30) !important; }
+.h-screen [class*="ring-cyan-"] { --tw-ring-color: rgba(239, 109, 90, 0.45) !important; }
+.h-screen [class*="shadow-cyan-"] { --tw-shadow-color: rgba(239, 109, 90, 0.18) !important; }
+.h-screen [class~="bg-cyan-500"] { background-color: var(--chef-power-red) !important; color: white !important; }
+.h-screen [class*="bg-cyan-500/"] { background-color: var(--chef-power-red-soft) !important; }
+.h-screen [class*="bg-cyan-400/"] { background-color: rgba(239, 109, 90, 0.10) !important; }
+.h-screen [class~="bg-cyan-400"] { background-color: var(--chef-power-red) !important; }
+.h-screen [class*="focus:border-cyan-"]:focus { border-color: rgba(239, 109, 90, 0.75) !important; }
+.h-screen [class*="focus:ring-cyan-"]:focus { --tw-ring-color: rgba(239, 109, 90, 0.30) !important; }
+
+/* Top bar: same restrained floating-glass language as Living Workspace. */
+.h-screen > header {
+  height: 64px !important;
+  min-height: 64px;
+  padding: 0 18px !important;
+  border-color: var(--chef-power-border) !important;
+  background: rgba(27, 22, 19, 0.88) !important;
+  backdrop-filter: blur(20px) saturate(1.08);
+  box-shadow: 0 1px 0 rgba(255,255,255,0.025);
+}
+
+.h-screen > header > div:first-child > svg {
+  width: 30px !important;
+  height: 30px !important;
+  padding: 7px;
+  border: 1px solid rgba(239,109,90,.22);
+  border-radius: 11px 11px 11px 5px;
+  color: #fff !important;
+  background: linear-gradient(145deg, #f47c69, #dd5746);
+  box-shadow: 0 8px 20px rgba(239,109,90,.20);
+}
+
+.h-screen > header > div:first-child > span:nth-child(2) {
+  font-size: 14px;
+  letter-spacing: -0.02em;
+}
+
+.mission-pulse,
+.header-quiet-button,
+.mode-switch {
+  border-color: var(--chef-power-border) !important;
+  background: rgba(255,255,255,.035) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.025);
+}
+
+.mission-pulse { min-height: 34px; padding-inline: 0.75rem; }
+.mission-pulse__signal { background: var(--chef-power-faint); box-shadow: 0 0 0 3px rgba(255,255,255,.03); }
+.mission-pulse[data-status="active"] .mission-pulse__signal,
+.mission-pulse[data-status="planning"] .mission-pulse__signal {
+  background: var(--chef-power-red);
+  box-shadow: 0 0 0 4px rgba(239,109,90,.11), 0 0 13px rgba(239,109,90,.30);
+}
+.mission-pulse[data-status="completed"] .mission-pulse__signal { background: var(--chef-power-green); }
+.mission-pulse__count { background: var(--chef-power-red-soft); color: #f49a8b; }
+.header-quiet-button { border-radius: 10px; color: var(--chef-power-muted); }
+.header-quiet-button:hover,
+.header-quiet-button[aria-expanded="true"] { background: rgba(255,255,255,.065) !important; color: var(--chef-power-ink); }
+.mode-switch { padding: 3px; border-radius: 11px; }
+.mode-switch__option { border-radius: 8px; padding: 5px 9px; color: var(--chef-power-muted); }
+.mode-switch__option.is-active { background: rgba(239,109,90,.13) !important; color: #f5a091 !important; box-shadow: inset 0 0 0 1px rgba(239,109,90,.16); }
+
+/* Frame the dense workbench like a premium desktop workspace, not a wall of panels. */
+.h-screen > .flex-1.flex {
+  gap: 10px;
+  padding: 10px;
+  background: transparent;
+}
+
+.h-screen > .flex-1.flex > aside:first-child {
+  width: clamp(20rem, 27vw, 23rem) !important;
+  overflow: hidden;
+  border: 1px solid var(--chef-power-border) !important;
+  border-radius: 18px;
+  background: var(--chef-power-surface) !important;
+  box-shadow: var(--chef-power-shadow);
+}
+
+.h-screen > .flex-1.flex > aside:first-child > div {
+  background: transparent !important;
+}
+
+.h-screen > .flex-1.flex > main {
+  overflow: hidden;
+  border: 1px solid var(--chef-power-border);
+  border-radius: 18px;
+  background: var(--chef-power-canvas);
+  box-shadow: var(--chef-power-shadow);
+}
+
+.h-screen > .flex-1.flex > main > aside {
+  border-color: var(--chef-power-border) !important;
+  background: rgba(33,26,23,.96) !important;
+}
+
+.h-screen > .flex-1.flex > main > aside > div {
+  background: transparent !important;
+  border-color: var(--chef-power-border) !important;
+}
+
+/* Chat becomes a compact mission desk with softer cards and a composer-like footer. */
+.h-screen > .flex-1.flex > aside:first-child > div > div:first-child {
+  height: 56px !important;
+  padding-inline: 14px !important;
+  background: rgba(255,255,255,.018) !important;
+  border-color: var(--chef-power-border) !important;
+}
+
+.h-screen > .flex-1.flex > aside:first-child input {
+  border-radius: 12px !important;
+  border-color: var(--chef-power-border-strong) !important;
+  background: rgba(255,255,255,.045) !important;
+  color: var(--chef-power-ink) !important;
+}
+
+.h-screen > .flex-1.flex > aside:first-child input:focus {
+  border-color: rgba(239,109,90,.62) !important;
+  box-shadow: 0 0 0 3px rgba(239,109,90,.09) !important;
+}
+
+.h-screen > .flex-1.flex > aside:first-child > div > div:last-child {
+  margin: 0 9px 9px;
+  padding: 9px !important;
+  border: 1px solid var(--chef-power-border) !important;
+  border-radius: 15px;
+  background: rgba(255,255,255,.025) !important;
+}
+
+/* Node palette: quieter categories, tactile cards, same warm paper-on-charcoal materials. */
+.h-screen main > aside:first-child {
+  width: 236px !important;
+  border-color: var(--chef-power-border) !important;
+  background: rgba(33,26,23,.92) !important;
+}
+
+.h-screen main > aside:first-child [draggable="true"] {
+  border-color: var(--chef-power-border) !important;
+  border-radius: 12px !important;
+  background: rgba(255,255,255,.035) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.02);
+}
+
+.h-screen main > aside:first-child [draggable="true"]:hover {
+  border-color: rgba(239,109,90,.30) !important;
+  background: rgba(239,109,90,.055) !important;
+  transform: translateY(-1px);
+}
+
+.h-screen main > aside:first-child input {
+  border-color: var(--chef-power-border) !important;
+  border-radius: 10px !important;
+  background: rgba(255,255,255,.035) !important;
+}
+
+/* Canvas surface. */
+.h-screen .react-flow {
+  background:
+    radial-gradient(circle at 50% 38%, rgba(239,109,90,.035), transparent 34%),
+    var(--chef-power-canvas) !important;
+}
+.h-screen .react-flow__background pattern circle { fill: rgba(224,199,188,.13) !important; }
+.h-screen .react-flow__controls {
+  overflow: hidden;
+  border: 1px solid var(--chef-power-border) !important;
+  border-radius: 12px !important;
+  background: rgba(38,30,27,.90) !important;
+  box-shadow: 0 12px 34px rgba(0,0,0,.24) !important;
+  backdrop-filter: blur(16px);
+}
+.h-screen .react-flow__controls button { border-color: var(--chef-power-border) !important; background: transparent !important; fill: var(--chef-power-muted) !important; }
+.h-screen .react-flow__controls button:hover { background: rgba(239,109,90,.08) !important; fill: #f39a8b !important; }
+.h-screen .react-flow__minimap { border: 1px solid var(--chef-power-border) !important; border-radius: 12px !important; background: rgba(29,23,20,.92) !important; box-shadow: 0 12px 34px rgba(0,0,0,.20); }
+
+/* Runtime nodes keep their detail but lose the hard GitHub card feel. */
+.h-screen .react-flow__node > div {
+  border-color: var(--chef-power-border-strong) !important;
+  background-color: rgba(37,29,26,.94) !important;
+  box-shadow: 0 14px 36px rgba(0,0,0,.25), inset 0 1px 0 rgba(255,255,255,.025) !important;
+  backdrop-filter: blur(12px);
+}
+.h-screen .react-flow__node.selected > div {
+  border-color: rgba(239,109,90,.48) !important;
+  box-shadow: 0 16px 42px rgba(0,0,0,.28), 0 0 0 4px rgba(239,109,90,.08) !important;
+}
+
+/* Floating canvas controls feel like the Simple-mode popovers. */
+.relationship-picker,
+.h-screen main .absolute.top-3.left-1\/2 {
+  border-color: var(--chef-power-border-strong) !important;
+  border-radius: 13px !important;
+  background: rgba(38,30,27,.90) !important;
+  box-shadow: 0 14px 36px rgba(0,0,0,.24) !important;
+  backdrop-filter: blur(18px) saturate(1.05);
+}
+.relationship-picker { padding: 7px 10px; color: var(--chef-power-muted); }
+.relationship-picker select { color: #f39a8b !important; }
+.relationship-picker option { background: var(--chef-power-surface-2) !important; color: var(--chef-power-ink) !important; }
+
+/* The detailed inspector is now the darker sibling of the friendly node popover. */
+.power-inspector {
+  top: 4.25rem;
+  right: 0.9rem;
+  width: min(24rem, calc(100% - 1.8rem));
+  border-color: var(--chef-power-border-strong) !important;
+  border-radius: 18px !important;
+  background: rgba(36,28,25,.94) !important;
+  box-shadow: 0 24px 64px rgba(0,0,0,.34), inset 0 1px 0 rgba(255,255,255,.025) !important;
+  color: var(--chef-power-ink) !important;
+  backdrop-filter: blur(22px) saturate(1.06);
+}
+.power-inspector__header,
+.power-inspector section { padding: 0.95rem 1rem; border-color: var(--chef-power-border) !important; }
+.power-inspector__header strong { color: var(--chef-power-ink) !important; font-size: .86rem; }
+.power-inspector__eyebrow,
+.power-inspector h3 { color: #b58f84 !important; }
+.power-inspector__live { border-color: var(--chef-power-border) !important; color: var(--chef-power-muted) !important; background: rgba(255,255,255,.025); }
+.power-inspector__grid dt { color: var(--chef-power-faint) !important; }
+.power-inspector__grid dd { color: #ddcec7 !important; }
+.power-inspector__chips { color: var(--chef-power-muted) !important; }
+.power-inspector__chips code { border-color: var(--chef-power-border) !important; background: rgba(255,255,255,.035) !important; color: #efa393 !important; }
+.power-inspector__intervene textarea { border-color: var(--chef-power-border) !important; border-radius: 11px; background: rgba(0,0,0,.15) !important; color: var(--chef-power-ink) !important; }
+.power-inspector__intervene textarea:focus { border-color: rgba(239,109,90,.60) !important; box-shadow: 0 0 0 3px rgba(239,109,90,.08); }
+.power-inspector__intervene button { border-color: rgba(239,109,90,.28) !important; border-radius: 9px; background: var(--chef-power-red-soft) !important; color: #f4a092 !important; }
+.power-inspector__event { border-color: var(--chef-power-border) !important; }
+.power-inspector__event code { color: #d9b2a8 !important; }
+.power-inspector__event time { color: var(--chef-power-faint) !important; }
+
+/* Browser/output surface. */
+.browser-surface {
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  border-color: var(--chef-power-border-strong) !important;
+  border-radius: 18px !important;
+  background: var(--chef-power-surface) !important;
+  box-shadow: 0 26px 70px rgba(0,0,0,.38) !important;
+}
+.browser-surface__toolbar { padding: 9px 11px; border-color: var(--chef-power-border) !important; background: var(--chef-power-surface-2) !important; }
+.browser-surface__toolbar input { border-color: var(--chef-power-border) !important; border-radius: 10px; background: rgba(0,0,0,.16) !important; color: var(--chef-power-ink) !important; }
+.browser-surface__toolbar button,
+.browser-surface__toolbar a { border-color: var(--chef-power-border) !important; border-radius: 9px; background: rgba(255,255,255,.035) !important; color: var(--chef-power-muted) !important; }
+.browser-surface__status { background: var(--chef-power-green) !important; box-shadow: 0 0 0 4px rgba(120,185,148,.10) !important; }
+
+/* Mission / automation strips read as lightweight contextual drawers. */
+.mission-controls,
+.automation-strip {
+  margin: 8px 10px 0;
+  min-height: 50px;
+  border: 1px solid var(--chef-power-border) !important;
+  border-radius: 14px;
+  background: rgba(38,30,27,.88) !important;
+  box-shadow: 0 10px 30px rgba(0,0,0,.18);
+}
+.mission-controls__identity strong,
+.automation-strip strong { color: var(--chef-power-ink) !important; }
+.mission-controls__identity span,
+.automation-strip strong + span,
+.automation-strip__hint { color: var(--chef-power-muted) !important; }
+.mission-controls__actions button,
+.mission-controls__actions input,
+.automation-strip__actions button {
+  border-color: var(--chef-power-border) !important;
+  border-radius: 9px !important;
+  background: rgba(255,255,255,.04) !important;
+  color: var(--chef-power-muted) !important;
+}
+.mission-controls__actions button:hover,
+.automation-strip__actions button:hover { border-color: rgba(239,109,90,.30) !important; color: #f4a092 !important; }
+.automation-strip__actions button:not(.is-stop) { background: var(--chef-power-red-soft) !important; color: #f3a092 !important; }
+
+/* Approval and errors use the same gentle surface hierarchy as Simple. */
+.h-screen [class*="border-amber-500/40"][class*="shadow-xl"] {
+  border-color: rgba(214,163,95,.32) !important;
+  border-radius: 15px !important;
+  background: rgba(43,33,28,.95) !important;
+  box-shadow: 0 18px 50px rgba(0,0,0,.30) !important;
+}
+.h-screen > .fixed.top-14.right-4 {
+  border-color: rgba(239,109,90,.28) !important;
+  border-radius: 14px !important;
+  background: rgba(43,31,27,.96) !important;
+  box-shadow: 0 18px 50px rgba(0,0,0,.30) !important;
+}
+
+/* Tiny interaction lift. */
+.h-screen button { transition: transform 150ms ease, background-color 150ms ease, border-color 150ms ease, color 150ms ease, box-shadow 150ms ease; }
+.h-screen button:not(:disabled):active { transform: translateY(1px); }
+
+@media (max-width: 1180px) {
+  .h-screen > .flex-1.flex { gap: 7px; padding: 7px; }
+  .h-screen > .flex-1.flex > aside:first-child { border-radius: 15px; }
+  .h-screen > .flex-1.flex > main { border-radius: 15px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .h-screen *, .h-screen *::before, .h-screen *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
