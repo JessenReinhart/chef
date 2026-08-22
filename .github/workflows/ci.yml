@@ -33,6 +33,8 @@ jobs:
         run: node --experimental-strip-types tests/execution-console.ts
       - name: Run channel rooms UI acceptance test
         run: node --experimental-strip-types tests/channel-rooms-ui.ts
+      - name: Run artifact shelf UI acceptance test
+        run: node --experimental-strip-types tests/artifact-shelf-ui.ts
 
   web-build:
     name: Web TypeScript build

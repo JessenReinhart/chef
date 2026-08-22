@@ -18,6 +18,7 @@ type LivingArtifact = {
 };
 
 const MAX_VISIBLE_RESULTS = 4;
+const MAX_SHELF_RESULTS = 24;
 
 function artifactIcon(type: ArtifactType): string {
   switch (type) {
@@ -45,10 +46,16 @@ function canDownload(artifact: LivingArtifact): boolean {
   return artifact.uri.startsWith("file:");
 }
 
+function provenanceLabel(artifact: LivingArtifact): string {
+  const task = artifact.taskId ? ` · task ${artifact.taskId.slice(0, 8)}` : "";
+  return `v${artifact.version} · by ${artifact.createdBy}${task}`;
+}
+
 export function LivingArtifactFeature() {
   const [enabled, setEnabled] = useState(() => localStorage.getItem("chef:view-mode") !== "power");
   const [artifacts, setArtifacts] = useState<LivingArtifact[]>([]);
   const [target, setTarget] = useState<Element | null>(null);
+  const [shelfOpen, setShelfOpen] = useState(false);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -60,6 +67,7 @@ export function LivingArtifactFeature() {
   useEffect(() => {
     if (!enabled) {
       setTarget(null);
+      setShelfOpen(false);
       return;
     }
     const findTarget = () => setTarget(document.querySelector(".chef-living-stage"));
@@ -98,6 +106,10 @@ export function LivingArtifactFeature() {
     () => artifacts.slice(-MAX_VISIBLE_RESULTS).reverse(),
     [artifacts],
   );
+  const shelfArtifacts = useMemo(
+    () => artifacts.slice(-MAX_SHELF_RESULTS).reverse(),
+    [artifacts],
+  );
 
   if (!enabled || !target || visibleArtifacts.length === 0) return null;
 
@@ -117,7 +129,7 @@ export function LivingArtifactFeature() {
           <div className="chef-result-card__body">
             <span className="chef-result-card__eyebrow">{artifactLabel(artifact.type)}</span>
             <strong title={artifact.name}>{artifact.name}</strong>
-            <small>v{artifact.version} · by {artifact.createdBy}</small>
+            <small title={provenanceLabel(artifact)}>{provenanceLabel(artifact)}</small>
           </div>
           {canDownload(artifact) ? (
             <a
@@ -133,14 +145,49 @@ export function LivingArtifactFeature() {
           )}
         </article>
       ))}
+
       {artifacts.length > MAX_VISIBLE_RESULTS && (
         <button
           className="chef-result-cluster__more"
           type="button"
-          onClick={() => localStorage.setItem("chef:view-mode", "power")}
+          aria-expanded={shelfOpen}
+          aria-controls="chef-artifact-shelf"
+          onClick={() => setShelfOpen((open) => !open)}
         >
-          +{artifacts.length - MAX_VISIBLE_RESULTS} more · Advanced ↗
+          {shelfOpen ? "Hide result shelf" : "Open result shelf"}
         </button>
+      )}
+
+      {shelfOpen && (
+        <div id="chef-artifact-shelf" className="chef-artifact-shelf" role="region" aria-label="Artifact shelf">
+          <div className="chef-artifact-shelf__header">
+            <div>
+              <strong>Artifact shelf</strong>
+              <span>Durable outputs from this workspace</span>
+            </div>
+            <button type="button" onClick={() => setShelfOpen(false)} aria-label="Close artifact shelf">×</button>
+          </div>
+          <div className="chef-artifact-shelf__list">
+            {shelfArtifacts.map((artifact) => (
+              <article key={`shelf:${artifact.id}:${artifact.version}`} className="chef-artifact-shelf__item">
+                <div className="chef-artifact-shelf__item-icon" aria-hidden="true">{artifactIcon(artifact.type)}</div>
+                <div className="chef-artifact-shelf__item-body">
+                  <span>{artifactLabel(artifact.type)}</span>
+                  <strong title={artifact.name}>{artifact.name}</strong>
+                  <small title={provenanceLabel(artifact)}>{provenanceLabel(artifact)}</small>
+                </div>
+                {canDownload(artifact) ? (
+                  <a href={`/api/artifacts/${encodeURIComponent(artifact.id)}/download`} download title={`Download ${artifact.name}`}>Download</a>
+                ) : (
+                  <span className="chef-artifact-shelf__stored">Stored</span>
+                )}
+              </article>
+            ))}
+          </div>
+          {artifacts.length > MAX_SHELF_RESULTS && (
+            <p className="chef-artifact-shelf__limit">Showing the latest {MAX_SHELF_RESULTS} of {artifacts.length} results.</p>
+          )}
+        </div>
       )}
     </section>,
     target,
