@@ -100,6 +100,9 @@ export function MissionPanel({
   const [criteriaDraft, setCriteriaDraft] = useState("");
   const [criteriaSaving, setCriteriaSaving] = useState(false);
   const [criteriaError, setCriteriaError] = useState<string | null>(null);
+  const [followUpDraft, setFollowUpDraft] = useState("");
+  const [followUpSubmitting, setFollowUpSubmitting] = useState(false);
+  const [followUpError, setFollowUpError] = useState<string | null>(null);
 
   const completedCount = missionTasks.filter((task) => task.status === "completed").length;
   const activeCount = missionTasks.filter((task) => ["assigned", "spawning", "running"].includes(task.status)).length;
@@ -134,6 +137,31 @@ export function MissionPanel({
       setCriteriaError(error instanceof Error ? error.message : "Could not save success criteria");
     } finally {
       setCriteriaSaving(false);
+    }
+  };
+
+  const startFollowUp = async () => {
+    const request = followUpDraft.trim();
+    if (!request || followUpSubmitting) return;
+    setFollowUpSubmitting(true);
+    setFollowUpError(null);
+    try {
+      const response = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          message: `Previous Mission goal: ${mission.goal}\n\nFollow-up request: ${request}`,
+        }),
+      });
+      const body = await response.json().catch(() => ({})) as { ok?: boolean; error?: string };
+      if (!response.ok || body.ok === false) {
+        throw new Error(body.error ?? `HTTP ${response.status}`);
+      }
+      setFollowUpDraft("");
+    } catch (error) {
+      setFollowUpError(error instanceof Error ? error.message : "Could not start follow-up Mission");
+    } finally {
+      setFollowUpSubmitting(false);
     }
   };
 
@@ -219,7 +247,7 @@ export function MissionPanel({
             )}
           </div>
 
-          {!TERMINAL_STATUSES.has(mission.status) && (
+          {!TERMINAL_STATUSES.has(mission.status) ? (
             <form className="mt-4 flex flex-wrap gap-2" onSubmit={(event) => { event.preventDefault(); onRedirect(); }}>
               <input
                 value={redirectGoal}
@@ -228,6 +256,25 @@ export function MissionPanel({
                 className="min-w-[240px] flex-1 rounded-md border border-[#30363d] bg-[#0d1117] px-3 py-2 text-[11px] text-[#e6edf3] outline-none placeholder:text-[#484f58] focus:border-cyan-500/50"
               />
               <button type="submit" disabled={!redirectGoal.trim()} className="rounded-md border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-[11px] text-cyan-300 disabled:cursor-not-allowed disabled:opacity-40">Redirect</button>
+            </form>
+          ) : (
+            <form className="mt-4 rounded-lg border border-[#30363d] bg-[#0d1117] p-3" aria-label="Continue with a follow-up Mission" onSubmit={(event) => { event.preventDefault(); void startFollowUp(); }}>
+              <div className="mb-2">
+                <h3 className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#8b949e]">Continue from here</h3>
+                <p className="mt-0.5 text-[10px] text-[#6e7681]">Start a new Mission with this Mission goal included as explicit context, while keeping this finished run intact.</p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <input
+                  value={followUpDraft}
+                  onChange={(event) => setFollowUpDraft(event.target.value)}
+                  placeholder="What should Chef do next?"
+                  className="min-w-[240px] flex-1 rounded-md border border-[#30363d] bg-[#010409] px-3 py-2 text-[11px] text-[#e6edf3] outline-none placeholder:text-[#484f58] focus:border-cyan-500/50"
+                />
+                <button type="submit" disabled={!followUpDraft.trim() || followUpSubmitting} className="rounded-md border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-[11px] text-cyan-300 disabled:cursor-not-allowed disabled:opacity-40">
+                  {followUpSubmitting ? "Starting…" : "Start follow-up"}
+                </button>
+              </div>
+              {followUpError && <p className="mt-2 text-[10px] text-red-300">{followUpError}</p>}
             </form>
           )}
         </div>
