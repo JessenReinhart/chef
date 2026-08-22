@@ -22,6 +22,7 @@ const MAX_VISIBLE_RESULTS = 4;
 const MAX_SHELF_RESULTS = 24;
 const MAX_PREVIEW_LENGTH = 800;
 const MAX_METADATA_ROWS = 8;
+const SPATIAL_RESULT_SLOTS = ["near", "upper", "outer", "lower"] as const;
 
 function artifactIcon(type: ArtifactType): string {
   switch (type) {
@@ -160,6 +161,7 @@ export function LivingArtifactFeature() {
         <article
           key={`${artifact.id}:${artifact.version}`}
           className="chef-result-card"
+          data-result-slot={SPATIAL_RESULT_SLOTS[index]}
           style={{ "--chef-result-index": index } as CSSProperties}
         >
           <button className="chef-result-card__inspect" type="button" onClick={() => inspectArtifact(artifact)} aria-label={`Inspect ${artifact.name}`}>
