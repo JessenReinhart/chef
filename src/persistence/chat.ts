@@ -71,9 +71,11 @@ function fromAgentMessage(msg: AgentMessage, threadId?: ThreadId): ChatMessage {
 
 /** Chat-specific repository methods (delegates durable message writes to Repository). */
 export class ChatRepository {
+  readonly #repo: Repository;
   readonly #threads;
 
-  constructor(private readonly repo: Repository) {
+  constructor(repo: Repository) {
+    this.#repo = repo;
     this.#threads = createThreadRepository(repo);
   }
 
@@ -88,7 +90,7 @@ export class ChatRepository {
   insert(input: ChatMessageInput): ChatMessage {
     if (input.threadId) this.#assertOwnedThread(input.workspaceId, input.threadId);
     const agentMsg = toAgentMessage(input);
-    this.repo.insertMessage({
+    this.#repo.insertMessage({
       id: agentMsg.id,
       workspaceId: agentMsg.workspaceId,
       from: agentMsg.from,
@@ -104,7 +106,7 @@ export class ChatRepository {
   /** List chat messages for the legacy workspace chat or one selected Thread. */
   list(workspaceId: WorkspaceId, threadId?: ThreadId): ChatMessage[] {
     if (threadId) this.#assertOwnedThread(workspaceId, threadId);
-    const msgs = this.repo.listMessages(workspaceId, channelForThread(threadId));
+    const msgs = this.#repo.listMessages(workspaceId, channelForThread(threadId));
     return msgs.map((msg) => fromAgentMessage(msg, threadId));
   }
 
@@ -116,7 +118,7 @@ export class ChatRepository {
   /** Get total count of chat messages for one continuity boundary. */
   count(workspaceId: WorkspaceId, threadId?: ThreadId): number {
     if (threadId) this.#assertOwnedThread(workspaceId, threadId);
-    const row = this.repo.db
+    const row = this.#repo.db
       .prepare(`SELECT COUNT(*) as count FROM messages WHERE workspace_id = ? AND channel = ?`)
       .get(workspaceId, channelForThread(threadId)) as { count: number } | undefined;
     return row?.count ?? 0;
