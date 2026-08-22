@@ -56,6 +56,14 @@ jobs:
                 .map((pr) => pr.head.ref),
             );
 
+            // One-time audited leftovers that contain unique historical commits
+            // but are superseded by merged work on master.
+            const explicitlyStale = new Set([
+              'agent/direct-agent-message',
+              'fix/repair-icon-binary',
+              'pr3',
+            ]);
+
             const deleted = [];
             const retained = [];
 
@@ -66,7 +74,9 @@ jobs:
               }
 
               let reason = null;
-              if (mergedHeads.has(branch.name)) {
+              if (explicitlyStale.has(branch.name)) {
+                reason = 'audited superseded branch';
+              } else if (mergedHeads.has(branch.name)) {
                 reason = 'merged PR head';
               } else {
                 try {
