@@ -177,7 +177,7 @@ export function ChatPanel({ onPlanProposed, mode }: ChatPanelProps) {
                 {
                   role: "assistant",
                   content: mode === "simple"
-                    ? `Mission started with ${count} teammate${count !== 1 ? "s" : ""}.`
+                    ? `Mission started with ${count} planned step${count !== 1 ? "s" : ""}.`
                     : `Mission plan materialized ${count} runtime node${count !== 1 ? "s" : ""}.`,
                   timestamp: Date.now(),
                   bubbleKind: "plan.proposed",

@@ -8,6 +8,7 @@ import { createArtifactLineageServer } from "./artifact-lineage-http.ts";
 import { createDecisionServer } from "./decision-http.ts";
 import { createHarnessReadinessServer } from "./harness-readiness-http.ts";
 import { createBlockerServer } from "./blocker-http.ts";
+import { createRecoveryServer } from "./recovery-http.ts";
 import { createProjectServer } from "./project-http.ts";
 import { createThreadServer } from "./thread-http.ts";
 import { createOrchestratorConfigServer } from "./orchestrator-config-http.ts";
@@ -32,8 +33,6 @@ if (!Number.isFinite(missionTimeoutMs) || missionTimeoutMs <= 0) {
 }
 mkdirSync(dirname(dbPath), { recursive: true });
 
-// Chef's persisted orchestrator key must win during provider construction, but
-// machine-level Anthropic/OpenAI env vars must remain intact for CLI workers.
 const inheritedAnthropicKey = process.env.ANTHROPIC_API_KEY;
 const inheritedOpenAIKey = process.env.OPENAI_API_KEY;
 if (process.env.CHEF_PROVIDER && process.env.CHEF_API_KEY) {
@@ -62,7 +61,8 @@ const lineageServer = createArtifactLineageServer(chef, messageServer);
 const decisionServer = createDecisionServer(chef, lineageServer);
 const readinessServer = createHarnessReadinessServer(chef, decisionServer);
 const blockerServer = createBlockerServer(chef, readinessServer);
-const threadServer = createThreadServer(chef, blockerServer);
+const recoveryServer = createRecoveryServer(chef, blockerServer);
+const threadServer = createThreadServer(chef, recoveryServer);
 let server: ReturnType<typeof createWebUiServer>;
 let switchingProject = false;
 const relaunch = async (nextProjectDir = projectDir) => {
@@ -106,6 +106,7 @@ server.listen(port, "127.0.0.1", () => {
   console.log(`  GET  /api/messages — structured collaboration messages`);
   console.log(`  GET  /api/harnesses/readiness — detected CLI harness readiness`);
   console.log(`  GET  /api/blockers — pending approvals and blocked/failed tasks`);
+  console.log(`  POST /api/nodes/:id/retry — retry failed/blocked work`);
   console.log(`  GET/POST /api/threads — durable conversation threads`);
   console.log(`  GET/PATCH /api/threads/:id — inspect or rename/update a Thread`);
   console.log(`  POST /api/threads/:id/archive — archive a Thread`);
