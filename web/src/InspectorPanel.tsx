@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import type { GraphNode } from "../../src/core/graph.ts";
-import { AgentContextInspector } from "./AgentContextInspector";
 import { NodeIcon, NODE_LIBRARY } from "./nodeCatalog.tsx";
 import { SimpleConfigRenderer, mapRuntimeToSimple, mapSimpleToRuntime } from "./simpleNodeConfig.tsx";
 
@@ -172,8 +171,6 @@ export function InspectorPanel({ selectedNode, onAcceptApproval, onRejectApprova
         />
         {libraryEntry?.description && <Field label="About" value={libraryEntry.description} />}
       </div>
-
-      {node.kind === "agent" && <AgentContextInspector nodeId={node.id} taskId={node.taskId} />}
 
       <div className="wb-inspector__section">
         <div className="wb-inspector__section-title">Configuration</div>
