@@ -1,0 +1,85 @@
+name: Prune merged branches
+
+on:
+  push:
+    branches:
+      - master
+  pull_request_target:
+    types:
+      - closed
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  prune:
+    if: github.event_name == 'push' || github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete merged PR head branches
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            const branches = await github.paginate(github.rest.repos.listBranches, {
+              owner,
+              repo,
+              per_page: 100,
+            });
+
+            const openPulls = await github.paginate(github.rest.pulls.list, {
+              owner,
+              repo,
+              state: 'open',
+              per_page: 100,
+            });
+
+            const mergedPulls = await github.paginate(github.rest.pulls.list, {
+              owner,
+              repo,
+              state: 'closed',
+              per_page: 100,
+            });
+
+            const keep = new Set(['master']);
+            for (const pr of openPulls) {
+              if (pr.head.repo?.full_name === `${owner}/${repo}`) keep.add(pr.head.ref);
+            }
+
+            const mergedHeads = new Set(
+              mergedPulls
+                .filter((pr) => pr.merged_at && pr.head.repo?.full_name === `${owner}/${repo}`)
+                .map((pr) => pr.head.ref),
+            );
+
+            const deleted = [];
+            const skipped = [];
+
+            for (const branch of branches) {
+              if (keep.has(branch.name)) {
+                skipped.push(`${branch.name} (protected/open PR)`);
+                continue;
+              }
+              if (!mergedHeads.has(branch.name)) continue;
+
+              try {
+                await github.rest.git.deleteRef({
+                  owner,
+                  repo,
+                  ref: `heads/${branch.name}`,
+                });
+                deleted.push(branch.name);
+              } catch (error) {
+                core.warning(`Could not delete ${branch.name}: ${error.message}`);
+              }
+            }
+
+            core.summary
+              .addHeading('Merged branch cleanup')
+              .addRaw(`Deleted ${deleted.length} merged branch(es).\n\n`)
+              .addCodeBlock(deleted.length ? deleted.join('\n') : 'No merged branches to delete.')
+              .addRaw(`\nKept ${skipped.length} protected/open branch(es).`)
+              .write();
