@@ -34,6 +34,8 @@ Choose either method.
 
 Open the Chef folder and double-click `Chef.cmd`.
 
+On the first Windows launch, Chef also prepares `Chef.lnk` beside `Chef.cmd`. The shortcut uses the Chef app icon and can be your normal launcher after that.
+
 **Terminal:**
 
 ```powershell
@@ -49,7 +51,8 @@ On the first launch, Chef automatically:
 3. installs missing web dependencies;
 4. builds the web interface when it is missing or out of date;
 5. starts the local Chef runtime on `127.0.0.1:4321`;
-6. opens Chef in your default browser.
+6. opens Chef in your default browser;
+7. on Windows, materializes the branded app icon and launcher shortcut.
 
 Later launches reuse the installed dependencies and only rebuild the UI when needed.
 
@@ -134,6 +137,16 @@ Open the runtime URL manually. For the default port:
 http://127.0.0.1:4321
 ```
 
+### The branded shortcut did not appear
+
+Chef still works through `Chef.cmd`. You can recreate the shortcut manually from the repository root:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/ensure-windows-launcher.ps1
+```
+
+The generated `.ico` stays in your local app data and `Chef.lnk` is generated beside `Chef.cmd`.
+
 ### Diagnose the environment
 
 Run:
@@ -174,5 +187,7 @@ Install Chef
 → Chef opens in the browser
 → local runtime starts automatically
 ```
+
+The packaged installer should reuse `assets/chef-icon.svg` as its branding source so the browser, README, launcher, and installer stay visually consistent.
 
 Possible distribution surfaces include a Windows installer and Winget package. The local runtime and browser-based UI architecture do not need to change for that milestone.
