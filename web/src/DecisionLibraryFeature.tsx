@@ -16,14 +16,14 @@ const STATUS_OPTIONS: Array<{ value: "all" | DecisionStatus; label: string }> = 
   { value: "rejected", label: "Rejected" },
 ];
 
-const MEMORY_CATEGORIES: Array<{ key: MemoryCategory; label: string; description: string }> = [
-  { key: "decisions", label: "Decisions", description: "Accepted and rejected durable choices." },
-  { key: "requirements", label: "Requirements", description: "Accepted constraints and requested behavior." },
-  { key: "knownFacts", label: "Known Facts", description: "Accepted facts the workspace can rely on." },
-  { key: "conventions", label: "Conventions", description: "Accepted project and team conventions." },
-  { key: "lessons", label: "Lessons", description: "Accepted lessons preserved from prior work." },
-  { key: "openQuestions", label: "Open Questions", description: "Unresolved questions that still need an answer." },
-  { key: "reusableProcedures", label: "Reusable Procedures", description: "Accepted procedures worth repeating." },
+const MEMORY_CATEGORIES: Array<{ key: MemoryCategory; label: string; description: string; captureType: string }> = [
+  { key: "decisions", label: "Decisions", description: "Accepted and rejected durable choices.", captureType: "decision" },
+  { key: "requirements", label: "Requirements", description: "Accepted constraints and requested behavior.", captureType: "requirement" },
+  { key: "knownFacts", label: "Known Facts", description: "Accepted facts the workspace can rely on.", captureType: "knownFact" },
+  { key: "conventions", label: "Conventions", description: "Accepted project and team conventions.", captureType: "convention" },
+  { key: "lessons", label: "Lessons", description: "Accepted lessons preserved from prior work.", captureType: "lesson" },
+  { key: "openQuestions", label: "Open Questions", description: "Unresolved questions that still need an answer.", captureType: "openQuestion" },
+  { key: "reusableProcedures", label: "Reusable Procedures", description: "Accepted procedures worth repeating.", captureType: "reusableProcedure" },
 ];
 
 async function loadDecisions(status: "all" | DecisionStatus): Promise<Decision[]> {
@@ -37,6 +37,17 @@ async function loadDecisions(status: "all" | DecisionStatus): Promise<Decision[]
 async function loadMemory(): Promise<MemoryProjection> {
   const response = await fetch("/api/memory");
   const body = await response.json() as { ok?: boolean; data?: MemoryProjection; error?: string };
+  if (!response.ok || !body.data) throw new Error(body.error ?? `HTTP ${response.status}`);
+  return body.data;
+}
+
+async function recordMemory(type: string, summary: string): Promise<Decision> {
+  const response = await fetch("/api/decisions", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ type, summary }),
+  });
+  const body = await response.json() as { ok?: boolean; data?: Decision; error?: string };
   if (!response.ok || !body.data) throw new Error(body.error ?? `HTTP ${response.status}`);
   return body.data;
 }
@@ -80,6 +91,9 @@ function KnowledgeLibrary({ onClose }: { onClose: () => void }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [captureSummary, setCaptureSummary] = useState("");
+  const [captureSaving, setCaptureSaving] = useState(false);
+  const [captureError, setCaptureError] = useState<string | null>(null);
 
   const refresh = async () => {
     setLoading(true);
@@ -103,6 +117,7 @@ function KnowledgeLibrary({ onClose }: { onClose: () => void }) {
   };
 
   useEffect(() => {
+    setCaptureError(null);
     void refresh();
   }, [view, status, memoryCategory]);
 
@@ -113,6 +128,24 @@ function KnowledgeLibrary({ onClose }: { onClose: () => void }) {
     [currentItems, selectedId],
   );
   const selectedCategory = MEMORY_CATEGORIES.find((category) => category.key === memoryCategory) ?? MEMORY_CATEGORIES[0];
+
+  const submitMemory = async () => {
+    const summary = captureSummary.trim();
+    if (!summary || captureSaving) return;
+    setCaptureSaving(true);
+    setCaptureError(null);
+    try {
+      const created = await recordMemory(selectedCategory.captureType, summary);
+      const next = await loadMemory();
+      setMemory(next);
+      setCaptureSummary("");
+      setSelectedId(created.id);
+    } catch (caught) {
+      setCaptureError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setCaptureSaving(false);
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-[80] grid place-items-center bg-black/60 p-4" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}>
@@ -159,21 +192,55 @@ function KnowledgeLibrary({ onClose }: { onClose: () => void }) {
             ))}
           </div>
         ) : (
-          <div className="grid grid-cols-2 gap-2 border-b border-[#21262d] px-4 py-3 sm:grid-cols-4 xl:grid-cols-7">
-            {MEMORY_CATEGORIES.map((category) => (
+          <>
+            <div className="grid grid-cols-2 gap-2 border-b border-[#21262d] px-4 py-3 sm:grid-cols-4 xl:grid-cols-7">
+              {MEMORY_CATEGORIES.map((category) => (
+                <button
+                  key={category.key}
+                  onClick={() => setMemoryCategory(category.key)}
+                  title={category.description}
+                  className={memoryCategory === category.key
+                    ? "rounded-lg border border-cyan-500/40 bg-cyan-500/10 p-2 text-left text-cyan-200"
+                    : "rounded-lg border border-[#30363d] p-2 text-left text-[#8b949e] hover:bg-[#161b22] hover:text-[#e6edf3]"}
+                >
+                  <span className="block truncate text-[10px] font-medium">{category.label}</span>
+                  <strong className="mt-1 block text-sm">{memory?.counts[category.key] ?? 0}</strong>
+                </button>
+              ))}
+            </div>
+            <form
+              className="flex items-start gap-2 border-b border-[#21262d] bg-[#010409] px-4 py-3"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void submitMemory();
+              }}
+            >
+              <div className="min-w-0 flex-1">
+                <label htmlFor="knowledge-capture" className="text-[11px] font-medium text-[#c9d1d9]">Record {selectedCategory.label.toLowerCase()}</label>
+                <textarea
+                  id="knowledge-capture"
+                  value={captureSummary}
+                  maxLength={2000}
+                  rows={2}
+                  onChange={(event) => setCaptureSummary(event.target.value)}
+                  placeholder={`Add durable ${selectedCategory.label.toLowerCase()} for this workspace…`}
+                  className="mt-1 w-full resize-none rounded-md border border-[#30363d] bg-[#0d1117] px-3 py-2 text-xs text-[#e6edf3] outline-none placeholder:text-[#6e7681] focus:border-cyan-500/60"
+                />
+                <div className="mt-1 flex items-center justify-between gap-3 text-[10px] text-[#6e7681]">
+                  <span>{memoryCategory === "openQuestions" ? "Saved as proposed until resolved." : "Saved as accepted human-authored project memory."}</span>
+                  <span>{captureSummary.length}/2000</span>
+                </div>
+                {captureError && <p className="mt-1 text-[11px] text-red-300">{captureError}</p>}
+              </div>
               <button
-                key={category.key}
-                onClick={() => setMemoryCategory(category.key)}
-                title={category.description}
-                className={memoryCategory === category.key
-                  ? "rounded-lg border border-cyan-500/40 bg-cyan-500/10 p-2 text-left text-cyan-200"
-                  : "rounded-lg border border-[#30363d] p-2 text-left text-[#8b949e] hover:bg-[#161b22] hover:text-[#e6edf3]"}
+                type="submit"
+                disabled={captureSaving || captureSummary.trim().length === 0}
+                className="mt-5 rounded-md border border-cyan-500/40 bg-cyan-500/10 px-3 py-2 text-xs font-medium text-cyan-200 disabled:cursor-not-allowed disabled:opacity-40"
               >
-                <span className="block truncate text-[10px] font-medium">{category.label}</span>
-                <strong className="mt-1 block text-sm">{memory?.counts[category.key] ?? 0}</strong>
+                {captureSaving ? "Recording…" : "Record memory"}
               </button>
-            ))}
-          </div>
+            </form>
+          </>
         )}
 
         {error ? (
