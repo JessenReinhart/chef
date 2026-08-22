@@ -153,7 +153,7 @@ export function createChef(options: {
   dbPath: string;
   projectDir: string;
   decisionProvider?: DecisionProvider;
-  /** Plan execution timeout in ms (default 60s). Short values force timeout paths. */
+  /** Optional Mission execution timeout in ms. Short values force timeout paths in tests/policy. */
   orchestratorTimeoutMs?: number;
   /** Chat persistence for SSE streaming */
   chatRepository?: { list: (workspaceId: WorkspaceId) => ChatMessage[]; insert: (input: { role: string; content: string; metadata?: Record<string, unknown> }) => ChatMessage };
@@ -246,17 +246,25 @@ export function createChef(options: {
     model: llmConfigured ? llmConfig.model : null,
   };
 
-  // Use LLM provider from env if configured, otherwise use provided or scripted
+  // Use LLM provider from env if configured, otherwise use provided or scripted.
+  // The wrapper injects live worker readiness at proposal time so LLM plans can
+  // separate nodeType from the actual worker identity.
   const llmProvider = options.decisionProvider ?? createLLMDecisionProvider();
   const scripted = llmProvider ?? new ScriptedDecisionProvider();
   const provider: OrchestratorDecisionProvider = {
     name: scripted.name,
-    proposePlan: (input) => scripted.proposePlan(input),
+    proposePlan: (input) => scripted.proposePlan({
+      ...input,
+      availableWorkers: specializedHarnesses.detections()
+        .filter((worker) => worker.available && worker.taskCapable)
+        .map((worker) => ({ id: worker.id, name: worker.name, type: worker.type })),
+    }),
     evaluate: (taskResult) => scripted.evaluate(taskResult),
     harnessFor(agentId: AgentId, wsId: WorkspaceId): OrchestratorHarness {
-      const candidate = "harnessFor" in scripted && typeof scripted.harnessFor === "function"
-        ? scripted.harnessFor(agentId, wsId)
-        : new GenericTerminalHarness({ agentId, workspaceId: wsId, command: "node", cwd: options.projectDir });
+      if (!("harnessFor" in scripted) || typeof scripted.harnessFor !== "function") {
+        throw new Error(`No executable harness registered for agent ${agentId}`);
+      }
+      const candidate = scripted.harnessFor(agentId, wsId);
       const harness = candidate as GenericTerminalHarness;
       runtimeRegistry.set(agentId, asSchedulerHarness(harness));
       const orchestratorHarness: OrchestratorHarness = {
@@ -384,13 +392,12 @@ export function createChef(options: {
     mcpRegistry,
     async start(): Promise<void> {
       await scheduler.recoverOnStartup(workspaceId);
-      // Detect and register specialized harnesses (Claude Code, Pi, OMP,
-      // Freebuff) — binary absence is reported, not fatal.
+      // Detect and register specialized harnesses (Claude Code, Codex, Aider,
+      // Pi, OMP, Freebuff). Binary absence is reported, not fatal.
       await specializedHarnesses.initialize();
       // Wire specialized harnesses into the scheduler's registry so dispatch
       // can find them by agent id (task.assignedTo). The orchestrator must
-      // observe the same adapter's event stream; otherwise its provider
-      // fallback would replace this live owner with a generic harness.
+      // observe the same adapter's event stream.
       for (const harness of specializedHarnesses.values()) {
         runtimeRegistry.set(harness.id as AgentId, harness);
         orchestratorRegistry.set(harness.id as AgentId, {
@@ -400,10 +407,8 @@ export function createChef(options: {
           forget: (sessionId: string) => harness.forget(sessionId),
         });
       }
-      // Always register a generic PTY harness under the "generic" agent id so
-      // canvas nodes assigned to "generic" (palette advertises it as always
-      // available) can actually dispatch. Command resolved at spawn time via
-      // the harness command surface (node fallback).
+      // Generic is a direct interactive canvas surface only. It is deliberately
+      // not task-capable and is excluded from automatic Mission routing.
       if (!runtimeRegistry.get("generic")) {
         runtimeRegistry.set(
           "generic",
