@@ -16,6 +16,11 @@ export type NodeStatus =
 
 export type ViewMode = "simple" | "power";
 
+export type WorkerPolicy =
+  | { mode: "auto" }
+  | { mode: "preferred"; workerId: string }
+  | { mode: "locked"; workerId: string };
+
 export type EdgeRelationship =
   | "communication"
   | "context"
@@ -147,7 +152,9 @@ export interface HarnessInfo {
   id: string;
   name: string;
   type: string;
+  command: string;
   available: boolean;
+  taskCapable: boolean;
 }
 
 /** LLM decision-provider status — mirrors server runtime.llmStatus. */
