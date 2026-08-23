@@ -18,6 +18,7 @@ try {
   const threads = createThreadRepository(repo);
   threads.create({ id: "thread-auth", workspaceId: "workspace-a", title: "Authentication" });
   threads.create({ id: "thread-dashboard", workspaceId: "workspace-a", title: "Dashboard" });
+  threads.create({ id: "thread-order", workspaceId: "workspace-a", title: "Stable ordering" });
   threads.create({ id: "thread-other", workspaceId: "workspace-b", title: "Other workspace" });
 
   const chat = createChatRepository(repo);
@@ -25,6 +26,8 @@ try {
   chat.insert({ workspaceId: "workspace-a", threadId: "thread-auth", role: "assistant", content: "Planning login" });
   chat.insert({ workspaceId: "workspace-a", threadId: "thread-dashboard", role: "user", content: "Redesign dashboard" });
   chat.insert({ workspaceId: "workspace-a", role: "user", content: "Legacy global chat" });
+  chat.insert({ id: "message-b", workspaceId: "workspace-a", threadId: "thread-order", role: "assistant", content: "Second stable message", timestamp: 123 });
+  chat.insert({ id: "message-a", workspaceId: "workspace-a", threadId: "thread-order", role: "user", content: "First stable message", timestamp: 123 });
 
   assert.deepEqual(
     chat.list("workspace-a", "thread-auth").map((message) => message.content),
@@ -35,6 +38,11 @@ try {
     chat.list("workspace-a", "thread-dashboard").map((message) => message.content),
     ["Redesign dashboard"],
     "Thread B must not receive Thread A chat history",
+  );
+  assert.deepEqual(
+    chat.list("workspace-a", "thread-order").map((message) => message.id),
+    ["message-a", "message-b"],
+    "equal-timestamp Thread messages must have deterministic ordering",
   );
   assert.deepEqual(
     chat.list("workspace-a").map((message) => message.content),
@@ -63,9 +71,14 @@ try {
     ["Add login", "Planning login"],
     "Thread chat continuity must survive repository reopen",
   );
+  assert.deepEqual(
+    reopenedChat.list("workspace-a", "thread-order").map((message) => message.id),
+    ["message-a", "message-b"],
+    "equal-timestamp Thread ordering must remain stable after repository reopen",
+  );
   reopenedRepo.close();
 
-  console.log("thread-chat-persistence: ok — sibling Threads remain isolated and history survives reopen");
+  console.log("thread-chat-persistence: ok — sibling Threads remain isolated and history ordering survives reopen");
 } finally {
   await rm(dir, { recursive: true, force: true });
 }
