@@ -62,10 +62,8 @@ const server = createServer((req, res) => {
   req.on("end", () => {
     const body = JSON.parse(raw) as { messages?: Array<{ role?: string; content?: string }> };
     const system = body.messages?.find((message) => message.role === "system")?.content ?? "";
-    if (currentWorkerPolicy().mode === "locked") {
-      assert.match(system, /- omp: OMP \(omp\)/);
-      assert.doesNotMatch(system, /claude-code: Claude Code/);
-    }
+    assert.match(system, /- omp: OMP \(omp\)/);
+    assert.doesNotMatch(system, /claude-code: Claude Code/);
     const plan = {
       goal: "worker policy test",
       tasks: [{
