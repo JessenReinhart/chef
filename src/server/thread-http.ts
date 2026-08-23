@@ -100,12 +100,12 @@ export function createThreadServer(runtime: ChefRuntime, baseServer: Server): Se
         const message = body.message.trim();
         chat.insert({ workspaceId: runtime.workspaceId, threadId: thread.id, role: "user", content: message });
 
-        // handleChatMessage creates its Mission synchronously before its first
-        // await. Capture that new Mission while it is still non-terminal so
-        // the originating Thread remains durable even though Mission.threadId
-        // has not yet graduated to a first-class schema column.
+        // The core intent path creates its Mission synchronously before its
+        // first await. Capture that Mission while it is still non-terminal so
+        // the originating Thread remains durable. Thread chat deliberately
+        // avoids the legacy workspace-global chat channel.
         const existingMissionIds = new Set(runtime.repository.listMissions(runtime.workspaceId).map((mission) => mission.id));
-        const execution = runtime.sendChatMessage(message);
+        const execution = runtime.sendUserMessage(message);
         const mission = runtime.repository.listMissions(runtime.workspaceId).find(
           (candidate) => !existingMissionIds.has(candidate.id) && candidate.goal === message,
         );
