@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { api } from "./api";
-import type { ChatMessage, LlmStatus, UiRuntimeEvent, ViewMode } from "./types";
+import type { ChatMessage, HarnessInfo, LlmStatus, UiRuntimeEvent, ViewMode, WorkerPolicy } from "./types";
 import { summarizeMissionProgress, summarizeMissionProgressEvent, type MissionProgressItem } from "./missionProgress";
 
 interface ChatPanelProps {
@@ -31,6 +31,7 @@ const QUICK_PROMPTS = [
 
 /** Assistant system message kind — colors the bubble without abusing `type`. */
 type BubbleKind = "plan.proposed" | "plan.error" | "error";
+type WorkerMode = WorkerPolicy["mode"];
 
 interface BubbleMessage extends ChatMessage {
   bubbleKind?: BubbleKind;
@@ -42,12 +43,17 @@ export function ChatPanel({ onPlanProposed, mode }: ChatPanelProps) {
   const [streaming, setStreaming] = useState(false);
   const [lastEventSeq, setLastEventSeq] = useState<number | undefined>(undefined);
   const [llmStatus, setLlmStatus] = useState<LlmStatus | null>(null);
+  const [harnesses, setHarnesses] = useState<HarnessInfo[]>([]);
+  const [workerMode, setWorkerMode] = useState<WorkerMode>("auto");
+  const [workerId, setWorkerId] = useState("");
   const [progress, setProgress] = useState<MissionProgressItem[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const onPlanProposedRef = useRef(onPlanProposed);
   onPlanProposedRef.current = onPlanProposed;
   const processedIdsRef = useRef<Set<string>>(new Set());
+
+  const availableWorkers = harnesses.filter((harness) => harness.available && harness.taskCapable);
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -67,6 +73,26 @@ export function ChatPanel({ onPlanProposed, mode }: ChatPanelProps) {
       })
       .catch(() => {
         // LLM status endpoint optional — no-op if unavailable
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Worker choices are runtime-detected. Do not expose adapters that cannot
+  // execute bounded Mission tasks.
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .harnesses()
+      .then((items) => {
+        if (cancelled) return;
+        setHarnesses(items);
+        const firstReady = items.find((item) => item.available && item.taskCapable);
+        if (firstReady) setWorkerId((current) => current || firstReady.id);
+      })
+      .catch(() => {
+        // Auto remains valid if readiness discovery is temporarily unavailable.
       });
     return () => {
       cancelled = true;
@@ -248,12 +274,15 @@ export function ChatPanel({ onPlanProposed, mode }: ChatPanelProps) {
   const send = useCallback(async () => {
     if (!input.trim() || streaming) return;
     const text = input.trim();
+    const workerPolicy: WorkerPolicy = workerMode === "auto" || !workerId
+      ? { mode: "auto" }
+      : { mode: workerMode, workerId };
     setInput("");
     setStreaming(true);
     setMessages((prev) => [...prev, { role: "user", content: text, timestamp: Date.now() }]);
 
     try {
-      const result = await api.chat(text);
+      const result = await api.chat(text, workerPolicy);
       // The assistant reply arrives via SSE (chat.assistant). The POST
       // response is a fallback in case the stream missed it.
       if (!result.ok) {
@@ -272,7 +301,7 @@ export function ChatPanel({ onPlanProposed, mode }: ChatPanelProps) {
       setStreaming(false);
       inputRef.current?.focus();
     }
-  }, [input, streaming]);
+  }, [input, streaming, workerId, workerMode]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -414,6 +443,45 @@ export function ChatPanel({ onPlanProposed, mode }: ChatPanelProps) {
 
       {/* Input */}
       <div className="p-3 border-t border-[#21262d] bg-[#010409]/80 backdrop-blur shrink-0">
+        <div className="mb-2 flex flex-wrap items-center gap-2 text-[11px] text-[#8b949e]">
+          <span className="font-medium text-[#c9d1d9]">Worker</span>
+          <select
+            aria-label="Worker routing mode"
+            value={workerMode}
+            disabled={streaming}
+            onChange={(event) => {
+              const next = event.target.value as WorkerMode;
+              setWorkerMode(next);
+              if (next !== "auto" && !workerId && availableWorkers[0]) setWorkerId(availableWorkers[0].id);
+            }}
+            className="rounded-md border border-[#30363d] bg-[#161b22] px-2 py-1 text-[11px] text-[#c9d1d9] outline-none focus:border-cyan-500 disabled:opacity-50"
+          >
+            <option value="auto">Auto</option>
+            <option value="preferred" disabled={availableWorkers.length === 0}>Prefer</option>
+            <option value="locked" disabled={availableWorkers.length === 0}>Require</option>
+          </select>
+          {workerMode !== "auto" && (
+            <select
+              aria-label="Mission worker"
+              value={workerId}
+              disabled={streaming || availableWorkers.length === 0}
+              onChange={(event) => setWorkerId(event.target.value)}
+              className="rounded-md border border-[#30363d] bg-[#161b22] px-2 py-1 text-[11px] text-[#e6edf3] outline-none focus:border-cyan-500 disabled:opacity-50"
+            >
+              {availableWorkers.map((worker) => (
+                <option key={worker.id} value={worker.id}>{worker.name}</option>
+              ))}
+            </select>
+          )}
+          <span className="text-[#6e7681]">
+            {workerMode === "auto"
+              ? "Chef chooses per task"
+              : workerMode === "preferred"
+                ? "falls back to Auto if unavailable"
+                : "Mission fails if unavailable"}
+          </span>
+          {mode === "power" && <span className="ml-auto text-[#6e7681]">{availableWorkers.length} task-capable ready</span>}
+        </div>
         <div className="flex gap-2">
           <input
             ref={inputRef}
