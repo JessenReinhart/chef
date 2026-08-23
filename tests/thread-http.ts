@@ -21,7 +21,7 @@ const foreignThread = threads.create({ workspaceId: "workspace-b", title: "Priva
 const runtime = {
   workspaceId: "workspace-a",
   repository,
-  sendChatMessage(message: string) {
+  sendUserMessage(message: string) {
     repository.insertMission({ workspaceId: "workspace-a", goal: message, status: "planning", createdBy: "user" });
     return Promise.resolve({ workspaceId: "workspace-a", taskIds: [] as string[], report: `Completed: ${message}`, ok: true });
   },
@@ -99,6 +99,7 @@ try {
     "Thread-scoped send must append both sides of the turn to the selected Thread only",
   );
   assert.equal(continuedHistoryBody.data.at(-1)?.metadata?.missionId, sendBody.data.missionId);
+  assert.equal(chat.count("workspace-a"), 0, "Thread-scoped sends must not leak into legacy workspace-global chat history");
 
   const firstThreadStillIsolated = await fetch(`${origin}/api/threads/${createdBody.data.id}/messages`);
   const firstThreadStillIsolatedBody = await firstThreadStillIsolated.json() as { data: Array<{ content: string }> };
