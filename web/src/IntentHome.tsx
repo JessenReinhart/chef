@@ -139,6 +139,9 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
   const homeState = useMemo<HomeState>(() => {
     if (
       missionApprovals.length > 0
+      || latestMission?.status === "failed"
+      || latestMission?.status === "blocked"
+      || latestMission?.status === "cancelled"
       || missionTasks.some((task) => task.status === "failed" || task.status === "blocked" || task.status === "cancelled")
     ) return "attention";
     if (missionTasks.some((task) => task.status === "running" || task.status === "assigned" || task.status === "spawning")) return "working";
