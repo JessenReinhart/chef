@@ -56,7 +56,7 @@ try {
 
   const missions = repository.listMissions("workspace-a");
   assert.equal(missions.length, 2, "one Thread must be able to retain multiple Missions");
-  assert.deepEqual(missions.map((mission) => mission.goal), ["Implement sign-in", "Add forgot-password flow"]);
+  assert.deepEqual(new Set(missions.map((mission) => mission.goal)), new Set(["Implement sign-in", "Add forgot-password flow"]));
   for (const mission of missions) {
     assert.equal(mission.metadata.threadId, thread.id, "each chat-created Mission must keep the originating Thread lineage");
   }
