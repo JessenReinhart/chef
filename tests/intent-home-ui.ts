@@ -22,8 +22,8 @@ assert.match(home, /createThread\("New thread"\)/, "Simple Mode must be able to 
 assert.match(home, /mission\.metadata\?\.threadId === selectedThreadId/, "Mission status on Home must be scoped to the selected Thread");
 assert.match(home, /Recent conversation/, "selected Thread history must be visible without opening Workbench");
 assert.match(home, /saveSelectedThreadId/, "selected Thread should survive reload when possible");
-assert.match(threadApi, /\/api\/threads\/${encodeURIComponent\(threadId\)}\/chat/, "Thread sends must use the canonical Thread-scoped endpoint");
-assert.match(threadApi, /\/api\/threads\/${encodeURIComponent\(threadId\)}\/messages/, "Thread history must use the canonical Thread-scoped endpoint");
+assert.match(threadApi, /\/api\/threads\/\$\{encodeURIComponent\(threadId\)\}\/chat/, "Thread sends must use the canonical Thread-scoped endpoint");
+assert.match(threadApi, /\/api\/threads\/\$\{encodeURIComponent\(threadId\)\}\/messages/, "Thread history must use the canonical Thread-scoped endpoint");
 assert.doesNotMatch(home, /api\.chat\(|api\.chatMessages\(/, "Simple Mode must not silently fall back to workspace-global chat continuity");
 assert.match(home, /Open Workbench/, "advanced inspection should stay deliberately reachable");
 assert.match(home, /Needs your attention/, "approval and failure states should be surfaced in plain language");
