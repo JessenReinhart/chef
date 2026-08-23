@@ -53,6 +53,32 @@ try {
   assert.equal(routed.tasks[0].nodeType, "agent.llm", "nodeType describes the kind of work");
   assert.equal(routed.tasks[0].assignedTo, "codex", "omitted assignee routes to an available worker identity");
 
+  // Real OpenAI-compatible models sometimes add a harmless `plan` envelope
+  // and use `prompt` for the task instruction even when asked for JSON. Keep
+  // that transport variance at the provider boundary instead of starving the
+  // worker of its actual Mission instruction.
+  responsePlan = {
+    plan: {
+      tasks: [{
+        id: "task-wrapped",
+        nodeType: "agent.llm",
+        assignedTo: "codex",
+        priority: 1,
+        dependencies: [],
+        prompt: "Create chef-e2e-proof.txt and verify it contains CHEF_E2E_OK.",
+      }],
+    },
+  };
+  const wrapped = await provider.proposePlan(context);
+  assert.ok(wrapped);
+  assert.equal(wrapped.tasks[0].assignedTo, "codex");
+  assert.equal(
+    wrapped.tasks[0].description,
+    "Create chef-e2e-proof.txt and verify it contains CHEF_E2E_OK.",
+    "prompt compatibility must preserve the worker instruction",
+  );
+  assert.notEqual(wrapped.tasks[0].title, "Untitled", "a prompt-only task should get a useful fallback title");
+
   responsePlan = {
     goal: context.goal,
     tasks: [{
@@ -89,7 +115,21 @@ try {
     "unsupported Mission node types fail closed instead of falling through to a generic process",
   );
 
-  console.log("mission-worker-routing: ok — node type and worker identity stay separate");
+  responsePlan = {
+    tasks: [{
+      id: "task-empty",
+      nodeType: "agent.llm",
+      dependencies: [],
+      priority: 1,
+    }],
+  };
+  await assert.rejects(
+    () => provider.proposePlan(context),
+    /every task requires description or prompt/,
+    "Mission tasks must never reach a worker with an empty instruction",
+  );
+
+  console.log("mission-worker-routing: ok — node type, worker identity, and provider plan envelopes stay coherent");
 } finally {
   await new Promise<void>((resolve) => server.close(() => resolve()));
 }
