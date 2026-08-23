@@ -38,12 +38,15 @@ assert.match(threadApi, /\/api\/threads\/\$\{encodeURIComponent\(threadId\)\}\/m
 assert.doesNotMatch(home, /api\.chat\(|api\.chatMessages\(/, "Simple Mode must not silently fall back to workspace-global chat continuity");
 assert.match(home, /Open Workbench/, "advanced inspection should stay deliberately reachable");
 assert.match(home, /Needs your attention/, "approval and failure states should be surfaced in plain language");
-assert.match(home, /const missionApprovals = useMemo/, "Home approvals should be projected from the current Mission instead of all workspace approvals");
-assert.match(home, /approvals\.filter\(\(approval\) => ids\.has\(approval\.taskId\)\)/, "unrelated Mission approvals must not pollute the current Home status");
+assert.match(home, /const threadTaskIds = useMemo/, "Home must derive the selected Thread's task lineage before projecting approvals");
+assert.match(home, /threadMissions\.flatMap\(\(mission\) => mission\.taskIds\)/, "approval lineage must include every Mission in the selected Thread, not only the latest Mission");
+assert.match(home, /approvals\.filter\(\(approval\) => threadTaskIds\.has\(approval\.taskId\)\)/, "pending approvals from sibling Threads must stay excluded while earlier selected-Thread approvals remain visible");
+assert.match(home, /missionApprovals\.length > 0/, "any selected-Thread pending approval must put Home into the attention state");
+assert.match(home, /const ids = new Set\(latestMission\.taskIds\);\s+return tasks\.filter/, "current-work task rendering must remain scoped to the latest Mission");
 assert.match(home, /task\.status === "failed" \|\| task\.status === "blocked" \|\| task\.status === "cancelled"/, "cancelled work must keep the aggregate Home status in the attention state");
 assert.match(home, /api\.retryNode\(taskId\)/, "failed work must be retryable directly from Simple Mode");
 assert.match(home, /"Retry"/, "Simple Mode must present a plain-language retry action");
-assert.match(home, /task\.status === "blocked" && !approvalTaskIds\.has\(task\.id\)/, "retry must not bypass a pending approval gate");
+assert.match(home, /task\.status === "blocked" && !approvalTaskIds\.has\(task\.id\)/, "retry must not bypass a pending approval gate for that task");
 assert.match(home, /Chef is working/, "active work should collapse to a human-readable status");
 assert.match(home, /Work complete/, "completed work should collapse to a human-readable status");
 assert.doesNotMatch(home, /NodePalette|ChannelRooms|AgentContextInspector|Power Mode|PTY|sessionId/, "default home must not expose Workbench/runtime machinery");
@@ -62,4 +65,4 @@ assert.match(rooms, /if \(!open \|\| !selectedChannel\)/, "closed Rooms should n
 const threadSendCalls = home.match(/sendThreadMessage\(/g) ?? [];
 assert.equal(threadSendCalls.length, 1, "the default home should have one authoritative Thread-scoped Chef intent submission path");
 
-console.log("intent-home-ui: ok — Chef teaches one Thread-scoped intent flow with lifecycle, prior outcomes, recovery, and Workbench behind progressive depth");
+console.log("intent-home-ui: ok — Chef keeps Thread-scoped intent, history, approvals, recovery, and Workbench progressive depth coherent");
