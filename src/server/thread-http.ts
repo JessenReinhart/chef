@@ -42,6 +42,11 @@ function parseThreadMessagesId(pathname: string): string | null {
   return match ? decodeURIComponent(match[1]!) : null;
 }
 
+function parseThreadChatId(pathname: string): string | null {
+  const match = pathname.match(/^\/api\/threads\/([^/]+)\/chat$/);
+  return match ? decodeURIComponent(match[1]!) : null;
+}
+
 export function createThreadServer(runtime: ChefRuntime, baseServer: Server): Server {
   const baseHandler = baseServer.listeners("request")[0] as RequestHandler | undefined;
   if (!baseHandler) throw new Error("base HTTP server has no request handler");
@@ -58,6 +63,7 @@ export function createThreadServer(runtime: ChefRuntime, baseServer: Server): Se
     try {
       const target = parseThreadId(url.pathname);
       const messagesThreadId = parseThreadMessagesId(url.pathname);
+      const chatThreadId = parseThreadChatId(url.pathname);
       if (req.method === "GET" && url.pathname === "/api/threads") {
         sendJson(res, 200, { ok: true, data: threads.list(runtime.workspaceId) });
         return;
@@ -78,6 +84,46 @@ export function createThreadServer(runtime: ChefRuntime, baseServer: Server): Se
         const thread = ownedThread(messagesThreadId);
         if (!thread) { sendJson(res, 404, { error: "thread not found" }); return; }
         sendJson(res, 200, { ok: true, data: chat.list(runtime.workspaceId, thread.id) });
+        return;
+      }
+
+      if (chatThreadId && req.method === "POST") {
+        const thread = ownedThread(chatThreadId);
+        if (!thread) { sendJson(res, 404, { error: "thread not found" }); return; }
+        if (thread.status !== "active") { sendJson(res, 409, { error: "thread is archived" }); return; }
+        const body = await readBody(req);
+        if (typeof body.message !== "string" || !body.message.trim()) {
+          sendJson(res, 400, { error: "message is required" });
+          return;
+        }
+
+        const message = body.message.trim();
+        chat.insert({ workspaceId: runtime.workspaceId, threadId: thread.id, role: "user", content: message });
+
+        // handleChatMessage creates its Mission synchronously before its first
+        // await. Capture that new Mission while it is still non-terminal so
+        // the originating Thread remains durable even though Mission.threadId
+        // has not yet graduated to a first-class schema column.
+        const existingMissionIds = new Set(runtime.repository.listMissions(runtime.workspaceId).map((mission) => mission.id));
+        const execution = runtime.sendChatMessage(message);
+        const mission = runtime.repository.listMissions(runtime.workspaceId).find(
+          (candidate) => !existingMissionIds.has(candidate.id) && candidate.goal === message,
+        );
+        if (mission) {
+          runtime.repository.updateMission(mission.id, {
+            metadata: { ...mission.metadata, threadId: thread.id },
+          });
+        }
+
+        const result = await execution;
+        chat.insert({
+          workspaceId: runtime.workspaceId,
+          threadId: thread.id,
+          role: "assistant",
+          content: result.report,
+          metadata: { missionId: mission?.id, taskIds: result.taskIds, ok: result.ok },
+        });
+        sendJson(res, 200, { ok: result.ok, data: { ...result, missionId: mission?.id, threadId: thread.id } });
         return;
       }
 
