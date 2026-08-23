@@ -5,6 +5,7 @@ import type { ApprovalDecision, RuntimeEvent, PlanTask, PlanStatus, CanvasPatch,
 import { buildPlanGraph } from "../core/graph.ts";
 import { buildAgentPresence } from "../runtime/agent-presence.ts";
 import { capabilityRegistry, type Role } from "../runtime/capabilities.ts";
+import { parseWorkerPolicy, runWithWorkerPolicy } from "../runtime/worker-policy.ts";
 import type { Repository } from "../persistence/database.ts";
 
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8" } as const;
@@ -137,24 +138,10 @@ export function createHttpServer(runtime: ChefRuntime): Server {
         sendJson(res, 200, buildPlanGraph(snapshot));
         return;
       }
-      // Harness detection registry: every known specialized candidate plus the
-      // generic PTY fallback, with live availability from the runtime registry.
+      // Harness readiness comes directly from the authoritative registry so
+      // new adapters automatically become selectable without a second list.
       if (req.method === "GET" && path === "/api/harnesses") {
-        const available = new Set(runtime.specializedHarnesses.availableIds());
-        const KNOWN: Array<{ id: string; name: string; type: string }> = [
-          { id: "claude-code", name: "Claude Code", type: "claude-code" },
-          { id: "pi", name: "Pi", type: "pi" },
-          { id: "omp", name: "OMP", type: "omp" },
-          { id: "freebuff", name: "Freebuff", type: "freebuff" },
-          { id: "generic", name: "Generic Terminal", type: "generic" },
-        ];
-        const data = KNOWN.map((h) => ({
-          id: h.id,
-          name: h.name,
-          type: h.type,
-          available: h.id === "generic" ? true : available.has(h.id),
-        }));
-        sendJson(res, 200, { ok: true, data });
+        sendJson(res, 200, { ok: true, data: runtime.specializedHarnesses.detections() });
         return;
       }
 
@@ -221,12 +208,26 @@ export function createHttpServer(runtime: ChefRuntime): Server {
       }
 
       if (req.method === "POST" && path === "/api/chat") {
-        const body = (await readBody(req)) as { message?: string };
+        const body = (await readBody(req)) as { message?: string; workerPolicy?: unknown };
         if (typeof body.message !== "string" || body.message.length === 0) {
           sendJson(res, 400, { error: "message is required" });
           return;
         }
-        const result = await runtime.sendChatMessage(body.message);
+        let workerPolicy;
+        try {
+          workerPolicy = parseWorkerPolicy(body.workerPolicy);
+        } catch (error) {
+          sendJson(res, 400, { error: error instanceof Error ? error.message : String(error) });
+          return;
+        }
+        if (workerPolicy.mode === "locked") {
+          const selected = runtime.specializedHarnesses.detections().find((worker) => worker.id === workerPolicy.workerId);
+          if (!selected?.available || !selected.taskCapable) {
+            sendJson(res, 409, { error: `Required worker is not available for Mission execution: ${workerPolicy.workerId}` });
+            return;
+          }
+        }
+        const result = await runWithWorkerPolicy(workerPolicy, () => runtime.sendChatMessage(body.message!));
         sendJson(res, 200, { ok: result.ok, data: result });
         return;
       }
