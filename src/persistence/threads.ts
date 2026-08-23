@@ -53,6 +53,10 @@ function normalizeTitle(title: string): string {
   return normalized;
 }
 
+function nextUpdatedAt(current: Timestamp): Timestamp {
+  return Math.max(Date.now(), current + 1);
+}
+
 /** Durable Thread persistence. Runtime/API ownership checks build on this layer. */
 export class ThreadRepository {
   private readonly repo: Repository;
@@ -111,9 +115,17 @@ export class ThreadRepository {
       patch.status ?? current.status,
       summary,
       JSON.stringify(metadata),
-      Date.now(),
+      nextUpdatedAt(current.updatedAt),
       id,
     );
+    return this.get(id)!;
+  }
+
+  /** Advance recency for durable Thread activity without changing Thread content. */
+  touch(id: ThreadId): Thread {
+    const current = this.get(id);
+    if (!current) throw new Error(`Thread not found: ${id}`);
+    this.repo.db.prepare(`UPDATE threads SET updated_at = ? WHERE id = ?`).run(nextUpdatedAt(current.updatedAt), id);
     return this.get(id)!;
   }
 
