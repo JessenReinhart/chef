@@ -36,7 +36,6 @@ const SCRIPTS_DIR = join(defaultSidebandRoot(), "scripts");
 const TIMED_OUT = Symbol("orchestrator-timeout");
 const ORCHESTRATOR_SOURCE = { type: "orchestrator", id: "orchestrator" } as const;
 
-const DEFAULT_TIMEOUT_MS = 60_000;
 const SLEEP_STEP_MS = 50;
 const SESSION_ACTIVE_WAIT_MS = 1_000;
 
@@ -180,7 +179,7 @@ export class Orchestrator {
   readonly #registry: HarnessRegistry;
   readonly #decisionProvider: OrchestratorDecisionProvider;
   readonly #context: ContextManager;
-  readonly #timeoutMs: number;
+  readonly #timeoutMs: number | undefined;
   readonly #onEvent: ((event: RuntimeEvent) => void) | undefined;
   #activePlan: Plan | null = null;
   readonly #terminalEvents = new Map<TaskId, string>();
@@ -193,7 +192,7 @@ export class Orchestrator {
     this.#registry = options.harnessRegistry;
     this.#decisionProvider = options.decisionProvider ?? new ScriptedDecisionProvider();
     this.#context = new ContextManager(options.repository);
-    this.#timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    this.#timeoutMs = options.timeoutMs;
     this.#onEvent = options.onEvent;
   }
 
@@ -1047,17 +1046,20 @@ export class Orchestrator {
   }
 
   async #withTimeout<T>(work: Promise<T>, label: string, controller?: AbortController): Promise<T> {
+    const timeoutMs = this.#timeoutMs;
+    if (timeoutMs === undefined) return work;
+
     const { promise: timeout, resolve } = Promise.withResolvers<typeof TIMED_OUT>();
     const timer = setTimeout(() => {
       controller?.abort();
       resolve(TIMED_OUT);
-    }, this.#timeoutMs);
+    }, timeoutMs);
     timer.unref();
     try {
       const result = await Promise.race([work, timeout]);
       if (result === TIMED_OUT) {
         try { await work; } catch { /* timeout remains the primary error */ }
-        throw new Error(`Timed out after ${this.#timeoutMs}ms: ${label}`);
+        throw new Error(`Timed out after ${timeoutMs}ms: ${label}`);
       }
       return result;
     } finally {
