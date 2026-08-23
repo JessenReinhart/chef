@@ -113,6 +113,7 @@ export interface ChatMessage {
   timestamp: number;
   taskId?: string;
   type?: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface Template {
