@@ -50,6 +50,11 @@ assert.match(home, /task\.status === "failed" \|\| task\.status === "blocked" \|
 assert.match(home, /api\.retryNode\(taskId\)/, "failed work must be retryable directly from Simple Mode");
 assert.match(home, /"Retry"/, "Simple Mode must present a plain-language retry action");
 assert.match(home, /task\.status === "blocked" && !approvalTaskIds\.has\(task\.id\)/, "retry must not bypass a pending approval gate for that task");
+assert.match(home, /function prepareCancelledMissionFollowup\(\)/, "cancelled Missions must have a dedicated safe recovery path");
+assert.match(home, /latestMission\.status !== "cancelled" \|\| !selectedThreadId/, "cancelled-Mission recovery must stay scoped to a selected Thread");
+assert.match(home, /setGoal\(`Continue this work: \$\{latestMission\.goal\}`\)/, "cancelled recovery must prepare a fresh follow-up from the cancelled Mission goal");
+assert.match(home, /latestMission\?\.status === "cancelled" && selectedThreadId/, "cancelled recovery must only appear for the selected Thread's latest cancelled Mission");
+assert.match(home, /Continue this work/, "Simple Mode must offer a plain-language cancelled-Mission recovery action");
 assert.match(home, /Chef is working/, "active work should collapse to a human-readable status");
 assert.match(home, /Work complete/, "completed work should collapse to a human-readable status");
 assert.doesNotMatch(home, /NodePalette|ChannelRooms|AgentContextInspector|Power Mode|PTY|sessionId/, "default home must not expose Workbench/runtime machinery");
