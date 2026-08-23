@@ -52,6 +52,21 @@ export async function createThread(title: string): Promise<UiThread> {
   return response.data;
 }
 
+export async function renameThread(threadId: string, title: string): Promise<UiThread> {
+  const response = await request<{ ok: boolean; data: UiThread }>(`/api/threads/${encodeURIComponent(threadId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ title }),
+  });
+  return response.data;
+}
+
+export async function archiveThread(threadId: string): Promise<UiThread> {
+  const response = await request<{ ok: boolean; data: UiThread }>(`/api/threads/${encodeURIComponent(threadId)}/archive`, {
+    method: "POST",
+  });
+  return response.data;
+}
+
 export async function threadMessages(threadId: string): Promise<ChatMessage[]> {
   const response = await request<{ ok: boolean; data: ChatMessage[] }>(`/api/threads/${encodeURIComponent(threadId)}/messages`);
   return response.data;
