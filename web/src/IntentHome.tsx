@@ -121,11 +121,15 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
     return tasks.filter((task) => ids.has(task.id)).slice(-6).reverse();
   }, [latestMission, tasks]);
 
-  const missionApprovals = useMemo(() => {
-    if (!latestMission) return [];
-    const ids = new Set(latestMission.taskIds);
-    return approvals.filter((approval) => ids.has(approval.taskId));
-  }, [approvals, latestMission]);
+  const threadTaskIds = useMemo(
+    () => new Set(threadMissions.flatMap((mission) => mission.taskIds)),
+    [threadMissions],
+  );
+
+  const missionApprovals = useMemo(
+    () => approvals.filter((approval) => threadTaskIds.has(approval.taskId)),
+    [approvals, threadTaskIds],
+  );
 
   const approvalTaskIds = useMemo(
     () => new Set(missionApprovals.map((approval) => approval.taskId)),
