@@ -42,6 +42,9 @@ assert.match(home, /const threadTaskIds = useMemo/, "Home must derive the select
 assert.match(home, /threadMissions\.flatMap\(\(mission\) => mission\.taskIds\)/, "approval lineage must include every Mission in the selected Thread, not only the latest Mission");
 assert.match(home, /approvals\.filter\(\(approval\) => threadTaskIds\.has\(approval\.taskId\)\)/, "pending approvals from sibling Threads must stay excluded while earlier selected-Thread approvals remain visible");
 assert.match(home, /missionApprovals\.length > 0/, "any selected-Thread pending approval must put Home into the attention state");
+assert.match(home, /latestMission\?\.status === "failed"/, "Mission-level failure must put Home into the attention state even without a failed Task projection");
+assert.match(home, /latestMission\?\.status === "blocked"/, "Mission-level blocked state must remain visible even without a blocked Task projection");
+assert.match(home, /latestMission\?\.status === "cancelled"/, "Mission-level cancellation must not fall back to Ready when Task rows are missing or stale");
 assert.match(home, /const ids = new Set\(latestMission\.taskIds\);\s+return tasks\.filter/, "current-work task rendering must remain scoped to the latest Mission");
 assert.match(home, /task\.status === "failed" \|\| task\.status === "blocked" \|\| task\.status === "cancelled"/, "cancelled work must keep the aggregate Home status in the attention state");
 assert.match(home, /api\.retryNode\(taskId\)/, "failed work must be retryable directly from Simple Mode");
