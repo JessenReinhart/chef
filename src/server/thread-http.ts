@@ -6,6 +6,7 @@ import { createThreadRepository, type ThreadPatch } from "../persistence/threads
 
 type RequestHandler = (req: IncomingMessage, res: ServerResponse) => void | Promise<void>;
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8" } as const;
+const THREAD_RECENT_MESSAGE_LIMIT = 8;
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, JSON_HEADERS);
@@ -98,6 +99,11 @@ export function createThreadServer(runtime: ChefRuntime, baseServer: Server): Se
         }
 
         const message = body.message.trim();
+        // Capture only prior turns. Loading before the current user insert
+        // prevents the goal from being duplicated inside its own context.
+        const recentMessages = chat.list(runtime.workspaceId, thread.id)
+          .slice(-THREAD_RECENT_MESSAGE_LIMIT)
+          .map(({ role, content, timestamp }) => ({ role, content, timestamp }));
         chat.insert({ workspaceId: runtime.workspaceId, threadId: thread.id, role: "user", content: message });
 
         // The core intent path creates its Mission synchronously before its
@@ -105,7 +111,10 @@ export function createThreadServer(runtime: ChefRuntime, baseServer: Server): Se
         // the originating Thread remains durable. Thread chat deliberately
         // avoids the legacy workspace-global chat channel.
         const existingMissionIds = new Set(runtime.repository.listMissions(runtime.workspaceId).map((mission) => mission.id));
-        const execution = runtime.sendUserMessage(message);
+        const execution = runtime.sendUserMessage(message, {
+          threadId: thread.id,
+          recentMessages,
+        });
         const mission = runtime.repository.listMissions(runtime.workspaceId).find(
           (candidate) => !existingMissionIds.has(candidate.id) && candidate.goal === message,
         );
