@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 
 import type { ChefRuntime } from "../main.ts";
+import { createChatRepository } from "../persistence/chat.ts";
 import { createThreadRepository, type ThreadPatch } from "../persistence/threads.ts";
 
 type RequestHandler = (req: IncomingMessage, res: ServerResponse) => void | Promise<void>;
@@ -36,10 +37,16 @@ function parseThreadId(pathname: string): { id: string; archive: boolean } | nul
   return { id: decodeURIComponent(match[1]!), archive: Boolean(match[2]) };
 }
 
+function parseThreadMessagesId(pathname: string): string | null {
+  const match = pathname.match(/^\/api\/threads\/([^/]+)\/messages$/);
+  return match ? decodeURIComponent(match[1]!) : null;
+}
+
 export function createThreadServer(runtime: ChefRuntime, baseServer: Server): Server {
   const baseHandler = baseServer.listeners("request")[0] as RequestHandler | undefined;
   if (!baseHandler) throw new Error("base HTTP server has no request handler");
   const threads = createThreadRepository(runtime.repository);
+  const chat = createChatRepository(runtime.repository);
 
   const ownedThread = (id: string) => {
     const thread = threads.get(id);
@@ -50,6 +57,7 @@ export function createThreadServer(runtime: ChefRuntime, baseServer: Server): Se
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
     try {
       const target = parseThreadId(url.pathname);
+      const messagesThreadId = parseThreadMessagesId(url.pathname);
       if (req.method === "GET" && url.pathname === "/api/threads") {
         sendJson(res, 200, { ok: true, data: threads.list(runtime.workspaceId) });
         return;
@@ -63,6 +71,13 @@ export function createThreadServer(runtime: ChefRuntime, baseServer: Server): Se
         }
         const thread = threads.create({ workspaceId: runtime.workspaceId, title: body.title });
         sendJson(res, 201, { ok: true, data: thread });
+        return;
+      }
+
+      if (messagesThreadId && req.method === "GET") {
+        const thread = ownedThread(messagesThreadId);
+        if (!thread) { sendJson(res, 404, { error: "thread not found" }); return; }
+        sendJson(res, 200, { ok: true, data: chat.list(runtime.workspaceId, thread.id) });
         return;
       }
 

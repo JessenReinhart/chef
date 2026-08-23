@@ -107,7 +107,9 @@ export class ChatRepository {
   list(workspaceId: WorkspaceId, threadId?: ThreadId): ChatMessage[] {
     if (threadId) this.#assertOwnedThread(workspaceId, threadId);
     const msgs = this.#repo.listMessages(workspaceId, channelForThread(threadId));
-    return msgs.map((msg) => fromAgentMessage(msg, threadId));
+    return msgs
+      .map((msg) => fromAgentMessage(msg, threadId))
+      .sort((a, b) => a.timestamp - b.timestamp || a.id.localeCompare(b.id));
   }
 
   /** List chat messages after a given timestamp for one continuity boundary. */

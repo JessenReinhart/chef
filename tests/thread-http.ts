@@ -4,6 +4,7 @@ import { createServer } from "node:http";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
+import { createChatRepository } from "../src/persistence/chat.ts";
 import { Repository } from "../src/persistence/database.ts";
 import { createThreadRepository } from "../src/persistence/threads.ts";
 import { createThreadServer } from "../src/server/thread-http.ts";
@@ -14,6 +15,7 @@ const repository = new Repository(dbPath);
 repository.createWorkspace({ id: "workspace-a", name: "Workspace A" });
 repository.createWorkspace({ id: "workspace-b", name: "Workspace B" });
 const threads = createThreadRepository(repository);
+const chat = createChatRepository(repository);
 const foreignThread = threads.create({ workspaceId: "workspace-b", title: "Private work" });
 
 const runtime = { workspaceId: "workspace-a", repository } as never;
@@ -40,10 +42,37 @@ try {
   assert.equal(createdBody.data.title, "Authentication");
   assert.equal(createdBody.data.status, "active");
 
+  const secondThread = threads.create({ workspaceId: "workspace-a", title: "Dashboard" });
+  chat.insert({ workspaceId: "workspace-a", threadId: createdBody.data.id, role: "user", content: "Keep email login" });
+  chat.insert({ workspaceId: "workspace-a", threadId: createdBody.data.id, role: "assistant", content: "I will keep it." });
+  chat.insert({ workspaceId: "workspace-a", threadId: secondThread.id, role: "user", content: "Redesign dashboard" });
+  chat.insert({ workspaceId: "workspace-b", threadId: foreignThread.id, role: "user", content: "Private sibling workspace message" });
+
+  const historyResponse = await fetch(`${origin}/api/threads/${createdBody.data.id}/messages`);
+  assert.equal(historyResponse.status, 200);
+  const historyBody = await historyResponse.json() as { data: Array<{ threadId?: string; content: string }> };
+  assert.deepEqual(
+    historyBody.data.map((message) => ({ threadId: message.threadId, content: message.content })),
+    [
+      { threadId: createdBody.data.id, content: "Keep email login" },
+      { threadId: createdBody.data.id, content: "I will keep it." },
+    ],
+    "Thread history must contain only messages from the selected Thread",
+  );
+
+  const secondHistoryResponse = await fetch(`${origin}/api/threads/${secondThread.id}/messages`);
+  assert.equal(secondHistoryResponse.status, 200);
+  const secondHistoryBody = await secondHistoryResponse.json() as { data: Array<{ content: string }> };
+  assert.deepEqual(secondHistoryBody.data.map((message) => message.content), ["Redesign dashboard"]);
+
   const listResponse = await fetch(`${origin}/api/threads`);
   assert.equal(listResponse.status, 200);
   const listBody = await listResponse.json() as { data: Array<{ id: string }> };
-  assert.deepEqual(listBody.data.map((thread) => thread.id), [createdBody.data.id], "thread list must not leak sibling workspace data");
+  assert.deepEqual(
+    new Set(listBody.data.map((thread) => thread.id)),
+    new Set([createdBody.data.id, secondThread.id]),
+    "thread list must not leak sibling workspace data",
+  );
 
   const getResponse = await fetch(`${origin}/api/threads/${createdBody.data.id}`);
   assert.equal(getResponse.status, 200);
@@ -64,6 +93,7 @@ try {
   assert.equal(archiveBody.data.status, "archived");
 
   assert.equal((await fetch(`${origin}/api/threads/${foreignThread.id}`)).status, 404, "foreign workspace thread must be hidden");
+  assert.equal((await fetch(`${origin}/api/threads/${foreignThread.id}/messages`)).status, 404, "foreign workspace Thread history must be hidden");
   assert.equal((await fetch(`${origin}/api/threads/${foreignThread.id}`, {
     method: "PATCH",
     headers: { "content-type": "application/json" },
@@ -82,11 +112,12 @@ try {
     body: "null",
   })).status, 400, "non-object JSON bodies must fail closed");
   assert.equal((await fetch(`${origin}/api/threads/%E0%A4%A`)).status, 400, "malformed encoded Thread ids must not escape the request boundary");
+  assert.equal((await fetch(`${origin}/api/threads/%E0%A4%A/messages`)).status, 400, "malformed encoded Thread ids must fail at the message-history boundary");
 
   const fallback = await fetch(`${origin}/api/state`);
   assert.equal(fallback.status, 200);
   assert.deepEqual(await fallback.json(), { fallback: "/api/state" });
-  console.log("thread-http: ok — CRUD is durable and workspace scoped");
+  console.log("thread-http: ok — CRUD and message history are durable and workspace scoped");
 } finally {
   await new Promise<void>((resolve) => server.close(() => resolve()));
   repository.close();
