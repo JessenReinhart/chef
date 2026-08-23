@@ -19,9 +19,15 @@ assert.match(home, /threadMessages\(selected\.id\)/, "Simple Mode history must c
 assert.match(home, /sendThreadMessage\(threadId, message\)/, "the primary composer must continue work through the selected Thread");
 assert.match(home, /\+ New thread/, "Thread creation must be available directly from Simple Mode");
 assert.match(home, /createThread\("New thread"\)/, "Simple Mode must be able to create an explicit new Thread");
+assert.match(home, /renameSelectedThread\(\)/, "Thread rename must be available directly from Home");
+assert.match(home, /archiveSelectedThread\(\)/, "Thread archive must be available directly from Home");
+assert.match(home, /nextThreads\.find\(\(thread\) => thread\.status === "active"\)/, "archiving the selected Thread must move selection to another active Thread when possible");
+assert.match(home, /saveSelectedThreadId\(nextActive\?\.id \?\? null\)/, "archiving must not leave an archived Thread persisted as the active selection");
 assert.match(home, /mission\.metadata\?\.threadId === selectedThreadId/, "Mission status on Home must be scoped to the selected Thread");
 assert.match(home, /Recent conversation/, "selected Thread history must be visible without opening Workbench");
 assert.match(home, /saveSelectedThreadId/, "selected Thread should survive reload when possible");
+assert.match(threadApi, /method: "PATCH"/, "Thread rename must use the existing PATCH lifecycle route");
+assert.match(threadApi, /\/api\/threads\/\$\{encodeURIComponent\(threadId\)\}\/archive/, "Thread archive must use the canonical archive route");
 assert.match(threadApi, /\/api\/threads\/\$\{encodeURIComponent\(threadId\)\}\/chat/, "Thread sends must use the canonical Thread-scoped endpoint");
 assert.match(threadApi, /\/api\/threads\/\$\{encodeURIComponent\(threadId\)\}\/messages/, "Thread history must use the canonical Thread-scoped endpoint");
 assert.doesNotMatch(home, /api\.chat\(|api\.chatMessages\(/, "Simple Mode must not silently fall back to workspace-global chat continuity");
@@ -50,4 +56,4 @@ assert.match(rooms, /if \(!open \|\| !selectedChannel\)/, "closed Rooms should n
 const threadSendCalls = home.match(/sendThreadMessage\(/g) ?? [];
 assert.equal(threadSendCalls.length, 1, "the default home should have one authoritative Thread-scoped Chef intent submission path");
 
-console.log("intent-home-ui: ok — Chef teaches one Thread-scoped intent flow with recovery and Workbench behind progressive depth");
+console.log("intent-home-ui: ok — Chef teaches one Thread-scoped intent flow with lifecycle, recovery, and Workbench behind progressive depth");
