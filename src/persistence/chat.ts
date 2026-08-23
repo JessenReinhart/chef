@@ -100,6 +100,7 @@ export class ChatRepository {
       payload: agentMsg.payload,
       timestamp: agentMsg.timestamp,
     });
+    if (input.threadId) this.#threads.touch(input.threadId);
     return fromAgentMessage(agentMsg, input.threadId);
   }
 
