@@ -18,7 +18,14 @@ const threads = createThreadRepository(repository);
 const chat = createChatRepository(repository);
 const foreignThread = threads.create({ workspaceId: "workspace-b", title: "Private work" });
 
-const runtime = { workspaceId: "workspace-a", repository } as never;
+const runtime = {
+  workspaceId: "workspace-a",
+  repository,
+  sendChatMessage(message: string) {
+    repository.insertMission({ workspaceId: "workspace-a", goal: message, status: "planning", createdBy: "user" });
+    return Promise.resolve({ workspaceId: "workspace-a", taskIds: [] as string[], report: `Completed: ${message}`, ok: true });
+  },
+} as never;
 const baseServer = createServer((req, res) => {
   res.writeHead(200, { "content-type": "application/json" });
   res.end(JSON.stringify({ fallback: req.url }));
@@ -65,6 +72,38 @@ try {
   const secondHistoryBody = await secondHistoryResponse.json() as { data: Array<{ content: string }> };
   assert.deepEqual(secondHistoryBody.data.map((message) => message.content), ["Redesign dashboard"]);
 
+  const sendResponse = await fetch(`${origin}/api/threads/${secondThread.id}/chat`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ message: "  Keep the filters from before  " }),
+  });
+  assert.equal(sendResponse.status, 200);
+  const sendBody = await sendResponse.json() as { data: { threadId: string; missionId?: string; report: string; ok: boolean } };
+  assert.equal(sendBody.data.threadId, secondThread.id);
+  assert.equal(sendBody.data.report, "Completed: Keep the filters from before");
+  assert.equal(sendBody.data.ok, true);
+  assert.ok(sendBody.data.missionId, "Thread chat should report its originating Mission");
+  const linkedMission = repository.getMission(sendBody.data.missionId!);
+  assert.equal(linkedMission?.metadata.threadId, secondThread.id, "chat-created Mission must retain its originating Thread");
+
+  const continuedHistoryResponse = await fetch(`${origin}/api/threads/${secondThread.id}/messages`);
+  assert.equal(continuedHistoryResponse.status, 200);
+  const continuedHistoryBody = await continuedHistoryResponse.json() as { data: Array<{ role: string; content: string; metadata?: Record<string, unknown> }> };
+  assert.deepEqual(
+    continuedHistoryBody.data.map((message) => [message.role, message.content]),
+    [
+      ["user", "Redesign dashboard"],
+      ["user", "Keep the filters from before"],
+      ["assistant", "Completed: Keep the filters from before"],
+    ],
+    "Thread-scoped send must append both sides of the turn to the selected Thread only",
+  );
+  assert.equal(continuedHistoryBody.data.at(-1)?.metadata?.missionId, sendBody.data.missionId);
+
+  const firstThreadStillIsolated = await fetch(`${origin}/api/threads/${createdBody.data.id}/messages`);
+  const firstThreadStillIsolatedBody = await firstThreadStillIsolated.json() as { data: Array<{ content: string }> };
+  assert.deepEqual(firstThreadStillIsolatedBody.data.map((message) => message.content), ["Keep email login", "I will keep it."], "sibling Thread history must stay isolated after a send");
+
   const listResponse = await fetch(`${origin}/api/threads`);
   assert.equal(listResponse.status, 200);
   const listBody = await listResponse.json() as { data: Array<{ id: string }> };
@@ -91,9 +130,19 @@ try {
   assert.equal(archiveResponse.status, 200);
   const archiveBody = await archiveResponse.json() as { data: { status: string } };
   assert.equal(archiveBody.data.status, "archived");
+  assert.equal((await fetch(`${origin}/api/threads/${createdBody.data.id}/chat`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ message: "Do not continue archived work" }),
+  })).status, 409, "archived Threads must reject new turns");
 
   assert.equal((await fetch(`${origin}/api/threads/${foreignThread.id}`)).status, 404, "foreign workspace thread must be hidden");
   assert.equal((await fetch(`${origin}/api/threads/${foreignThread.id}/messages`)).status, 404, "foreign workspace Thread history must be hidden");
+  assert.equal((await fetch(`${origin}/api/threads/${foreignThread.id}/chat`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ message: "steal context" }),
+  })).status, 404, "foreign workspace Thread chat must be hidden");
   assert.equal((await fetch(`${origin}/api/threads/${foreignThread.id}`, {
     method: "PATCH",
     headers: { "content-type": "application/json" },
@@ -101,6 +150,11 @@ try {
   })).status, 404, "foreign workspace thread must not be mutable");
   assert.equal((await fetch(`${origin}/api/threads/${foreignThread.id}/archive`, { method: "POST" })).status, 404, "foreign workspace thread must not be archivable");
 
+  assert.equal((await fetch(`${origin}/api/threads/${secondThread.id}/chat`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ message: "   " }),
+  })).status, 400, "Thread chat must reject empty turns");
   assert.equal((await fetch(`${origin}/api/threads`, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -113,11 +167,16 @@ try {
   })).status, 400, "non-object JSON bodies must fail closed");
   assert.equal((await fetch(`${origin}/api/threads/%E0%A4%A`)).status, 400, "malformed encoded Thread ids must not escape the request boundary");
   assert.equal((await fetch(`${origin}/api/threads/%E0%A4%A/messages`)).status, 400, "malformed encoded Thread ids must fail at the message-history boundary");
+  assert.equal((await fetch(`${origin}/api/threads/%E0%A4%A/chat`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ message: "hello" }),
+  })).status, 400, "malformed encoded Thread ids must fail at the chat-send boundary");
 
   const fallback = await fetch(`${origin}/api/state`);
   assert.equal(fallback.status, 200);
   assert.deepEqual(await fallback.json(), { fallback: "/api/state" });
-  console.log("thread-http: ok — CRUD and message history are durable and workspace scoped");
+  console.log("thread-http: ok — CRUD, isolated history, and Thread-scoped sends are workspace scoped");
 } finally {
   await new Promise<void>((resolve) => server.close(() => resolve()));
   repository.close();
