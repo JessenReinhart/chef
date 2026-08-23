@@ -38,7 +38,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       PROJECTS_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
-      PROJECT_TITLE: Chef
+      PROJECT_TITLE: Chef Project
     steps:
       - name: Check project token
         shell: bash
@@ -111,9 +111,31 @@ jobs:
             }
 
             const normalizeStatus = (status) => status.trim().toLowerCase();
-            const statusOption = (status) => statusField.options.find(
-              (option) => normalizeStatus(option.name) === normalizeStatus(status),
-            );
+            const statusAliases = {
+              Backlog: ['Backlog', 'Todo', 'To do', 'Ready'],
+              Ready: ['Ready', 'Backlog', 'Todo', 'To do'],
+              'In progress': ['In progress', 'In Progress', 'Doing', 'Active'],
+              'In review': ['In review', 'Review', 'In progress', 'In Progress'],
+              Done: ['Done', 'Completed', 'Closed'],
+            };
+            const availableStatuses = statusField.options.map((option) => option.name);
+            core.info(`Available project statuses: ${availableStatuses.join(', ')}`);
+
+            const statusOption = (status) => {
+              const aliases = statusAliases[status] ?? [status];
+              for (const alias of aliases) {
+                const option = statusField.options.find(
+                  (candidate) => normalizeStatus(candidate.name) === normalizeStatus(alias),
+                );
+                if (option) {
+                  if (normalizeStatus(option.name) !== normalizeStatus(status)) {
+                    core.info(`Mapping logical status '${status}' to project status '${option.name}'.`);
+                  }
+                  return option;
+                }
+              }
+              return null;
+            };
             const markerNames = {
               backlog: 'Backlog',
               ready: 'Ready',
@@ -164,7 +186,9 @@ jobs:
             async function setIssueStatus(issueNodeId, status) {
               const option = statusOption(status);
               if (!option) {
-                throw new Error(`Status '${status}' does not exist in project '${project.title}'.`);
+                throw new Error(
+                  `No compatible project status for logical status '${status}' in '${project.title}'. Available statuses: ${availableStatuses.join(', ')}`,
+                );
               }
               const itemId = await ensureProjectItem(issueNodeId);
               await github.graphql(`
@@ -184,7 +208,7 @@ jobs:
                 fieldId: statusField.id,
                 optionId: option.id,
               });
-              core.info(`Set project item ${itemId} to '${option.name}'.`);
+              core.info(`Set project item ${itemId} to '${option.name}' (logical: '${status}').`);
             }
 
             async function getIssueNodeId(number) {
