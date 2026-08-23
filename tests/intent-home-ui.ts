@@ -24,6 +24,11 @@ assert.match(home, /archiveSelectedThread\(\)/, "Thread archive must be availabl
 assert.match(home, /nextThreads\.find\(\(thread\) => thread\.status === "active"\)/, "archiving the selected Thread must move selection to another active Thread when possible");
 assert.match(home, /saveSelectedThreadId\(nextActive\?\.id \?\? null\)/, "archiving must not leave an archived Thread persisted as the active selection");
 assert.match(home, /mission\.metadata\?\.threadId === selectedThreadId/, "Mission status on Home must be scoped to the selected Thread");
+assert.match(home, /const recentPriorMissions = useMemo/, "Home must derive bounded prior Mission history from the selected Thread projection");
+assert.match(home, /mission\.id !== latestMission\?\.id/, "prior Mission history must not duplicate the current Mission");
+assert.match(home, /\.slice\(0, 3\)/, "prior Mission history must stay bounded on the default Home surface");
+assert.match(home, /Recent Mission outcomes/, "selected Thread prior outcomes must be inspectable without opening Workbench");
+assert.match(home, /missionOutcomePresentation\(mission\.status\)/, "prior Mission history must use human-readable outcome labels");
 assert.match(home, /Recent conversation/, "selected Thread history must be visible without opening Workbench");
 assert.match(home, /saveSelectedThreadId/, "selected Thread should survive reload when possible");
 assert.match(threadApi, /method: "PATCH"/, "Thread rename must use the existing PATCH lifecycle route");
@@ -56,4 +61,4 @@ assert.match(rooms, /if \(!open \|\| !selectedChannel\)/, "closed Rooms should n
 const threadSendCalls = home.match(/sendThreadMessage\(/g) ?? [];
 assert.equal(threadSendCalls.length, 1, "the default home should have one authoritative Thread-scoped Chef intent submission path");
 
-console.log("intent-home-ui: ok — Chef teaches one Thread-scoped intent flow with lifecycle, recovery, and Workbench behind progressive depth");
+console.log("intent-home-ui: ok — Chef teaches one Thread-scoped intent flow with lifecycle, prior outcomes, recovery, and Workbench behind progressive depth");

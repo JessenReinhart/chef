@@ -34,6 +34,17 @@ function missionPresentation(state: HomeState): { label: string; dot: string; ri
   return { label: "Ready", dot: "bg-slate-500", ring: "" };
 }
 
+function missionOutcomePresentation(status: UiMission["status"]): { label: string; dot: string; text: string } {
+  if (status === "completed") return { label: "Completed", dot: "bg-emerald-400", text: "text-emerald-300" };
+  if (status === "failed" || status === "blocked" || status === "cancelled") {
+    return { label: status === "cancelled" ? "Cancelled" : "Needs attention", dot: "bg-rose-400", text: "text-rose-300" };
+  }
+  if (status === "waiting_for_approval" || status === "paused") {
+    return { label: status === "paused" ? "Paused" : "Waiting for you", dot: "bg-amber-300", text: "text-amber-300" };
+  }
+  return { label: "In progress", dot: "bg-red-400", text: "text-red-300" };
+}
+
 function titleFromMessage(message: string): string {
   const normalized = message.replace(/\s+/g, " ").trim();
   return normalized.length <= 48 ? normalized : `${normalized.slice(0, 45)}…`;
@@ -94,6 +105,14 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
   const latestMission = useMemo(
     () => [...threadMissions].sort((a, b) => b.updatedAt - a.updatedAt)[0] ?? null,
     [threadMissions],
+  );
+
+  const recentPriorMissions = useMemo(
+    () => [...threadMissions]
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+      .filter((mission) => mission.id !== latestMission?.id)
+      .slice(0, 3),
+    [latestMission?.id, threadMissions],
   );
 
   const missionTasks = useMemo(() => {
@@ -426,6 +445,24 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
                   </div>
                 )}
               </div>
+
+              {recentPriorMissions.length > 0 && (
+                <div className="mt-5 border-t border-white/[0.06] pt-4" aria-label="Recent Mission outcomes">
+                  <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-600">Earlier in this Thread</div>
+                  <div className="space-y-1">
+                    {recentPriorMissions.map((mission) => {
+                      const outcome = missionOutcomePresentation(mission.status);
+                      return (
+                        <div key={mission.id} className="flex items-center gap-3 rounded-xl px-3 py-2">
+                          <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${outcome.dot}`} />
+                          <span className="min-w-0 flex-1 truncate text-xs text-zinc-400">{mission.goal}</span>
+                          <span className={`shrink-0 text-[10px] font-medium ${outcome.text}`}>{outcome.label}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
               <button
                 type="button"
