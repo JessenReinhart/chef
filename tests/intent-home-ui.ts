@@ -47,6 +47,9 @@ assert.match(home, /latestMission\?\.status === "blocked"/, "Mission-level block
 assert.match(home, /latestMission\?\.status === "cancelled"/, "Mission-level cancellation must not fall back to Ready when Task rows are missing or stale");
 assert.match(home, /const ids = new Set\(latestMission\.taskIds\);\s+return tasks\.filter/, "current-work task rendering must remain scoped to the latest Mission");
 assert.match(home, /task\.status === "failed" \|\| task\.status === "blocked" \|\| task\.status === "cancelled"/, "cancelled work must keep the aggregate Home status in the attention state");
+assert.match(home, /message\.metadata\?\.missionId === latestMission\.id/, "current-work output must be scoped to the latest Mission instead of any prior Thread reply");
+assert.match(home, /setSubmitting\(true\);\s+setLastReport\(null\);/, "starting a new Mission must clear the previous transient report immediately");
+assert.doesNotMatch(home, /find\(\(message\) => message\.role === "assistant"\)\?\.content/, "Home must not use an unscoped assistant reply as current Mission output");
 assert.match(home, /api\.retryNode\(taskId\)/, "failed work must be retryable directly from Simple Mode");
 assert.match(home, /"Retry"/, "Simple Mode must present a plain-language retry action");
 assert.match(home, /task\.status === "blocked" && !approvalTaskIds\.has\(task\.id\)/, "retry must not bypass a pending approval gate for that task");
