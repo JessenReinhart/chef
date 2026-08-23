@@ -55,9 +55,9 @@ jobs:
             const { owner: repoOwner, repo } = context.repo;
 
             const projectResult = await github.graphql(`
-              query($login: String!, $query: String!) {
+              query($login: String!, $projectSearch: String!) {
                 user(login: $login) {
-                  projectsV2(first: 50, query: $query) {
+                  projectsV2(first: 50, query: $projectSearch) {
                     nodes {
                       id
                       title
@@ -74,7 +74,7 @@ jobs:
                   }
                 }
               }
-            `, { login: owner, query: projectTitle });
+            `, { login: owner, projectSearch: projectTitle });
 
             const project = projectResult.user?.projectsV2?.nodes?.find(
               (candidate) => candidate.title?.toLowerCase() === projectTitle.toLowerCase(),
