@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import { createInterface } from "node:readline/promises";
+import { Writable } from "node:stream";
 import { createChef, type ChefRuntime } from "../src/main.ts";
 import { createHttpServer } from "../src/server/http-server.ts";
 
@@ -13,6 +15,78 @@ const DEFAULT_TIMEOUT_MS = 10 * 60_000;
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+}
+
+function hasLLMKey(): boolean {
+  return Boolean(
+    process.env.ANTHROPIC_API_KEY
+    || process.env.OPENAI_API_KEY
+    || process.env.CHEF_API_KEY,
+  );
+}
+
+async function ensureInteractiveLLMConfig(): Promise<void> {
+  const configuredProvider = process.env.CHEF_PROVIDER?.trim();
+  if (configuredProvider && hasLLMKey()) return;
+
+  assert.ok(
+    process.stdin.isTTY && process.stdout.isTTY,
+    "Live E2E needs LLM configuration. Run interactively to enter endpoint/model/API key, or set CHEF_PROVIDER plus ANTHROPIC_API_KEY, OPENAI_API_KEY, or CHEF_API_KEY.",
+  );
+
+  console.log("\n[live-e2e] Chef LLM configuration is incomplete.");
+  console.log("[live-e2e] Enter the provider details for this run only. Nothing is written to .env or the debug trace.");
+  if (!configuredProvider) {
+    console.log("[live-e2e] Provider will default to custom (OpenAI-compatible endpoint).\n");
+  }
+
+  let muted = false;
+  const output = new Writable({
+    write(chunk, _encoding, callback) {
+      if (!muted) process.stdout.write(chunk);
+      callback();
+    },
+  });
+  const rl = createInterface({ input: process.stdin, output, terminal: true });
+
+  try {
+    const currentEndpoint = process.env.CHEF_BASE_URL?.trim() ?? "";
+    const currentModel = process.env.CHEF_MODEL?.trim() ?? "";
+    const endpointPrompt = currentEndpoint
+      ? `LLM endpoint [${currentEndpoint}]: `
+      : "LLM endpoint: ";
+    const modelPrompt = currentModel
+      ? `Model name [${currentModel}]: `
+      : "Model name: ";
+
+    const endpoint = (await rl.question(endpointPrompt)).trim() || currentEndpoint;
+    const model = (await rl.question(modelPrompt)).trim() || currentModel;
+
+    let promptedApiKey: string | undefined;
+    if (hasLLMKey()) {
+      console.log("[live-e2e] API key: detected from environment, keeping it.");
+    } else {
+      const keyPromise = rl.question("API key (hidden): ");
+      muted = true;
+      promptedApiKey = (await keyPromise).trim();
+      muted = false;
+      process.stdout.write("\n");
+    }
+
+    assert.ok(endpoint, "LLM endpoint is required for interactive live E2E configuration");
+    assert.ok(model, "Model name is required for interactive live E2E configuration");
+    assert.ok(hasLLMKey() || promptedApiKey, "API key is required for interactive live E2E configuration");
+
+    process.env.CHEF_PROVIDER = configuredProvider || "custom";
+    process.env.CHEF_BASE_URL = endpoint;
+    process.env.CHEF_MODEL = model;
+    if (!hasLLMKey() && promptedApiKey) process.env.CHEF_API_KEY = promptedApiKey;
+
+    console.log(`[live-e2e] Using ${process.env.CHEF_PROVIDER}/${model} at ${endpoint}\n`);
+  } finally {
+    muted = false;
+    rl.close();
+  }
 }
 
 function boundedJson(value: unknown): unknown {
@@ -36,6 +110,8 @@ async function main(): Promise<void> {
   // Callers can explicitly set either variable to 0 to silence that channel.
   process.env.CHEF_LLM_DEBUG ??= "1";
   process.env.CHEF_RUNTIME_DEBUG ??= "1";
+
+  await ensureInteractiveLLMConfig();
 
   const configuredTimeout = Number(process.env.CHEF_E2E_TIMEOUT_MS ?? DEFAULT_TIMEOUT_MS);
   assert.ok(
