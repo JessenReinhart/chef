@@ -20,6 +20,7 @@ import type {
   UiAutomation,
   UiAutomationRun,
   UiRuntimeEvent,
+  WorkerPolicy,
 } from "./types";
 
 export interface RecentProject {
@@ -294,10 +295,10 @@ export class Api {
   }
 
   // ── Chat ────────────────────────────────────────────────────────
-  async chat(message: string): Promise<{ ok: boolean; taskIds: string[]; report: string }> {
+  async chat(message: string, workerPolicy: WorkerPolicy = { mode: "auto" }): Promise<{ ok: boolean; taskIds: string[]; report: string }> {
     return this.request<{ ok: boolean; data: { ok: boolean; taskIds: string[]; report: string } }>("/api/chat", {
       method: "POST",
-      body: JSON.stringify({ message }),
+      body: JSON.stringify({ message, workerPolicy }),
     }).then((r) => r.data);
   }
 
