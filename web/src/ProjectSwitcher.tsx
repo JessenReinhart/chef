@@ -49,13 +49,17 @@ export function ProjectSwitcher() {
         <div className="absolute left-0 top-[calc(100%+.45rem)] z-[60] w-[min(25rem,calc(100vw-2rem))] rounded-xl border border-[#30363d] bg-[#0d1117]/[.98] p-3 shadow-2xl backdrop-blur">
           <div className="text-xs font-semibold">Project</div>
           {project && <div className="my-1.5 truncate font-mono text-[10px] text-[#6e7681]" title={project.path}>{project.path}</div>}
-          {project?.nativePicker && (
+          {project?.nativePicker ? (
             <button className="w-full rounded-md border border-cyan-400/30 bg-cyan-400/10 px-2.5 py-2 text-left text-[11px] text-cyan-300 disabled:opacity-50" disabled={busy} onClick={() => void reopen(() => api.pickProject())}>
               {busy ? "Opening…" : "Open folder…"}
             </button>
-          )}
+          ) : project ? (
+            <div className="rounded-md border border-[#30363d] bg-[#010409]/70 px-2.5 py-2 text-[10px] leading-4 text-[#8b949e]">
+              Folder picker unavailable on this system. Enter a local project path below.
+            </div>
+          ) : null}
           <form className="mt-2 grid grid-cols-[1fr_auto] gap-1" onSubmit={(event) => { event.preventDefault(); if (path.trim()) void reopen(() => api.openProject(path.trim())); }}>
-            <input className="min-w-0 rounded border border-[#30363d] bg-[#010409] px-2 py-1.5 text-[10px]" value={path} onChange={(event) => setPath(event.target.value)} placeholder="C:\\dev\\my-project" aria-label="Project directory" />
+            <input className="min-w-0 rounded border border-[#30363d] bg-[#010409] px-2 py-1.5 text-[10px]" value={path} onChange={(event) => setPath(event.target.value)} placeholder="/home/you/project or C:\\dev\\my-project" aria-label="Project directory" />
             <button className="rounded border border-[#30363d] bg-[#161b22] px-2 py-1.5 text-[10px] disabled:opacity-50" type="submit" disabled={busy || !path.trim()}>Open path</button>
           </form>
           {project?.recent.length ? (
