@@ -220,12 +220,12 @@ export interface Harness {
   name: string;
   detect(): Promise<boolean>;
   spawn(config: SpawnConfig): Promise<HarnessSession>;
-  send(sessionId: string, input: string): Promise<void>;
-  resize(sessionId: string, cols: number, rows: number): Promise<void>;
-  interrupt(sessionId: string): Promise<void>;
-  terminate(sessionId: string): Promise<void>;
-  kill(sessionId: string): Promise<void>;
-  events(sessionId: string): AsyncIterable<HarnessEvent>;
+  send(sessionId: SessionId, input: string): Promise<void>;
+  resize(sessionId: SessionId, cols: number, rows: number): Promise<void>;
+  interrupt(sessionId: SessionId): Promise<void>;
+  terminate(sessionId: SessionId): Promise<void>;
+  kill(sessionId: SessionId): Promise<void>;
+  events(sessionId: SessionId): AsyncIterable<HarnessEvent>;
 }
 
 // ---------------------------------------------------------------------------
