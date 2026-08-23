@@ -59,7 +59,7 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
       const [snapshot, listedThreads] = await Promise.all([api.stateRaw(), listThreads()]);
       const activeThreads = listedThreads.filter((thread) => thread.status === "active");
       const rememberedId = selectedThreadId ?? loadSelectedThreadId();
-      const selected = activeThreads.find((thread) => thread.id === rememberedId) ?? activeThreads[0] ?? null;
+      const selected = listedThreads.find((thread) => thread.id === rememberedId) ?? activeThreads[0] ?? null;
       const selectedMessages = selected ? await threadMessages(selected.id) : [];
 
       setTasks(snapshot.tasks);
@@ -85,6 +85,13 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
     () => threads.find((thread) => thread.id === selectedThreadId) ?? null,
     [selectedThreadId, threads],
   );
+
+  const archivedThreads = useMemo(
+    () => threads.filter((thread) => thread.status === "archived"),
+    [threads],
+  );
+
+  const selectedThreadArchived = selectedThread?.status === "archived";
 
   const threadMissions = useMemo(() => {
     if (!selectedThreadId) return [];
@@ -156,7 +163,7 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
   }
 
   async function renameSelectedThread() {
-    if (!selectedThread || managingThread) return;
+    if (!selectedThread || selectedThreadArchived || managingThread) return;
     const nextTitle = window.prompt("Rename Thread", selectedThread.title)?.trim();
     if (!nextTitle || nextTitle === selectedThread.title) return;
     setManagingThread(true);
@@ -172,7 +179,7 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
   }
 
   async function archiveSelectedThread() {
-    if (!selectedThread || managingThread) return;
+    if (!selectedThread || selectedThreadArchived || managingThread) return;
     if (!window.confirm(`Archive “${selectedThread.title}”? You can keep its history, but it will leave the active Thread list.`)) return;
     setManagingThread(true);
     setError(null);
@@ -195,6 +202,10 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
   async function submitGoal() {
     const message = goal.trim();
     if (!message || submitting) return;
+    if (selectedThreadArchived) {
+      setError("This Thread is archived. Select an active Thread or create a new one to continue working.");
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {
@@ -294,13 +305,38 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
             </button>
           </div>
 
+          {archivedThreads.length > 0 && (
+            <details className="mx-auto mb-4 max-w-xl text-left">
+              <summary className="cursor-pointer text-center text-[10px] font-medium text-zinc-600 transition hover:text-zinc-400">
+                Archived Threads ({archivedThreads.length})
+              </summary>
+              <div className="mt-2 flex flex-wrap justify-center gap-2" aria-label="Archived Threads">
+                {archivedThreads.map((thread) => (
+                  <button
+                    key={thread.id}
+                    type="button"
+                    onClick={() => void selectThread(thread.id)}
+                    aria-pressed={thread.id === selectedThreadId}
+                    className={`rounded-full border px-3 py-1.5 text-[11px] transition ${
+                      thread.id === selectedThreadId
+                        ? "border-white/20 bg-white/[0.07] text-zinc-300"
+                        : "border-white/[0.06] bg-black/10 text-zinc-600 hover:border-white/10 hover:text-zinc-400"
+                    }`}
+                  >
+                    {thread.title} · Archived
+                  </button>
+                ))}
+              </div>
+            </details>
+          )}
+
           <div className="mb-3 flex items-center justify-center gap-2">
             <div className="inline-flex items-center gap-2 rounded-full border border-white/[0.08] bg-black/20 px-3 py-1.5 text-[11px] font-medium text-zinc-400 backdrop-blur">
               <span className={`h-1.5 w-1.5 rounded-full ${status.dot} ${status.ring}`} />
-              {status.label}
+              {selectedThreadArchived ? "Archived history" : status.label}
               {selectedThread && <span className="text-zinc-600">· {selectedThread.title}</span>}
             </div>
-            {selectedThread && (
+            {selectedThread && !selectedThreadArchived && (
               <div className="flex items-center gap-1" aria-label="Selected Thread actions">
                 <button
                   type="button"
@@ -322,10 +358,12 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
             )}
           </div>
           <h1 className="text-balance text-4xl font-semibold tracking-[-0.04em] text-white sm:text-5xl">
-            What are we doing?
+            {selectedThreadArchived ? "Reviewing previous work" : "What are we doing?"}
           </h1>
           <p className="mx-auto mt-4 max-w-xl text-sm leading-6 text-zinc-500">
-            Give Chef the outcome. Chef keeps this conversation and its work together in the selected Thread.
+            {selectedThreadArchived
+              ? "This Thread is archived and read-only. Its conversation and Mission history stay available here."
+              : "Give Chef the outcome. Chef keeps this conversation and its work together in the selected Thread."}
           </p>
 
           <form
@@ -345,15 +383,18 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
                 }
               }}
               rows={3}
-              placeholder="Fix the login bug, investigate the report, prepare a summary…"
-              className="block w-full resize-none bg-transparent px-4 py-3 text-[15px] leading-6 text-zinc-100 outline-none placeholder:text-zinc-700"
+              disabled={selectedThreadArchived}
+              placeholder={selectedThreadArchived ? "Select an active Thread or create a new one to continue working." : "Fix the login bug, investigate the report, prepare a summary…"}
+              className="block w-full resize-none bg-transparent px-4 py-3 text-[15px] leading-6 text-zinc-100 outline-none placeholder:text-zinc-700 disabled:cursor-not-allowed disabled:opacity-50"
               aria-label="Tell Chef what you want to accomplish"
             />
             <div className="flex items-center justify-between border-t border-white/[0.06] px-2 pt-2">
-              <span className="px-2 text-[10px] text-zinc-700">Enter to send · Shift+Enter for a new line</span>
+              <span className="px-2 text-[10px] text-zinc-700">
+                {selectedThreadArchived ? "Archived Threads are read-only" : "Enter to send · Shift+Enter for a new line"}
+              </span>
               <button
                 type="submit"
-                disabled={!goal.trim() || submitting}
+                disabled={!goal.trim() || submitting || selectedThreadArchived}
                 className="rounded-xl bg-red-400 px-4 py-2 text-xs font-bold text-[#190708] transition hover:bg-red-300 disabled:cursor-not-allowed disabled:opacity-30"
               >
                 {submitting ? "Starting…" : "Give to Chef"}
@@ -394,14 +435,14 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
                 </div>
                 <div className="flex shrink-0 items-center gap-2 rounded-full border border-white/[0.07] px-2.5 py-1 text-[10px] text-zinc-500">
                   <span className={`h-1.5 w-1.5 rounded-full ${status.dot}`} />
-                  {status.label}
+                  {selectedThreadArchived ? "Archived" : status.label}
                 </div>
               </div>
 
               <div className="mt-5 space-y-1">
                 {missionTasks.length > 0 ? missionTasks.map((task) => {
                   const presentation = taskPresentation(task.status);
-                  const canRetry = task.status === "failed" || (task.status === "blocked" && !approvalTaskIds.has(task.id));
+                  const canRetry = !selectedThreadArchived && (task.status === "failed" || (task.status === "blocked" && !approvalTaskIds.has(task.id)));
                   return (
                     <div key={task.id} className="flex items-center gap-3 rounded-xl px-3 py-2.5 transition hover:bg-white/[0.025]">
                       <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${presentation.dot}`} />
@@ -422,7 +463,7 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
                   );
                 }) : (
                   <div className="rounded-xl border border-dashed border-white/[0.07] px-4 py-6 text-center text-xs text-zinc-600">
-                    Chef is ready for a new goal in this Thread.
+                    {selectedThreadArchived ? "No retained Mission tasks for this Thread." : "Chef is ready for a new goal in this Thread."}
                   </div>
                 )}
               </div>
@@ -437,7 +478,7 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
             </div>
 
             <div className="space-y-4">
-              {missionApprovals.length > 0 && (
+              {!selectedThreadArchived && missionApprovals.length > 0 && (
                 <div className="rounded-2xl border border-amber-300/20 bg-amber-300/[0.05] p-5">
                   <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-amber-300/60">Needs your attention</div>
                   {missionApprovals.slice(0, 2).map((approval) => (
