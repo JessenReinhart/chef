@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "./api";
 import {
+  archiveThread,
   createThread,
   listThreads,
   loadSelectedThreadId,
+  renameThread,
   saveSelectedThreadId,
   sendThreadMessage,
   threadMessages,
@@ -47,6 +49,7 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
   const [goal, setGoal] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [creatingThread, setCreatingThread] = useState(false);
+  const [managingThread, setManagingThread] = useState(false);
   const [retryingTaskId, setRetryingTaskId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lastReport, setLastReport] = useState<string | null>(null);
@@ -152,6 +155,43 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
     }
   }
 
+  async function renameSelectedThread() {
+    if (!selectedThread || managingThread) return;
+    const nextTitle = window.prompt("Rename Thread", selectedThread.title)?.trim();
+    if (!nextTitle || nextTitle === selectedThread.title) return;
+    setManagingThread(true);
+    setError(null);
+    try {
+      const updated = await renameThread(selectedThread.id, nextTitle);
+      setThreads((current) => current.map((thread) => thread.id === updated.id ? updated : thread));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Chef could not rename this Thread");
+    } finally {
+      setManagingThread(false);
+    }
+  }
+
+  async function archiveSelectedThread() {
+    if (!selectedThread || managingThread) return;
+    if (!window.confirm(`Archive “${selectedThread.title}”? You can keep its history, but it will leave the active Thread list.`)) return;
+    setManagingThread(true);
+    setError(null);
+    try {
+      const archived = await archiveThread(selectedThread.id);
+      const nextThreads = threads.map((thread) => thread.id === archived.id ? archived : thread);
+      const nextActive = nextThreads.find((thread) => thread.status === "active") ?? null;
+      setThreads(nextThreads);
+      setSelectedThreadId(nextActive?.id ?? null);
+      saveSelectedThreadId(nextActive?.id ?? null);
+      setMessages(nextActive ? await threadMessages(nextActive.id) : []);
+      setLastReport(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Chef could not archive this Thread");
+    } finally {
+      setManagingThread(false);
+    }
+  }
+
   async function submitGoal() {
     const message = goal.trim();
     if (!message || submitting) return;
@@ -254,10 +294,32 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
             </button>
           </div>
 
-          <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-white/[0.08] bg-black/20 px-3 py-1.5 text-[11px] font-medium text-zinc-400 backdrop-blur">
-            <span className={`h-1.5 w-1.5 rounded-full ${status.dot} ${status.ring}`} />
-            {status.label}
-            {selectedThread && <span className="text-zinc-600">· {selectedThread.title}</span>}
+          <div className="mb-3 flex items-center justify-center gap-2">
+            <div className="inline-flex items-center gap-2 rounded-full border border-white/[0.08] bg-black/20 px-3 py-1.5 text-[11px] font-medium text-zinc-400 backdrop-blur">
+              <span className={`h-1.5 w-1.5 rounded-full ${status.dot} ${status.ring}`} />
+              {status.label}
+              {selectedThread && <span className="text-zinc-600">· {selectedThread.title}</span>}
+            </div>
+            {selectedThread && (
+              <div className="flex items-center gap-1" aria-label="Selected Thread actions">
+                <button
+                  type="button"
+                  onClick={() => void renameSelectedThread()}
+                  disabled={managingThread}
+                  className="rounded-lg border border-white/[0.08] px-2 py-1 text-[10px] text-zinc-500 transition hover:border-white/15 hover:text-zinc-200 disabled:opacity-40"
+                >
+                  Rename
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void archiveSelectedThread()}
+                  disabled={managingThread}
+                  className="rounded-lg border border-white/[0.08] px-2 py-1 text-[10px] text-zinc-600 transition hover:border-rose-300/20 hover:text-rose-300 disabled:opacity-40"
+                >
+                  Archive
+                </button>
+              </div>
+            )}
           </div>
           <h1 className="text-balance text-4xl font-semibold tracking-[-0.04em] text-white sm:text-5xl">
             What are we doing?
