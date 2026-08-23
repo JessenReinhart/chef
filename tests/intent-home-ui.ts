@@ -23,6 +23,13 @@ assert.match(home, /renameSelectedThread\(\)/, "Thread rename must be available 
 assert.match(home, /archiveSelectedThread\(\)/, "Thread archive must be available directly from Home");
 assert.match(home, /nextThreads\.find\(\(thread\) => thread\.status === "active"\)/, "archiving the selected Thread must move selection to another active Thread when possible");
 assert.match(home, /saveSelectedThreadId\(nextActive\?\.id \?\? null\)/, "archiving must not leave an archived Thread persisted as the active selection");
+assert.match(home, /const selected = listedThreads\.find\(\(thread\) => thread\.id === rememberedId\) \?\? activeThreads\[0\] \?\? null/, "refresh must preserve an explicitly selected archived Thread instead of silently replacing it");
+assert.match(home, /threads\.filter\(\(thread\) => thread\.status === "archived"\)/, "Simple Mode must derive archived Threads from the durable Thread list");
+assert.match(home, /Archived Threads \(\{archivedThreads\.length\}\)/, "archived history must have a discoverable secondary navigation surface");
+assert.match(home, /\{thread\.title\} · Archived/, "archived Threads must be visibly distinguished from active work");
+assert.match(home, /selectedThread\?\.status === "archived"/, "Home must track when the selected Thread is archived");
+assert.match(home, /This Thread is archived\. Select an active Thread or create a new one to continue working\./, "submitting into an archived Thread must be guarded in product language");
+assert.match(home, /disabled=\{selectedThreadArchived\}/, "the primary composer must be disabled while archived history is selected");
 assert.match(home, /mission\.metadata\?\.threadId === selectedThreadId/, "Mission status on Home must be scoped to the selected Thread");
 assert.match(home, /Recent conversation/, "selected Thread history must be visible without opening Workbench");
 assert.match(home, /saveSelectedThreadId/, "selected Thread should survive reload when possible");
@@ -56,4 +63,4 @@ assert.match(rooms, /if \(!open \|\| !selectedChannel\)/, "closed Rooms should n
 const threadSendCalls = home.match(/sendThreadMessage\(/g) ?? [];
 assert.equal(threadSendCalls.length, 1, "the default home should have one authoritative Thread-scoped Chef intent submission path");
 
-console.log("intent-home-ui: ok — Chef teaches one Thread-scoped intent flow with lifecycle, recovery, and Workbench behind progressive depth");
+console.log("intent-home-ui: ok — Chef teaches one Thread-scoped intent flow with lifecycle, recovery, archived history, and Workbench behind progressive depth");
