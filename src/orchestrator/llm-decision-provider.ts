@@ -405,8 +405,25 @@ ${typesList}
 Task-capable workers currently available:
 ${workersList}
 
+Required JSON shape:
+{
+  "goal": "optional restatement of the user goal",
+  "tasks": [
+    {
+      "id": "unique UUID",
+      "title": "short human-readable task title",
+      "description": "complete executable instruction for the worker",
+      "dependencies": [],
+      "priority": 1,
+      "nodeType": "agent.llm",
+      "assignedTo": "optional worker id from the list above"
+    }
+  ]
+}
+Do not wrap this object inside a top-level \"plan\" property. Do not rename \"description\" to \"prompt\".
+
 Rules:
-1. Output ONLY valid JSON matching the Plan schema.
+1. Output ONLY valid JSON matching the Plan schema above.
 2. Every task MUST include nodeType and it MUST be one of the Mission task types above.
 3. nodeType describes the kind of work. assignedTo is a worker identity. Never put a node type in assignedTo.
 4. assignedTo may be omitted to let the runtime route deterministically. If supplied, it MUST be one of the worker IDs above.
@@ -544,7 +561,16 @@ Return a Plan with tasks that achieve this goal.`;
 
 	#parsePlan(jsonStr: string, workspaceId: WorkspaceId, goal: string, availableWorkerIds: string[]): Plan {
 		const parsed = parseModelJsonObject(jsonStr);
-		const rawTasks = parsed.tasks;
+		// Some OpenAI-compatible models wrap an otherwise valid Plan as
+		// { "plan": { ... } }. Treat that as transport variance only when the
+		// canonical top-level tasks array is absent; runtime validation below
+		// remains authoritative for the unwrapped payload.
+		const planObject = Array.isArray(parsed.tasks)
+			? parsed
+			: parsed.plan !== undefined
+				? asJsonObject(parsed.plan)
+				: parsed;
+		const rawTasks = planObject.tasks;
 
 		if (!Array.isArray(rawTasks)) {
 			throw new Error("Invalid plan: missing tasks array");
@@ -567,10 +593,21 @@ Return a Plan with tasks that achieve this goal.`;
 			if (explicitWorker && !workerIds.has(explicitWorker)) {
 				throw new Error(`Worker is not available for Mission execution: ${explicitWorker}`);
 			}
+			const description = typeof task.description === "string" && task.description.trim().length > 0
+				? task.description
+				: typeof task.prompt === "string"
+					? task.prompt
+					: "";
+			if (!description.trim()) {
+				throw new Error("Invalid plan: every task requires description or prompt");
+			}
+			const title = typeof task.title === "string" && task.title.trim().length > 0
+				? task.title
+				: "Execute Mission task";
 			return {
 				id: String(task.id ?? crypto.randomUUID()),
-				title: String(task.title ?? "Untitled"),
-				description: String(task.description ?? ""),
+				title,
+				description,
 				dependencies: Array.isArray(task.dependencies) ? task.dependencies.map(String) : [],
 				priority: typeof task.priority === "number" ? task.priority : 0,
 				nodeType,
