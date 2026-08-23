@@ -1,5 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "./api";
+import {
+  createThread,
+  listThreads,
+  loadSelectedThreadId,
+  saveSelectedThreadId,
+  sendThreadMessage,
+  threadMessages,
+  type UiThread,
+} from "./threadApi";
 import type { ChatMessage, UiMission, UiTask } from "./types";
 
 type Approval = { id: string; reason: string; taskId: string; status: string };
@@ -23,29 +32,45 @@ function missionPresentation(state: HomeState): { label: string; dot: string; ri
   return { label: "Ready", dot: "bg-slate-500", ring: "" };
 }
 
+function titleFromMessage(message: string): string {
+  const normalized = message.replace(/\s+/g, " ").trim();
+  return normalized.length <= 48 ? normalized : `${normalized.slice(0, 45)}…`;
+}
+
 export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void }) {
   const [tasks, setTasks] = useState<UiTask[]>([]);
   const [missions, setMissions] = useState<UiMission[]>([]);
   const [approvals, setApprovals] = useState<Approval[]>([]);
+  const [threads, setThreads] = useState<UiThread[]>([]);
+  const [selectedThreadId, setSelectedThreadId] = useState<string | null>(() => loadSelectedThreadId());
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [goal, setGoal] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [creatingThread, setCreatingThread] = useState(false);
   const [retryingTaskId, setRetryingTaskId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lastReport, setLastReport] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
-      const [snapshot, chatMessages] = await Promise.all([api.stateRaw(), api.chatMessages()]);
+      const [snapshot, listedThreads] = await Promise.all([api.stateRaw(), listThreads()]);
+      const activeThreads = listedThreads.filter((thread) => thread.status === "active");
+      const rememberedId = selectedThreadId ?? loadSelectedThreadId();
+      const selected = activeThreads.find((thread) => thread.id === rememberedId) ?? activeThreads[0] ?? null;
+      const selectedMessages = selected ? await threadMessages(selected.id) : [];
+
       setTasks(snapshot.tasks);
       setMissions(snapshot.missions ?? []);
       setApprovals(snapshot.approvals.filter((approval) => approval.status === "pending"));
-      setMessages(chatMessages);
+      setThreads(listedThreads);
+      setMessages(selectedMessages);
+      setSelectedThreadId(selected?.id ?? null);
+      saveSelectedThreadId(selected?.id ?? null);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Chef could not refresh the workspace");
     }
-  }, []);
+  }, [selectedThreadId]);
 
   useEffect(() => {
     void refresh();
@@ -53,19 +78,29 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
     return () => window.clearInterval(timer);
   }, [refresh]);
 
+  const selectedThread = useMemo(
+    () => threads.find((thread) => thread.id === selectedThreadId) ?? null,
+    [selectedThreadId, threads],
+  );
+
+  const threadMissions = useMemo(() => {
+    if (!selectedThreadId) return [];
+    return missions.filter((mission) => mission.metadata?.threadId === selectedThreadId);
+  }, [missions, selectedThreadId]);
+
   const latestMission = useMemo(
-    () => [...missions].sort((a, b) => b.updatedAt - a.updatedAt)[0] ?? null,
-    [missions],
+    () => [...threadMissions].sort((a, b) => b.updatedAt - a.updatedAt)[0] ?? null,
+    [threadMissions],
   );
 
   const missionTasks = useMemo(() => {
-    if (!latestMission) return tasks.slice(-5).reverse();
+    if (!latestMission) return [];
     const ids = new Set(latestMission.taskIds);
     return tasks.filter((task) => ids.has(task.id)).slice(-6).reverse();
   }, [latestMission, tasks]);
 
   const missionApprovals = useMemo(() => {
-    if (!latestMission) return approvals;
+    if (!latestMission) return [];
     const ids = new Set(latestMission.taskIds);
     return approvals.filter((approval) => ids.has(approval.taskId));
   }, [approvals, latestMission]);
@@ -88,13 +123,50 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
     [messages],
   );
 
+  async function selectThread(threadId: string) {
+    saveSelectedThreadId(threadId);
+    setSelectedThreadId(threadId);
+    setLastReport(null);
+    try {
+      setMessages(await threadMessages(threadId));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Chef could not open this Thread");
+    }
+  }
+
+  async function startNewThread() {
+    if (creatingThread) return;
+    setCreatingThread(true);
+    setError(null);
+    try {
+      const thread = await createThread("New thread");
+      setThreads((current) => [...current, thread]);
+      saveSelectedThreadId(thread.id);
+      setSelectedThreadId(thread.id);
+      setMessages([]);
+      setLastReport(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Chef could not create a Thread");
+    } finally {
+      setCreatingThread(false);
+    }
+  }
+
   async function submitGoal() {
     const message = goal.trim();
     if (!message || submitting) return;
     setSubmitting(true);
     setError(null);
     try {
-      const result = await api.chat(message);
+      let threadId = selectedThreadId;
+      if (!threadId) {
+        const thread = await createThread(titleFromMessage(message));
+        setThreads((current) => [...current, thread]);
+        threadId = thread.id;
+        saveSelectedThreadId(thread.id);
+        setSelectedThreadId(thread.id);
+      }
+      const result = await sendThreadMessage(threadId, message);
       setGoal("");
       setLastReport(result.report || null);
       await refresh();
@@ -154,17 +226,44 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
         </button>
       </header>
 
-      <main className="relative z-10 mx-auto flex w-full max-w-4xl flex-col px-6 pb-16 pt-[8vh] sm:pt-[11vh]">
+      <main className="relative z-10 mx-auto flex w-full max-w-4xl flex-col px-6 pb-16 pt-[7vh] sm:pt-[9vh]">
         <section className="mx-auto w-full max-w-3xl text-center">
+          <div className="mb-4 flex items-center justify-center gap-2 overflow-x-auto pb-1" aria-label="Conversation Threads">
+            {threads.filter((thread) => thread.status === "active").map((thread) => (
+              <button
+                key={thread.id}
+                type="button"
+                onClick={() => void selectThread(thread.id)}
+                aria-pressed={thread.id === selectedThreadId}
+                className={`shrink-0 rounded-full border px-3 py-1.5 text-[11px] transition ${
+                  thread.id === selectedThreadId
+                    ? "border-red-300/30 bg-red-300/[0.09] text-red-200"
+                    : "border-white/[0.08] bg-black/20 text-zinc-500 hover:border-white/15 hover:text-zinc-300"
+                }`}
+              >
+                {thread.title}
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={() => void startNewThread()}
+              disabled={creatingThread}
+              className="shrink-0 rounded-full border border-dashed border-white/10 px-3 py-1.5 text-[11px] text-zinc-500 transition hover:border-red-300/30 hover:text-red-200 disabled:opacity-40"
+            >
+              {creatingThread ? "Creating…" : "+ New thread"}
+            </button>
+          </div>
+
           <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-white/[0.08] bg-black/20 px-3 py-1.5 text-[11px] font-medium text-zinc-400 backdrop-blur">
             <span className={`h-1.5 w-1.5 rounded-full ${status.dot} ${status.ring}`} />
             {status.label}
+            {selectedThread && <span className="text-zinc-600">· {selectedThread.title}</span>}
           </div>
           <h1 className="text-balance text-4xl font-semibold tracking-[-0.04em] text-white sm:text-5xl">
             What are we doing?
           </h1>
           <p className="mx-auto mt-4 max-w-xl text-sm leading-6 text-zinc-500">
-            Give Chef the outcome. Chef will coordinate the work and surface only what needs you.
+            Give Chef the outcome. Chef keeps this conversation and its work together in the selected Thread.
           </p>
 
           <form
@@ -200,6 +299,20 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
             </div>
           </form>
 
+          {messages.length > 0 && (
+            <div className="mt-4 rounded-2xl border border-white/[0.07] bg-black/20 p-4 text-left" aria-label="Selected Thread history">
+              <div className="mb-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-600">Recent conversation</div>
+              <div className="space-y-2">
+                {messages.slice(-4).map((message, index) => (
+                  <div key={`${message.timestamp}-${index}`} className="flex gap-2 text-xs leading-5">
+                    <span className="w-9 shrink-0 text-[10px] font-semibold uppercase text-zinc-600">{message.role === "user" ? "You" : "Chef"}</span>
+                    <span className="line-clamp-2 text-zinc-400">{message.content}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {error && (
             <div className="mt-3 rounded-xl border border-rose-400/20 bg-rose-400/[0.06] px-4 py-3 text-left text-xs text-rose-300" role="alert">
               {error}
@@ -214,7 +327,7 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
                 <div className="min-w-0">
                   <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-600">Current work</div>
                   <h2 className="mt-2 truncate text-base font-semibold text-zinc-100">
-                    {latestMission?.goal ?? "Workspace activity"}
+                    {latestMission?.goal ?? "Thread activity"}
                   </h2>
                 </div>
                 <div className="flex shrink-0 items-center gap-2 rounded-full border border-white/[0.07] px-2.5 py-1 text-[10px] text-zinc-500">
@@ -247,7 +360,7 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
                   );
                 }) : (
                   <div className="rounded-xl border border-dashed border-white/[0.07] px-4 py-6 text-center text-xs text-zinc-600">
-                    Chef is ready for a new goal.
+                    Chef is ready for a new goal in this Thread.
                   </div>
                 )}
               </div>
