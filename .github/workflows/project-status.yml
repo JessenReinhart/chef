@@ -1,6 +1,10 @@
 name: Sync GitHub Project status
 
 on:
+  push:
+    branches: [master]
+    paths:
+      - .github/workflows/project-status.yml
   issues:
     types: [opened, reopened, closed]
   issue_comment:
@@ -110,6 +114,14 @@ jobs:
             const statusOption = (status) => statusField.options.find(
               (option) => normalizeStatus(option.name) === normalizeStatus(status),
             );
+            const markerNames = {
+              backlog: 'Backlog',
+              ready: 'Ready',
+              'in-progress': 'In progress',
+              'in-review': 'In review',
+              done: 'Done',
+            };
+            const trustedAssociations = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
 
             async function findProjectItem(issueNodeId) {
               const result = await github.graphql(`
@@ -199,14 +211,70 @@ jobs:
               return result.repository?.pullRequest?.closingIssuesReferences?.nodes ?? [];
             }
 
+            async function backfillOpenIssues() {
+              const items = await github.paginate(github.rest.issues.listForRepo, {
+                owner: repoOwner,
+                repo,
+                state: 'open',
+                per_page: 100,
+              });
+              const issues = items.filter((item) => !item.pull_request);
+              const statuses = new Map();
+
+              for (const issue of issues) {
+                let status = trustedAssociations.has(issue.author_association) ? 'Ready' : 'Backlog';
+                const comments = await github.paginate(github.rest.issues.listComments, {
+                  owner: repoOwner,
+                  repo,
+                  issue_number: issue.number,
+                  per_page: 100,
+                });
+                for (const comment of comments) {
+                  if (!trustedAssociations.has(comment.author_association)) continue;
+                  const marker = comment.body?.match(
+                    /<!--\s*project-status:(backlog|ready|in-progress|in-review|done)\s*-->/i,
+                  );
+                  if (marker) status = markerNames[marker[1].toLowerCase()];
+                }
+                statuses.set(issue.node_id, status);
+              }
+
+              // Open linked PRs are authoritative over the baseline/marker snapshot.
+              // Ready PRs map to In review; drafts map to In progress.
+              const pulls = await github.paginate(github.rest.pulls.list, {
+                owner: repoOwner,
+                repo,
+                state: 'open',
+                per_page: 100,
+              });
+              for (const pr of pulls) {
+                const linkedIssues = await getClosingIssues(pr.number);
+                const status = pr.draft ? 'In progress' : 'In review';
+                for (const issue of linkedIssues) {
+                  if (issue.state === 'OPEN') statuses.set(issue.id, status);
+                }
+              }
+
+              core.info(`Backfilling ${statuses.size} open issue(s) into '${project.title}'.`);
+              for (const [id, status] of statuses) {
+                await setIssueStatus(id, status);
+              }
+            }
+
             const event = context.eventName;
             const action = context.payload.action;
             const updates = [];
 
+            // This path-scoped push runs when this workflow changes. It makes the
+            // board self-healing after setup/fixes without re-adding historical closed
+            // issues or spamming issue comments merely to trigger synchronization.
+            if (event === 'push') {
+              await backfillOpenIssues();
+              return;
+            }
+
             if (event === 'issues') {
-              const trusted = ['OWNER', 'MEMBER', 'COLLABORATOR'].includes(
-                context.payload.issue.author_association,
-              );
+              const trusted = trustedAssociations.has(context.payload.issue.author_association);
               const status = action === 'closed'
                 ? 'Done'
                 : trusted ? 'Ready' : 'Backlog';
@@ -218,9 +286,7 @@ jobs:
                 core.info('Ignoring project-status marker on a pull request comment.');
                 return;
               }
-              const trusted = ['OWNER', 'MEMBER', 'COLLABORATOR'].includes(
-                context.payload.comment.author_association,
-              );
+              const trusted = trustedAssociations.has(context.payload.comment.author_association);
               if (!trusted) {
                 core.info('Ignoring project-status marker from an untrusted commenter.');
                 return;
@@ -233,14 +299,7 @@ jobs:
                 core.info('No project-status marker found.');
                 return;
               }
-              const names = {
-                backlog: 'Backlog',
-                ready: 'Ready',
-                'in-progress': 'In progress',
-                'in-review': 'In review',
-                done: 'Done',
-              };
-              updates.push({ id: context.payload.issue.node_id, status: names[marker[1].toLowerCase()] });
+              updates.push({ id: context.payload.issue.node_id, status: markerNames[marker[1].toLowerCase()] });
             }
 
             if (event === 'pull_request_target') {
