@@ -34,7 +34,6 @@ jobs:
     runs-on: ubuntu-latest
     env:
       PROJECTS_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
-      PROJECT_OWNER: JessenReinhart
       PROJECT_TITLE: Chef
     steps:
       - name: Check project token
@@ -50,14 +49,16 @@ jobs:
         with:
           github-token: ${{ secrets.PROJECTS_TOKEN }}
           script: |
-            const owner = process.env.PROJECT_OWNER;
             const projectTitle = process.env.PROJECT_TITLE;
             const { owner: repoOwner, repo } = context.repo;
 
+            // Resolve the Project through the repository link instead of the user's
+            // project list. Projects v2 may be user- or organization-owned, while
+            // repository.projectsV2 consistently returns projects linked to this repo.
             const projectResult = await github.graphql(`
-              query($login: String!, $projectSearch: String!) {
-                user(login: $login) {
-                  projectsV2(first: 50, query: $projectSearch) {
+              query($owner: String!, $repo: String!) {
+                repository(owner: $owner, name: $repo) {
+                  projectsV2(first: 50) {
                     nodes {
                       id
                       title
@@ -74,21 +75,34 @@ jobs:
                   }
                 }
               }
-            `, { login: owner, projectSearch: projectTitle });
+            `, { owner: repoOwner, repo });
 
-            const project = projectResult.user?.projectsV2?.nodes?.find(
+            const linkedProjects = projectResult.repository?.projectsV2?.nodes ?? [];
+            const exactProject = linkedProjects.find(
               (candidate) => candidate.title?.toLowerCase() === projectTitle.toLowerCase(),
             );
+            const project = exactProject ?? (linkedProjects.length === 1 ? linkedProjects[0] : null);
+
             if (!project) {
-              core.setFailed(`GitHub Project '${projectTitle}' was not found under @${owner}.`);
+              const linkedTitles = linkedProjects.map((candidate) => candidate.title).filter(Boolean);
+              core.setFailed(
+                linkedTitles.length === 0
+                  ? `No GitHub Projects are linked to ${repoOwner}/${repo}. Link the Chef Project to this repository first.`
+                  : `GitHub Project '${projectTitle}' was not found among projects linked to ${repoOwner}/${repo}. Linked projects: ${linkedTitles.join(', ')}`,
+              );
               return;
             }
+
+            if (!exactProject && linkedProjects.length === 1) {
+              core.warning(`Project '${projectTitle}' was not found by title; using the only linked project '${project.title}'.`);
+            }
+            core.info(`Using GitHub Project '${project.title}' (${project.id}).`);
 
             const statusField = project.fields.nodes.find(
               (field) => field?.name?.toLowerCase() === 'status' && Array.isArray(field.options),
             );
             if (!statusField) {
-              core.setFailed(`Project '${projectTitle}' has no single-select Status field.`);
+              core.setFailed(`Project '${project.title}' has no single-select Status field.`);
               return;
             }
 
@@ -138,7 +152,7 @@ jobs:
             async function setIssueStatus(issueNodeId, status) {
               const option = statusOption(status);
               if (!option) {
-                throw new Error(`Status '${status}' does not exist in project '${projectTitle}'.`);
+                throw new Error(`Status '${status}' does not exist in project '${project.title}'.`);
               }
               const itemId = await ensureProjectItem(issueNodeId);
               await github.graphql(`
