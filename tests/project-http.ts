@@ -3,8 +3,16 @@ import { mkdtemp, mkdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "node:http";
-import { createProjectServer } from "../src/server/project-http.ts";
+import { createProjectServer, findLinuxDirectoryPicker } from "../src/server/project-http.ts";
 import type { ChefRuntime } from "../src/main.ts";
+
+const zenityPicker = await findLinuxDirectoryPicker(async (command) => command === "zenity");
+assert.equal(zenityPicker?.command, "zenity");
+assert.deepEqual(zenityPicker?.args.slice(0, 2), ["--file-selection", "--directory"]);
+
+const kdialogPicker = await findLinuxDirectoryPicker(async (command) => command === "kdialog");
+assert.equal(kdialogPicker?.command, "kdialog");
+assert.equal(await findLinuxDirectoryPicker(async () => false), null);
 
 const dir = await mkdtemp(join(tmpdir(), "chef-project-http-"));
 const current = join(dir, "current");
@@ -19,6 +27,7 @@ const base = createServer((_req, res) => { res.writeHead(418); res.end("base"); 
 const server = createProjectServer(runtime, base, {
   recentProjectsPath: recents,
   pickDirectory: async () => next,
+  canPickDirectory: async () => true,
   onOpenProject: async (path) => { opened = path; },
 });
 
@@ -28,9 +37,10 @@ assert.ok(address && typeof address === "object");
 const origin = `http://127.0.0.1:${address.port}`;
 
 try {
-  const state = await fetch(`${origin}/api/project`).then((response) => response.json()) as { data: { path: string; recent: unknown[] } };
+  const state = await fetch(`${origin}/api/project`).then((response) => response.json()) as { data: { path: string; recent: unknown[]; nativePicker: boolean } };
   assert.equal(state.data.path, current);
   assert.deepEqual(state.data.recent, []);
+  assert.equal(state.data.nativePicker, true);
 
   const invalid = await fetch(`${origin}/api/project/open`, {
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: join(dir, "missing") }),
