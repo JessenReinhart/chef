@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import type {
   AgentId,
   Approval,
@@ -10,6 +11,7 @@ import type {
   Mission,
   AutomationRun,
   OrchestratorResult,
+  PlanProposalContext,
   RuntimeEvent,
   Session,
   TaskId,
@@ -98,12 +100,14 @@ export interface LLMStatus {
   model: string | null;
 }
 
+type MissionPlanningContext = Pick<PlanProposalContext, "threadId" | "recentMessages">;
+
 export interface ChefRuntime {
   readonly workspaceId: WorkspaceId;
   readonly repository: Repository;
   readonly projectDir: string;
   start(): Promise<void>;
-  sendUserMessage(message: string): Promise<OrchestratorResult>;
+  sendUserMessage(message: string, context?: MissionPlanningContext): Promise<OrchestratorResult>;
   /** Retry a failed/blocked task through the scheduler's retry budget. */
   retryTask(taskId: TaskId): Promise<void>;
   /** Send a chat message and stream assistant replies via SSE. */
@@ -246,15 +250,20 @@ export function createChef(options: {
     model: llmConfigured ? llmConfig.model : null,
   };
 
+  // Thread planning context is request-scoped so concurrent sends cannot leak
+  // conversational history into each other's planner calls.
+  const planningContext = new AsyncLocalStorage<MissionPlanningContext>();
+
   // Use LLM provider from env if configured, otherwise use provided or scripted.
-  // The wrapper injects live worker readiness at proposal time so LLM plans can
-  // separate nodeType from the actual worker identity.
+  // The wrapper injects live worker readiness and request-scoped Thread context
+  // at proposal time so LLM plans can separate continuity from runtime state.
   const llmProvider = options.decisionProvider ?? createLLMDecisionProvider();
   const scripted = llmProvider ?? new ScriptedDecisionProvider();
   const provider: OrchestratorDecisionProvider = {
     name: scripted.name,
     proposePlan: (input) => scripted.proposePlan({
       ...input,
+      ...planningContext.getStore(),
       availableWorkers: specializedHarnesses.detections()
         .filter((worker) => worker.available && worker.taskCapable)
         .map((worker) => ({ id: worker.id, name: worker.name, type: worker.type })),
@@ -422,8 +431,8 @@ export function createChef(options: {
         // MCP servers are optional — absence must not break startup.
       }
     },
-    sendUserMessage(message: string): Promise<OrchestratorResult> {
-      return orchestrator.handleUserMessage(workspaceId, message);
+    sendUserMessage(message: string, context?: MissionPlanningContext): Promise<OrchestratorResult> {
+      return planningContext.run(context ?? {}, () => orchestrator.handleUserMessage(workspaceId, message));
     },
     sendChatMessage(message: string): Promise<OrchestratorResult> {
       return orchestrator.handleChatMessage(workspaceId, message);

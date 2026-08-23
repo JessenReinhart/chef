@@ -277,9 +277,20 @@ export interface AvailableWorker {
   type: string;
 }
 
+/** One bounded prior conversational turn supplied to Mission planning. */
+export interface ThreadMessageContext {
+  role: "user" | "assistant" | "system";
+  content: string;
+  timestamp: Timestamp;
+}
+
 export interface PlanProposalContext {
   workspaceId: WorkspaceId;
+  /** Durable conversation boundary that originated this planning request. */
+  threadId?: string;
   goal: string;
+  /** Bounded same-Thread history, ordered oldest to newest and excluding the current turn. */
+  recentMessages?: ThreadMessageContext[];
   contextRefs?: ContextReference[];
   events?: RuntimeEvent[];
   /** Live, task-capable workers that the runtime allows the planner to target. */

@@ -4,6 +4,7 @@ import { createServer } from "node:http";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
+import type { ThreadMessageContext } from "../src/core/types.ts";
 import { createChatRepository } from "../src/persistence/chat.ts";
 import { Repository } from "../src/persistence/database.ts";
 import { createThreadRepository } from "../src/persistence/threads.ts";
@@ -17,11 +18,16 @@ repository.createWorkspace({ id: "workspace-b", name: "Workspace B" });
 const threads = createThreadRepository(repository);
 const chat = createChatRepository(repository);
 const foreignThread = threads.create({ workspaceId: "workspace-b", title: "Private work" });
+const planningCalls: Array<{
+  message: string;
+  context?: { threadId?: string; recentMessages?: ThreadMessageContext[] };
+}> = [];
 
 const runtime = {
   workspaceId: "workspace-a",
   repository,
-  sendUserMessage(message: string) {
+  sendUserMessage(message: string, context?: { threadId?: string; recentMessages?: ThreadMessageContext[] }) {
+    planningCalls.push({ message, context });
     repository.insertMission({ workspaceId: "workspace-a", goal: message, status: "planning", createdBy: "user" });
     return Promise.resolve({ workspaceId: "workspace-a", taskIds: [] as string[], report: `Completed: ${message}`, ok: true });
   },
@@ -86,6 +92,23 @@ try {
   const linkedMission = repository.getMission(sendBody.data.missionId!);
   assert.equal(linkedMission?.metadata.threadId, secondThread.id, "chat-created Mission must retain its originating Thread");
 
+  const followUpPlanningCall = planningCalls.at(-1);
+  assert.equal(followUpPlanningCall?.message, "Keep the filters from before");
+  assert.equal(followUpPlanningCall?.context?.threadId, secondThread.id, "planning must retain the selected Thread identity");
+  assert.deepEqual(
+    followUpPlanningCall?.context?.recentMessages?.map((message) => message.content),
+    ["Redesign dashboard"],
+    "planning must receive same-Thread history that existed before the current turn",
+  );
+  assert.ok(
+    !followUpPlanningCall?.context?.recentMessages?.some((message) => message.content === "Keep the filters from before"),
+    "current user turn must not be duplicated inside recent-message context",
+  );
+  assert.ok(
+    !followUpPlanningCall?.context?.recentMessages?.some((message) => message.content === "Keep email login"),
+    "planning must not receive sibling Thread history",
+  );
+
   const continuedHistoryResponse = await fetch(`${origin}/api/threads/${secondThread.id}/messages`);
   assert.equal(continuedHistoryResponse.status, 200);
   const continuedHistoryBody = await continuedHistoryResponse.json() as { data: Array<{ role: string; content: string; metadata?: Record<string, unknown> }> };
@@ -112,6 +135,38 @@ try {
     new Set(listBody.data.map((thread) => thread.id)),
     new Set([createdBody.data.id, secondThread.id]),
     "thread list must not leak sibling workspace data",
+  );
+
+  const boundedThread = threads.create({ workspaceId: "workspace-a", title: "Long context" });
+  for (let index = 0; index < 10; index += 1) {
+    chat.insert({
+      workspaceId: "workspace-a",
+      threadId: boundedThread.id,
+      role: index % 2 === 0 ? "user" : "assistant",
+      content: `context-${index}`,
+      timestamp: 1_000 + index,
+    });
+  }
+  const boundedSendResponse = await fetch(`${origin}/api/threads/${boundedThread.id}/chat`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ message: "Use the latest context" }),
+  });
+  assert.equal(boundedSendResponse.status, 200);
+  const boundedPlanningCall = planningCalls.at(-1);
+  assert.equal(boundedPlanningCall?.context?.threadId, boundedThread.id);
+  assert.deepEqual(
+    boundedPlanningCall?.context?.recentMessages?.map((message) => message.content),
+    ["context-2", "context-3", "context-4", "context-5", "context-6", "context-7", "context-8", "context-9"],
+    "planning context must deterministically keep only the latest eight prior Thread messages",
+  );
+  assert.ok(
+    !boundedPlanningCall?.context?.recentMessages?.some((message) => message.content === "Use the latest context"),
+    "bounded planning context must still exclude the current goal",
+  );
+  assert.ok(
+    !boundedPlanningCall?.context?.recentMessages?.some((message) => ["Keep email login", "Redesign dashboard"].includes(message.content)),
+    "bounded planning context must not include sibling Thread messages",
   );
 
   const getResponse = await fetch(`${origin}/api/threads/${createdBody.data.id}`);
@@ -177,7 +232,7 @@ try {
   const fallback = await fetch(`${origin}/api/state`);
   assert.equal(fallback.status, 200);
   assert.deepEqual(await fallback.json(), { fallback: "/api/state" });
-  console.log("thread-http: ok — CRUD, isolated history, and Thread-scoped sends are workspace scoped");
+  console.log("thread-http: ok — CRUD, isolated history, and bounded Thread planning context are workspace scoped");
 } finally {
   await new Promise<void>((resolve) => server.close(() => resolve()));
   repository.close();
