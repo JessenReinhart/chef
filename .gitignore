@@ -8,3 +8,4 @@ dist/
 *.tsbuildinfo
 Chef.lnk
 web/public/chef-icon.svg
+.chef-debug/
