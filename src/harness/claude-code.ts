@@ -18,8 +18,10 @@ export class ClaudeCodeHarness extends SpecializedCliHarness {
       type: "claude-code",
       name: "Claude Code",
       binary,
-      flags: ["--no-telemetry"],
-      taskArgs: (prompt) => ["--no-telemetry", "-p", prompt],
+      // Claude Code no longer accepts the old --no-telemetry CLI flag.
+      // Keep telemetry disabled through the supported environment variable
+      // instead, and use print mode for bounded non-interactive Mission work.
+      taskArgs: (prompt) => ["-p", prompt],
       env: { CLAUDE_CODE_DISABLE_TELEMETRY: "1" },
       ...runtime,
     });
