@@ -269,6 +269,12 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
     }
   }
 
+  function prepareCancelledMissionFollowup() {
+    if (!latestMission || latestMission.status !== "cancelled" || !selectedThreadId) return;
+    setGoal(`Continue this work: ${latestMission.goal}`);
+    setError(null);
+  }
+
   return (
     <div className="relative h-screen w-screen overflow-auto bg-[#09090b] text-zinc-100 selection:bg-red-400 selection:text-black">
       <div
@@ -286,41 +292,16 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
             <div className="text-[10px] text-zinc-600">Local AI workspace</div>
           </div>
         </div>
-        <button
-          type="button"
-          onClick={onOpenWorkbench}
-          className="rounded-lg border border-white/10 bg-white/[0.035] px-3 py-2 text-xs font-medium text-zinc-400 transition hover:border-white/20 hover:bg-white/[0.07] hover:text-zinc-100"
-        >
-          Open Workbench
-        </button>
+        <button type="button" onClick={onOpenWorkbench} className="rounded-lg border border-white/10 bg-white/[0.035] px-3 py-2 text-xs font-medium text-zinc-400 transition hover:border-white/20 hover:bg-white/[0.07] hover:text-zinc-100">Open Workbench</button>
       </header>
 
       <main className="relative z-10 mx-auto flex w-full max-w-4xl flex-col px-6 pb-16 pt-[7vh] sm:pt-[9vh]">
         <section className="mx-auto w-full max-w-3xl text-center">
           <div className="mb-4 flex items-center justify-center gap-2 overflow-x-auto pb-1" aria-label="Conversation Threads">
             {threads.filter((thread) => thread.status === "active").map((thread) => (
-              <button
-                key={thread.id}
-                type="button"
-                onClick={() => void selectThread(thread.id)}
-                aria-pressed={thread.id === selectedThreadId}
-                className={`shrink-0 rounded-full border px-3 py-1.5 text-[11px] transition ${
-                  thread.id === selectedThreadId
-                    ? "border-red-300/30 bg-red-300/[0.09] text-red-200"
-                    : "border-white/[0.08] bg-black/20 text-zinc-500 hover:border-white/15 hover:text-zinc-300"
-                }`}
-              >
-                {thread.title}
-              </button>
+              <button key={thread.id} type="button" onClick={() => void selectThread(thread.id)} aria-pressed={thread.id === selectedThreadId} className={`shrink-0 rounded-full border px-3 py-1.5 text-[11px] transition ${thread.id === selectedThreadId ? "border-red-300/30 bg-red-300/[0.09] text-red-200" : "border-white/[0.08] bg-black/20 text-zinc-500 hover:border-white/15 hover:text-zinc-300"}`}>{thread.title}</button>
             ))}
-            <button
-              type="button"
-              onClick={() => void startNewThread()}
-              disabled={creatingThread}
-              className="shrink-0 rounded-full border border-dashed border-white/10 px-3 py-1.5 text-[11px] text-zinc-500 transition hover:border-red-300/30 hover:text-red-200 disabled:opacity-40"
-            >
-              {creatingThread ? "Creating…" : "+ New thread"}
-            </button>
+            <button type="button" onClick={() => void startNewThread()} disabled={creatingThread} className="shrink-0 rounded-full border border-dashed border-white/10 px-3 py-1.5 text-[11px] text-zinc-500 transition hover:border-red-300/30 hover:text-red-200 disabled:opacity-40">{creatingThread ? "Creating…" : "+ New thread"}</button>
           </div>
 
           <div className="mb-3 flex items-center justify-center gap-2">
@@ -331,100 +312,38 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
             </div>
             {selectedThread && (
               <div className="flex items-center gap-1" aria-label="Selected Thread actions">
-                <button
-                  type="button"
-                  onClick={() => void renameSelectedThread()}
-                  disabled={managingThread}
-                  className="rounded-lg border border-white/[0.08] px-2 py-1 text-[10px] text-zinc-500 transition hover:border-white/15 hover:text-zinc-200 disabled:opacity-40"
-                >
-                  Rename
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void archiveSelectedThread()}
-                  disabled={managingThread}
-                  className="rounded-lg border border-white/[0.08] px-2 py-1 text-[10px] text-zinc-600 transition hover:border-rose-300/20 hover:text-rose-300 disabled:opacity-40"
-                >
-                  Archive
-                </button>
+                <button type="button" onClick={() => void renameSelectedThread()} disabled={managingThread} className="rounded-lg border border-white/[0.08] px-2 py-1 text-[10px] text-zinc-500 transition hover:border-white/15 hover:text-zinc-200 disabled:opacity-40">Rename</button>
+                <button type="button" onClick={() => void archiveSelectedThread()} disabled={managingThread} className="rounded-lg border border-white/[0.08] px-2 py-1 text-[10px] text-zinc-600 transition hover:border-rose-300/20 hover:text-rose-300 disabled:opacity-40">Archive</button>
               </div>
             )}
           </div>
-          <h1 className="text-balance text-4xl font-semibold tracking-[-0.04em] text-white sm:text-5xl">
-            What are we doing?
-          </h1>
-          <p className="mx-auto mt-4 max-w-xl text-sm leading-6 text-zinc-500">
-            Give Chef the outcome. Chef keeps this conversation and its work together in the selected Thread.
-          </p>
+          <h1 className="text-balance text-4xl font-semibold tracking-[-0.04em] text-white sm:text-5xl">What are we doing?</h1>
+          <p className="mx-auto mt-4 max-w-xl text-sm leading-6 text-zinc-500">Give Chef the outcome. Chef keeps this conversation and its work together in the selected Thread.</p>
 
-          <form
-            className="mt-8 rounded-2xl border border-white/10 bg-[#111114]/95 p-2 text-left shadow-[0_30px_90px_rgba(0,0,0,0.38)] backdrop-blur"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void submitGoal();
-            }}
-          >
-            <textarea
-              value={goal}
-              onChange={(event) => setGoal(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey) {
-                  event.preventDefault();
-                  void submitGoal();
-                }
-              }}
-              rows={3}
-              placeholder="Fix the login bug, investigate the report, prepare a summary…"
-              className="block w-full resize-none bg-transparent px-4 py-3 text-[15px] leading-6 text-zinc-100 outline-none placeholder:text-zinc-700"
-              aria-label="Tell Chef what you want to accomplish"
-            />
+          <form className="mt-8 rounded-2xl border border-white/10 bg-[#111114]/95 p-2 text-left shadow-[0_30px_90px_rgba(0,0,0,0.38)] backdrop-blur" onSubmit={(event) => { event.preventDefault(); void submitGoal(); }}>
+            <textarea value={goal} onChange={(event) => setGoal(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void submitGoal(); } }} rows={3} placeholder="Fix the login bug, investigate the report, prepare a summary…" className="block w-full resize-none bg-transparent px-4 py-3 text-[15px] leading-6 text-zinc-100 outline-none placeholder:text-zinc-700" aria-label="Tell Chef what you want to accomplish" />
             <div className="flex items-center justify-between border-t border-white/[0.06] px-2 pt-2">
               <span className="px-2 text-[10px] text-zinc-700">Enter to send · Shift+Enter for a new line</span>
-              <button
-                type="submit"
-                disabled={!goal.trim() || submitting}
-                className="rounded-xl bg-red-400 px-4 py-2 text-xs font-bold text-[#190708] transition hover:bg-red-300 disabled:cursor-not-allowed disabled:opacity-30"
-              >
-                {submitting ? "Starting…" : "Give to Chef"}
-              </button>
+              <button type="submit" disabled={!goal.trim() || submitting} className="rounded-xl bg-red-400 px-4 py-2 text-xs font-bold text-[#190708] transition hover:bg-red-300 disabled:cursor-not-allowed disabled:opacity-30">{submitting ? "Starting…" : "Give to Chef"}</button>
             </div>
           </form>
 
           {messages.length > 0 && (
             <div className="mt-4 rounded-2xl border border-white/[0.07] bg-black/20 p-4 text-left" aria-label="Selected Thread history">
               <div className="mb-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-600">Recent conversation</div>
-              <div className="space-y-2">
-                {messages.slice(-4).map((message, index) => (
-                  <div key={`${message.timestamp}-${index}`} className="flex gap-2 text-xs leading-5">
-                    <span className="w-9 shrink-0 text-[10px] font-semibold uppercase text-zinc-600">{message.role === "user" ? "You" : "Chef"}</span>
-                    <span className="line-clamp-2 text-zinc-400">{message.content}</span>
-                  </div>
-                ))}
-              </div>
+              <div className="space-y-2">{messages.slice(-4).map((message, index) => (<div key={`${message.timestamp}-${index}`} className="flex gap-2 text-xs leading-5"><span className="w-9 shrink-0 text-[10px] font-semibold uppercase text-zinc-600">{message.role === "user" ? "You" : "Chef"}</span><span className="line-clamp-2 text-zinc-400">{message.content}</span></div>))}</div>
             </div>
           )}
 
-          {error && (
-            <div className="mt-3 rounded-xl border border-rose-400/20 bg-rose-400/[0.06] px-4 py-3 text-left text-xs text-rose-300" role="alert">
-              {error}
-            </div>
-          )}
+          {error && <div className="mt-3 rounded-xl border border-rose-400/20 bg-rose-400/[0.06] px-4 py-3 text-left text-xs text-rose-300" role="alert">{error}</div>}
         </section>
 
         {(latestMission || missionApprovals.length > 0 || missionTasks.length > 0 || latestAssistantMessage || lastReport) && (
           <section className="mt-12 grid gap-4 lg:grid-cols-[1.25fr_0.75fr]">
             <div className="rounded-2xl border border-white/[0.08] bg-white/[0.025] p-5">
               <div className="flex items-start justify-between gap-4">
-                <div className="min-w-0">
-                  <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-600">Current work</div>
-                  <h2 className="mt-2 truncate text-base font-semibold text-zinc-100">
-                    {latestMission?.goal ?? "Thread activity"}
-                  </h2>
-                </div>
-                <div className="flex shrink-0 items-center gap-2 rounded-full border border-white/[0.07] px-2.5 py-1 text-[10px] text-zinc-500">
-                  <span className={`h-1.5 w-1.5 rounded-full ${status.dot}`} />
-                  {status.label}
-                </div>
+                <div className="min-w-0"><div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-600">Current work</div><h2 className="mt-2 truncate text-base font-semibold text-zinc-100">{latestMission?.goal ?? "Thread activity"}</h2></div>
+                <div className="flex shrink-0 items-center gap-2 rounded-full border border-white/[0.07] px-2.5 py-1 text-[10px] text-zinc-500"><span className={`h-1.5 w-1.5 rounded-full ${status.dot}`} />{status.label}</div>
               </div>
 
               <div className="mt-5 space-y-1">
@@ -435,52 +354,27 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
                     <div key={task.id} className="flex items-center gap-3 rounded-xl px-3 py-2.5 transition hover:bg-white/[0.025]">
                       <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${presentation.dot}`} />
                       <span className="min-w-0 flex-1 truncate text-xs text-zinc-300">{task.title}</span>
-                      {canRetry ? (
-                        <button
-                          type="button"
-                          onClick={() => void retryTask(task.id)}
-                          disabled={retryingTaskId !== null}
-                          className="rounded-lg border border-rose-300/20 bg-rose-300/[0.05] px-2.5 py-1 text-[10px] font-semibold text-rose-200 transition hover:bg-rose-300/[0.1] disabled:cursor-not-allowed disabled:opacity-40"
-                        >
-                          {retryingTaskId === task.id ? "Retrying…" : "Retry"}
-                        </button>
-                      ) : (
-                        <span className={`text-[10px] font-medium ${presentation.text}`}>{presentation.label}</span>
-                      )}
+                      {canRetry ? <button type="button" onClick={() => void retryTask(task.id)} disabled={retryingTaskId !== null} className="rounded-lg border border-rose-300/20 bg-rose-300/[0.05] px-2.5 py-1 text-[10px] font-semibold text-rose-200 transition hover:bg-rose-300/[0.1] disabled:cursor-not-allowed disabled:opacity-40">{retryingTaskId === task.id ? "Retrying…" : "Retry"}</button> : <span className={`text-[10px] font-medium ${presentation.text}`}>{presentation.label}</span>}
                     </div>
                   );
-                }) : (
-                  <div className="rounded-xl border border-dashed border-white/[0.07] px-4 py-6 text-center text-xs text-zinc-600">
-                    Chef is ready for a new goal in this Thread.
-                  </div>
-                )}
+                }) : <div className="rounded-xl border border-dashed border-white/[0.07] px-4 py-6 text-center text-xs text-zinc-600">Chef is ready for a new goal in this Thread.</div>}
               </div>
+
+              {latestMission?.status === "cancelled" && selectedThreadId && (
+                <div className="mt-4 rounded-xl border border-amber-300/15 bg-amber-300/[0.04] px-4 py-3 text-left" aria-label="Cancelled Mission recovery">
+                  <p className="text-xs leading-5 text-zinc-400">This Mission was cancelled. Keep the cancellation history intact and continue as fresh work in this Thread.</p>
+                  <button type="button" onClick={prepareCancelledMissionFollowup} className="mt-3 rounded-lg border border-amber-200/20 bg-amber-200/[0.06] px-3 py-1.5 text-[10px] font-semibold text-amber-200 transition hover:bg-amber-200/[0.1]">Continue this work</button>
+                </div>
+              )}
 
               {recentPriorMissions.length > 0 && (
                 <div className="mt-5 border-t border-white/[0.06] pt-4" aria-label="Recent Mission outcomes">
                   <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-600">Earlier in this Thread</div>
-                  <div className="space-y-1">
-                    {recentPriorMissions.map((mission) => {
-                      const outcome = missionOutcomePresentation(mission.status);
-                      return (
-                        <div key={mission.id} className="flex items-center gap-3 rounded-xl px-3 py-2">
-                          <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${outcome.dot}`} />
-                          <span className="min-w-0 flex-1 truncate text-xs text-zinc-400">{mission.goal}</span>
-                          <span className={`shrink-0 text-[10px] font-medium ${outcome.text}`}>{outcome.label}</span>
-                        </div>
-                      );
-                    })}
-                  </div>
+                  <div className="space-y-1">{recentPriorMissions.map((mission) => { const outcome = missionOutcomePresentation(mission.status); return (<div key={mission.id} className="flex items-center gap-3 rounded-xl px-3 py-2"><span className={`h-1.5 w-1.5 shrink-0 rounded-full ${outcome.dot}`} /><span className="min-w-0 flex-1 truncate text-xs text-zinc-400">{mission.goal}</span><span className={`shrink-0 text-[10px] font-medium ${outcome.text}`}>{outcome.label}</span></div>); })}</div>
                 </div>
               )}
 
-              <button
-                type="button"
-                onClick={onOpenWorkbench}
-                className="mt-4 text-[11px] font-medium text-zinc-500 transition hover:text-zinc-200"
-              >
-                Inspect work in Workbench →
-              </button>
+              <button type="button" onClick={onOpenWorkbench} className="mt-4 text-[11px] font-medium text-zinc-500 transition hover:text-zinc-200">Inspect work in Workbench →</button>
             </div>
 
             <div className="space-y-4">
@@ -488,37 +382,12 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
                 <div className="rounded-2xl border border-amber-300/20 bg-amber-300/[0.05] p-5">
                   <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-amber-300/60">Needs your attention</div>
                   {missionApprovals.slice(0, 2).map((approval) => (
-                    <div key={approval.id} className="mt-3 border-t border-amber-200/10 pt-3 first:border-0 first:pt-0">
-                      <p className="text-xs leading-5 text-zinc-300">{approval.reason}</p>
-                      <div className="mt-3 flex gap-2">
-                        <button
-                          type="button"
-                          onClick={() => void decideApproval(approval.id, "accept")}
-                          className="rounded-lg bg-amber-200 px-3 py-1.5 text-[10px] font-bold text-amber-950"
-                        >
-                          Allow
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => void decideApproval(approval.id, "reject")}
-                          className="rounded-lg border border-white/10 px-3 py-1.5 text-[10px] font-medium text-zinc-400 hover:text-zinc-100"
-                        >
-                          Deny
-                        </button>
-                      </div>
-                    </div>
+                    <div key={approval.id} className="mt-3 border-t border-amber-200/10 pt-3 first:border-0 first:pt-0"><p className="text-xs leading-5 text-zinc-300">{approval.reason}</p><div className="mt-3 flex gap-2"><button type="button" onClick={() => void decideApproval(approval.id, "accept")} className="rounded-lg bg-amber-200 px-3 py-1.5 text-[10px] font-bold text-amber-950">Allow</button><button type="button" onClick={() => void decideApproval(approval.id, "reject")} className="rounded-lg border border-white/10 px-3 py-1.5 text-[10px] font-medium text-zinc-400 hover:text-zinc-100">Deny</button></div></div>
                   ))}
                 </div>
               )}
 
-              {(lastReport || latestAssistantMessage) && (
-                <div className="rounded-2xl border border-white/[0.08] bg-white/[0.025] p-5">
-                  <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-600">Latest from Chef</div>
-                  <p className="mt-3 line-clamp-6 whitespace-pre-wrap text-xs leading-5 text-zinc-400">
-                    {lastReport ?? latestAssistantMessage}
-                  </p>
-                </div>
-              )}
+              {(lastReport || latestAssistantMessage) && <div className="rounded-2xl border border-white/[0.08] bg-white/[0.025] p-5"><div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-600">Latest from Chef</div><p className="mt-3 line-clamp-6 whitespace-pre-wrap text-xs leading-5 text-zinc-400">{lastReport ?? latestAssistantMessage}</p></div>}
             </div>
           </section>
         )}
