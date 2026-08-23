@@ -13,7 +13,10 @@ async function main(): Promise<void> {
   const dbPath = join(projectDir, "chef.sqlite");
 
   try {
-    const chef = createChef({ dbPath, projectDir });
+    // Core Mission execution is cancellation-driven by default. Tests that
+    // require bounded completion must opt into their own deadline so a runtime
+    // regression cannot hang CI indefinitely.
+    const chef = createChef({ dbPath, projectDir, orchestratorTimeoutMs: 10_000 });
     await chef.start();
 
     assert.ok(chef.workspaceId, "start() must expose the seeded workspace id");
