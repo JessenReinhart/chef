@@ -17,6 +17,7 @@ import type {
 } from "../core/types.ts";
 import type { NodeDefinition } from "../core/nodes.ts";
 import { nodeRegistry } from "../runtime/node-registry.ts";
+import { resolveWorkerPolicy } from "../runtime/worker-policy.ts";
 import { ScriptedDecisionProvider } from "./orchestrator.ts";
 import { Anthropic } from "@anthropic-ai/sdk";
 
@@ -291,7 +292,14 @@ export class LLMDecisionProvider implements DecisionProvider {
 			return this.#fallback.proposePlan(input);
 		}
 
-		const workers = input.availableWorkers ?? [];
+		const resolution = resolveWorkerPolicy(input.availableWorkers ?? []);
+		const workers = resolution.workers;
+		llmDebug("worker.policy", {
+			mode: resolution.policy.mode,
+			workerId: resolution.policy.mode === "auto" ? null : resolution.policy.workerId,
+			fallback: resolution.fallback,
+			availableWorkers: workers.map((worker) => worker.id),
+		});
 		if (workers.length === 0) {
 			throw new Error("LLM plan proposal failed: no task-capable AI workers are available");
 		}
