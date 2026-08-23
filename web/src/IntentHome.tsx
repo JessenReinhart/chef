@@ -151,11 +151,11 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
 
   const status = missionPresentation(homeState);
   const currentMissionAssistantMessage = useMemo(() => {
-    if (!latestMission) return null;
+    if (!latestMission || submitting) return null;
     return [...messages].reverse().find(
       (message) => message.role === "assistant" && message.metadata?.missionId === latestMission.id,
     )?.content ?? null;
-  }, [latestMission, messages]);
+  }, [latestMission, messages, submitting]);
 
   async function selectThread(threadId: string) {
     saveSelectedThreadId(threadId);
