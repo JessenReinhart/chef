@@ -117,6 +117,15 @@ export class ThreadRepository {
     return this.get(id)!;
   }
 
+  /** Advance recency for durable Thread activity without changing Thread content. */
+  touch(id: ThreadId): Thread {
+    const current = this.get(id);
+    if (!current) throw new Error(`Thread not found: ${id}`);
+    const updatedAt = Math.max(Date.now(), current.updatedAt + 1);
+    this.repo.db.prepare(`UPDATE threads SET updated_at = ? WHERE id = ?`).run(updatedAt, id);
+    return this.get(id)!;
+  }
+
   archive(id: ThreadId): Thread {
     return this.update(id, { status: "archived" });
   }
