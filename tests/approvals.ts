@@ -92,11 +92,6 @@ async function runScenario(decision: ApprovalDecision): Promise<void> {
       await chef.resolveApproval(approval.id, decision, "human", "not now");
     }
 
-    await waitFor(() => {
-      const { promise: p, resolve: r } = Promise.withResolvers<void>();
-      chef.inspectState().then((state) => { r(); });
-      return p;
-    });
     await waitFor(async () => {
       const state = await chef.inspectState();
       return state.approvals.find((entry: Approval) => entry.id === approval.id)?.status !== "pending";
