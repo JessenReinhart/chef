@@ -12,13 +12,13 @@ assert.match(artifacts, /sort\(\(a, b\) => b\.createdAt - a\.createdAt\)\[0\]/, 
 assert.match(artifacts, /const taskIds = new Set\(mission\.taskIds\)/, "artifact projection must derive the current Mission task boundary");
 assert.match(artifacts, /artifact\.taskId && taskIds\.has\(artifact\.taskId\)/, "sibling and prior-Mission artifacts must not leak onto Home");
 assert.match(artifacts, /\.slice\(-MAX_HOME_ARTIFACTS\)\s+\.reverse\(\)/, "Home artifact output must remain bounded and newest-first");
-assert.match(artifacts, /metadata\.summary \?\? artifact\.metadata\.preview \?\? artifact\.metadata\.description/, "artifact cards should prefer human-readable summary metadata");
+assert.match(artifacts, /artifact\.metadata\.summary \?\? artifact\.metadata\.preview \?\? artifact\.metadata\.description/, "artifact cards should prefer human-readable summary metadata");
 assert.match(artifacts, /artifact\.uri\.startsWith\("file:"\)/, "only file-backed artifacts should expose download actions");
 assert.match(artifacts, /\/api\/artifacts\/\$\{encodeURIComponent\(artifact\.id\)\}\/download/, "Home downloads must reuse the canonical artifact endpoint");
 assert.match(artifacts, /Mission outputs are temporarily unavailable/, "artifact failure must degrade locally instead of breaking Home");
 assert.match(threadApi, /SELECTED_THREAD_EVENT = "chef:selected-thread-changed"/, "Thread selection changes must have an immediate projection signal");
 assert.match(threadApi, /previous !== threadId/, "selection events must not fire for unchanged selection");
 assert.match(threadApi, /window\.dispatchEvent\(new CustomEvent\(SELECTED_THREAD_EVENT/, "saving a new Thread selection must notify sibling Home projections");
-assert.match(artifacts, /window\.addEventListener\(THREAD_SELECTION_EVENT, onThreadChanged\)/, "artifact projection must refresh immediately when the selected Thread changes");
+assert.match(artifacts, /window\.addEventListener\(SELECTED_THREAD_EVENT, onThreadChanged\)/, "artifact projection must refresh immediately when the selected Thread changes");
 
 console.log("intent-home-artifacts-ui: ok");
