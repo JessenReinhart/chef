@@ -150,10 +150,12 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
   }, [latestMission?.status, missionApprovals.length, missionTasks]);
 
   const status = missionPresentation(homeState);
-  const latestAssistantMessage = useMemo(
-    () => [...messages].reverse().find((message) => message.role === "assistant")?.content ?? null,
-    [messages],
-  );
+  const currentMissionAssistantMessage = useMemo(() => {
+    if (!latestMission || submitting) return null;
+    return [...messages].reverse().find(
+      (message) => message.role === "assistant" && message.metadata?.missionId === latestMission.id,
+    )?.content ?? null;
+  }, [latestMission, messages, submitting]);
 
   async function selectThread(threadId: string) {
     saveSelectedThreadId(threadId);
@@ -225,6 +227,7 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
     const message = goal.trim();
     if (!message || submitting) return;
     setSubmitting(true);
+    setLastReport(null);
     setError(null);
     try {
       let threadId = selectedThreadId;
@@ -417,7 +420,7 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
           )}
         </section>
 
-        {(latestMission || missionApprovals.length > 0 || missionTasks.length > 0 || latestAssistantMessage || lastReport) && (
+        {(latestMission || missionApprovals.length > 0 || missionTasks.length > 0 || currentMissionAssistantMessage || lastReport) && (
           <section className="mt-12 grid gap-4 lg:grid-cols-[1.25fr_0.75fr]">
             <div className="rounded-2xl border border-white/[0.08] bg-white/[0.025] p-5">
               <div className="flex items-start justify-between gap-4">
@@ -532,11 +535,11 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
                 </div>
               )}
 
-              {(lastReport || latestAssistantMessage) && (
+              {(lastReport || currentMissionAssistantMessage) && (
                 <div className="rounded-2xl border border-white/[0.08] bg-white/[0.025] p-5">
                   <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-600">Latest from Chef</div>
                   <p className="mt-3 line-clamp-6 whitespace-pre-wrap text-xs leading-5 text-zinc-400">
-                    {lastReport ?? latestAssistantMessage}
+                    {lastReport ?? currentMissionAssistantMessage}
                   </p>
                 </div>
               )}
