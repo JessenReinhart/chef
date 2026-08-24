@@ -165,7 +165,7 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
   }, [latestMission, tasks]);
 
   const missionTasks = useMemo(
-    () => currentMissionTasks.slice(0, 6),
+    () => currentMissionTasks.slice(-6),
     [currentMissionTasks],
   );
 
