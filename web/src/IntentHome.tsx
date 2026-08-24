@@ -467,7 +467,13 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
                   );
                 }) : (
                   <div className="rounded-xl border border-dashed border-white/[0.07] px-4 py-6 text-center text-xs text-zinc-600">
-                    Chef is ready for a new goal in this Thread.
+                    {homeState === "working"
+                      ? "Chef is preparing or verifying this Mission."
+                      : homeState === "attention"
+                        ? "This Mission needs attention before work can continue."
+                        : homeState === "done"
+                          ? "This Mission is complete."
+                          : "Chef is ready for a new goal in this Thread."}
                   </div>
                 )}
               </div>
