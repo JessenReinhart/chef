@@ -45,7 +45,12 @@ assert.match(home, /Open Workbench/, "advanced inspection should stay deliberate
 assert.match(home, /Needs your attention/, "approval and failure states should be surfaced in plain language");
 assert.match(home, /const threadTaskIds = useMemo/, "Home must derive the selected Thread's task lineage before projecting approvals");
 assert.match(home, /threadMissions\.flatMap\(\(mission\) => mission\.taskIds\)/, "approval lineage must include every Mission in the selected Thread, not only the latest Mission");
-assert.match(home, /approvals\.filter\(\(approval\) => threadTaskIds\.has\(approval\.taskId\)\)/, "pending approvals from sibling Threads must stay excluded while earlier selected-Thread approvals remain visible");
+assert.match(home, /const missionByTaskId = useMemo/, "Home must resolve approval ownership through selected-Thread Mission task lineage");
+assert.match(home, /owners\.set\(taskId, mission\)/, "each selected-Thread task must map back to its owning Mission for approval context");
+assert.match(home, /missionByTaskId\.get\(approval\.taskId\)\?\.goal/, "pending approvals must carry the owning Mission goal instead of exposing raw IDs");
+assert.match(home, /For this Mission/, "approval cards must identify which Mission the decision belongs to");
+assert.match(home, /\{approval\.missionGoal\}/, "approval cards must render the resolved human-readable Mission goal");
+assert.match(home, /approvals\s+\.filter\(\(approval\) => threadTaskIds\.has\(approval\.taskId\)\)/, "pending approvals from sibling Threads must stay excluded while earlier selected-Thread approvals remain visible");
 assert.match(home, /missionApprovals\.length > 0/, "any selected-Thread pending approval must put Home into the attention state");
 assert.match(home, /latestMission\?\.status === "failed"/, "Mission-level failure must put Home into the attention state even without a failed Task projection");
 assert.match(home, /latestMission\?\.status === "blocked"/, "Mission-level blocked state must remain visible even without a blocked Task projection");
