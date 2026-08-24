@@ -45,6 +45,11 @@ assert.match(home, /missionApprovals\.length > 0/, "any selected-Thread pending 
 assert.match(home, /latestMission\?\.status === "failed"/, "Mission-level failure must put Home into the attention state even without a failed Task projection");
 assert.match(home, /latestMission\?\.status === "blocked"/, "Mission-level blocked state must remain visible even without a blocked Task projection");
 assert.match(home, /latestMission\?\.status === "cancelled"/, "Mission-level cancellation must not fall back to Ready when Task rows are missing or stale");
+assert.match(home, /latestMission\?\.status === "waiting_for_approval"/, "Mission-level approval wait must remain visible even when the approval row has not projected yet");
+assert.match(home, /latestMission\?\.status === "paused"/, "Mission-level pause must remain an attention state without depending on Task rows");
+assert.match(home, /latestMission\?\.status === "planning"/, "Mission planning must keep Home in a working state before Task rows exist");
+assert.match(home, /latestMission\?\.status === "active"/, "an active Mission must keep Home in a working state even between Task projections");
+assert.match(home, /latestMission\?\.status === "verifying"/, "Mission verification must remain working until the Mission reaches a terminal state");
 assert.match(home, /const ids = new Set\(latestMission\.taskIds\);\s+return tasks\.filter/, "current-work task rendering must remain scoped to the latest Mission");
 assert.match(home, /task\.status === "failed" \|\| task\.status === "blocked" \|\| task\.status === "cancelled"/, "cancelled work must keep the aggregate Home status in the attention state");
 assert.match(home, /message\.metadata\?\.missionId === latestMission\.id/, "current-work output must be scoped to the latest Mission instead of any prior Thread reply");
