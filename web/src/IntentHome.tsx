@@ -164,6 +164,11 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
       .filter((task): task is UiTask => task !== undefined);
   }, [latestMission, tasks]);
 
+  const earlierMissionTasks = useMemo(
+    () => currentMissionTasks.slice(0, -6),
+    [currentMissionTasks],
+  );
+
   const missionTasks = useMemo(
     () => currentMissionTasks.slice(-6),
     [currentMissionTasks],
@@ -376,6 +381,34 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
     setError(null);
   }
 
+  function renderMissionTask(task: UiTask) {
+    const presentation = taskPresentation(task.status);
+    const canRetry = task.status === "failed" || (task.status === "blocked" && !approvalTaskIds.has(task.id));
+    return (
+      <div key={task.id} className="flex items-center gap-3 rounded-xl px-3 py-2.5 transition hover:bg-white/[0.025]">
+        <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${presentation.dot}`} />
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-xs text-zinc-300">{task.title}</div>
+          {task.assignedTo && (
+            <div className="mt-0.5 truncate text-[10px] text-zinc-600">Worker · {task.assignedTo}</div>
+          )}
+        </div>
+        {canRetry ? (
+          <button
+            type="button"
+            onClick={() => void retryTask(task.id)}
+            disabled={retryingTaskId !== null}
+            className="rounded-lg border border-rose-300/20 bg-rose-300/[0.05] px-2.5 py-1 text-[10px] font-semibold text-rose-200 transition hover:bg-rose-300/[0.1] disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {retryingTaskId === task.id ? "Retrying…" : "Retry"}
+          </button>
+        ) : (
+          <span className={`text-[10px] font-medium ${presentation.text}`}>{presentation.label}</span>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="relative h-screen w-screen overflow-auto bg-[#09090b] text-zinc-100 selection:bg-red-400 selection:text-black">
       <div
@@ -558,33 +591,17 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
               </div>
 
               <div className="mt-5 space-y-1">
-                {missionTasks.length > 0 ? missionTasks.map((task) => {
-                  const presentation = taskPresentation(task.status);
-                  const canRetry = task.status === "failed" || (task.status === "blocked" && !approvalTaskIds.has(task.id));
-                  return (
-                    <div key={task.id} className="flex items-center gap-3 rounded-xl px-3 py-2.5 transition hover:bg-white/[0.025]">
-                      <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${presentation.dot}`} />
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate text-xs text-zinc-300">{task.title}</div>
-                        {task.assignedTo && (
-                          <div className="mt-0.5 truncate text-[10px] text-zinc-600">Worker · {task.assignedTo}</div>
-                        )}
-                      </div>
-                      {canRetry ? (
-                        <button
-                          type="button"
-                          onClick={() => void retryTask(task.id)}
-                          disabled={retryingTaskId !== null}
-                          className="rounded-lg border border-rose-300/20 bg-rose-300/[0.05] px-2.5 py-1 text-[10px] font-semibold text-rose-200 transition hover:bg-rose-300/[0.1] disabled:cursor-not-allowed disabled:opacity-40"
-                        >
-                          {retryingTaskId === task.id ? "Retrying…" : "Retry"}
-                        </button>
-                      ) : (
-                        <span className={`text-[10px] font-medium ${presentation.text}`}>{presentation.label}</span>
-                      )}
+                {earlierMissionTasks.length > 0 && (
+                  <details className="mb-2 rounded-xl border border-white/[0.06] bg-white/[0.015] px-2 py-2" aria-label="Earlier current Mission steps">
+                    <summary className="cursor-pointer select-none px-1 text-[10px] font-medium text-zinc-500 transition hover:text-zinc-300">
+                      Earlier steps · {earlierMissionTasks.length}
+                    </summary>
+                    <div className="mt-2 space-y-1 border-t border-white/[0.05] pt-2">
+                      {earlierMissionTasks.map(renderMissionTask)}
                     </div>
-                  );
-                }) : (
+                  </details>
+                )}
+                {missionTasks.length > 0 ? missionTasks.map(renderMissionTask) : (
                   <div className="rounded-xl border border-dashed border-white/[0.07] px-4 py-6 text-center text-xs text-zinc-600">
                     {homeState === "working"
                       ? "Chef is preparing or verifying this Mission."
