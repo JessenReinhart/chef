@@ -11,7 +11,7 @@ import {
   threadMessages,
   type UiThread,
 } from "./threadApi";
-import type { ChatMessage, UiMission, UiTask } from "./types";
+import type { ChatMessage, UiMission, UiRuntimeEvent, UiTask } from "./types";
 
 type Approval = { id: string; reason: string; taskId: string; status: string };
 type HomeState = "ready" | "working" | "attention" | "done";
@@ -50,9 +50,22 @@ function titleFromMessage(message: string): string {
   return normalized.length <= 48 ? normalized : `${normalized.slice(0, 45)}…`;
 }
 
+function activityText(event: UiRuntimeEvent): string | null {
+  if (event.type !== "session.data" || !event.payload || typeof event.payload !== "object") return null;
+  const data = (event.payload as { data?: unknown }).data;
+  if (typeof data !== "string") return null;
+  const normalized = data
+    .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!normalized) return null;
+  return normalized.length <= 320 ? normalized : `${normalized.slice(0, 317)}…`;
+}
+
 export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void }) {
   const [tasks, setTasks] = useState<UiTask[]>([]);
   const [missions, setMissions] = useState<UiMission[]>([]);
+  const [events, setEvents] = useState<UiRuntimeEvent[]>([]);
   const [approvals, setApprovals] = useState<Approval[]>([]);
   const [threads, setThreads] = useState<UiThread[]>([]);
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(() => loadSelectedThreadId());
@@ -75,6 +88,7 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
 
       setTasks(snapshot.tasks);
       setMissions(snapshot.missions ?? []);
+      setEvents(snapshot.events);
       setApprovals(snapshot.approvals.filter((approval) => approval.status === "pending"));
       setThreads(listedThreads);
       setMessages(selectedMessages);
@@ -116,11 +130,21 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
     [latestMission?.id, missionChronology],
   );
 
-  const missionTasks = useMemo(() => {
+  const currentMissionTasks = useMemo(() => {
     if (!latestMission) return [];
     const ids = new Set(latestMission.taskIds);
-    return tasks.filter((task) => ids.has(task.id)).slice(-6).reverse();
+    return tasks.filter((task) => ids.has(task.id));
   }, [latestMission, tasks]);
+
+  const missionTasks = useMemo(
+    () => currentMissionTasks.slice(-6).reverse(),
+    [currentMissionTasks],
+  );
+
+  const currentMissionTaskIds = useMemo(
+    () => new Set(latestMission?.taskIds ?? []),
+    [latestMission?.taskIds],
+  );
 
   const threadTaskIds = useMemo(
     () => new Set(threadMissions.flatMap((mission) => mission.taskIds)),
@@ -136,6 +160,25 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
     () => new Set(missionApprovals.map((approval) => approval.taskId)),
     [missionApprovals],
   );
+
+  const failureReason = useMemo(() => {
+    const task = [...currentMissionTasks].reverse().find(
+      (candidate) => (candidate.status === "failed" || candidate.status === "blocked")
+        && !approvalTaskIds.has(candidate.id)
+        && candidate.error?.trim(),
+    );
+    return task?.error?.trim() ?? null;
+  }, [approvalTaskIds, currentMissionTasks]);
+
+  const lastMissionActivity = useMemo(() => {
+    if (currentMissionTaskIds.size === 0) return null;
+    for (const event of [...events].sort((a, b) => b.seq - a.seq)) {
+      if (!event.taskId || !currentMissionTaskIds.has(event.taskId)) continue;
+      const text = activityText(event);
+      if (text) return text;
+    }
+    return null;
+  }, [currentMissionTaskIds, events]);
 
   const homeState = useMemo<HomeState>(() => {
     if (
@@ -478,6 +521,19 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
                   </div>
                 )}
               </div>
+
+              {homeState === "attention" && (failureReason || lastMissionActivity) && (
+                <div className="mt-4 rounded-xl border border-rose-300/15 bg-rose-300/[0.04] px-4 py-3 text-left" aria-label="Current Mission failure context">
+                  <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-rose-300/70">What happened</div>
+                  {failureReason && <p className="mt-2 text-xs leading-5 text-zinc-300">{failureReason}</p>}
+                  {lastMissionActivity && (
+                    <div className="mt-3 border-t border-rose-200/10 pt-3">
+                      <div className="text-[10px] font-medium text-zinc-500">Last useful activity</div>
+                      <p className="mt-1 line-clamp-4 text-xs leading-5 text-zinc-400">{lastMissionActivity}</p>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {latestMission?.status === "cancelled" && selectedThreadId && (
                 <div className="mt-4 rounded-xl border border-amber-300/15 bg-amber-300/[0.04] px-4 py-3 text-left" aria-label="Cancelled Mission recovery">
