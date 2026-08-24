@@ -269,6 +269,12 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
     }
   }
 
+  function prepareCancelledMissionFollowup() {
+    if (!latestMission || latestMission.status !== "cancelled" || !selectedThreadId) return;
+    setGoal(`Continue this work: ${latestMission.goal}`);
+    setError(null);
+  }
+
   return (
     <div className="relative h-screen w-screen overflow-auto bg-[#09090b] text-zinc-100 selection:bg-red-400 selection:text-black">
       <div
@@ -455,6 +461,21 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
                   </div>
                 )}
               </div>
+
+              {latestMission?.status === "cancelled" && selectedThreadId && (
+                <div className="mt-4 rounded-xl border border-amber-300/15 bg-amber-300/[0.04] px-4 py-3 text-left" aria-label="Cancelled Mission recovery">
+                  <p className="text-xs leading-5 text-zinc-400">
+                    This Mission was cancelled. Keep its history intact and continue as fresh work in this Thread.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={prepareCancelledMissionFollowup}
+                    className="mt-3 rounded-lg border border-amber-200/20 bg-amber-200/[0.06] px-3 py-1.5 text-[10px] font-semibold text-amber-200 transition hover:bg-amber-200/[0.1]"
+                  >
+                    Continue this work
+                  </button>
+                </div>
+              )}
 
               {recentPriorMissions.length > 0 && (
                 <div className="mt-5 border-t border-white/[0.06] pt-4" aria-label="Recent Mission outcomes">
