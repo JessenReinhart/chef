@@ -50,6 +50,14 @@ function titleFromMessage(message: string): string {
   return normalized.length <= 48 ? normalized : `${normalized.slice(0, 45)}…`;
 }
 
+function failureFollowupPrompt(goal: string, context?: string | null): string {
+  const normalized = context?.replace(/\s+/g, " ").trim();
+  const bounded = normalized ? (normalized.length <= 320 ? normalized : `${normalized.slice(0, 317)}…`) : null;
+  return bounded
+    ? `Fix this failed work: ${goal}\n\nWhat happened: ${bounded}`
+    : `Fix this failed work: ${goal}`;
+}
+
 function activityText(event: UiRuntimeEvent): string | null {
   if (event.type !== "session.data" || !event.payload || typeof event.payload !== "object") return null;
   const data = (event.payload as { data?: unknown }).data;
@@ -323,6 +331,12 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
     }
   }
 
+  function prepareFailedMissionFollowup() {
+    if (!latestMission || (latestMission.status !== "failed" && latestMission.status !== "blocked") || !selectedThreadId) return;
+    setGoal(failureFollowupPrompt(latestMission.goal, failureReason ?? lastMissionActivity));
+    setError(null);
+  }
+
   function prepareCancelledMissionFollowup() {
     if (!latestMission || latestMission.status !== "cancelled" || !selectedThreadId) return;
     setGoal(`Continue this work: ${latestMission.goal}`);
@@ -532,6 +546,21 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
                       <p className="mt-1 line-clamp-4 text-xs leading-5 text-zinc-400">{lastMissionActivity}</p>
                     </div>
                   )}
+                </div>
+              )}
+
+              {(latestMission?.status === "failed" || latestMission?.status === "blocked") && selectedThreadId && (
+                <div className="mt-4 rounded-xl border border-rose-300/15 bg-rose-300/[0.04] px-4 py-3 text-left" aria-label="Failed Mission recovery">
+                  <p className="text-xs leading-5 text-zinc-400">
+                    Start a fresh follow-up in this Thread with the failure context already filled in. You can edit it before sending.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={prepareFailedMissionFollowup}
+                    className="mt-3 rounded-lg border border-rose-200/20 bg-rose-200/[0.06] px-3 py-1.5 text-[10px] font-semibold text-rose-200 transition hover:bg-rose-200/[0.1]"
+                  >
+                    Ask Chef to fix it
+                  </button>
                 </div>
               )}
 

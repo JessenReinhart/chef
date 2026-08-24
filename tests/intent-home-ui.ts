@@ -75,6 +75,16 @@ assert.doesNotMatch(home, /find\(\(message\) => message\.role === "assistant"\)\
 assert.match(home, /api\.retryNode\(taskId\)/, "failed work must be retryable directly from Simple Mode");
 assert.match(home, /"Retry"/, "Simple Mode must present a plain-language retry action");
 assert.match(home, /task\.status === "blocked" && !approvalTaskIds\.has\(task\.id\)/, "retry must not bypass a pending approval gate for that task");
+assert.match(home, /function failureFollowupPrompt\(goal: string, context\?: string \| null\)/, "failed Mission follow-up must use a dedicated bounded prompt helper");
+assert.match(home, /normalized\.length <= 320 \? normalized : `\$\{normalized\.slice\(0, 317\)\}…`/, "failed Mission context copied into the composer must stay bounded");
+assert.match(home, /function prepareFailedMissionFollowup\(\)/, "failed and blocked Missions must have a safe same-Thread follow-up path");
+assert.match(home, /latestMission\.status !== "failed" && latestMission\.status !== "blocked"/, "guided failure recovery must stay limited to failed or blocked current Missions");
+assert.match(home, /!selectedThreadId\) return;/, "guided failure recovery must require the selected Thread boundary");
+assert.match(home, /failureReason \?\? lastMissionActivity/, "guided failure recovery should reuse current human-readable Mission failure context");
+assert.match(home, /setGoal\(failureFollowupPrompt/, "guided failure recovery must prepare editable composer text instead of starting work immediately");
+assert.match(home, /Failed Mission recovery/, "Simple Mode must expose the guided recovery surface without opening Workbench");
+assert.match(home, /Ask Chef to fix it/, "Simple Mode must offer a plain-language failed-Mission follow-up action");
+assert.match(home, /You can edit it before sending/, "guided failure recovery must remain explicitly user-editable before execution");
 assert.match(home, /function prepareCancelledMissionFollowup\(\)/, "cancelled Missions must have a dedicated safe recovery path");
 assert.match(home, /latestMission\.status !== "cancelled" \|\| !selectedThreadId/, "cancelled-Mission recovery must stay scoped to a selected Thread");
 assert.match(home, /setGoal\(`Continue this work: \$\{latestMission\.goal\}`\)/, "cancelled recovery must prepare a fresh follow-up from the cancelled Mission goal");
