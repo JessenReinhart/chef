@@ -20,6 +20,7 @@ export interface ThreadChatResult {
 }
 
 const SELECTED_THREAD_KEY = "chef:selected-thread";
+export const SELECTED_THREAD_EVENT = "chef:selected-thread-changed";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
@@ -85,6 +86,8 @@ export function loadSelectedThreadId(): string | null {
 }
 
 export function saveSelectedThreadId(threadId: string | null): void {
+  const previous = loadSelectedThreadId();
   if (threadId) localStorage.setItem(SELECTED_THREAD_KEY, threadId);
   else localStorage.removeItem(SELECTED_THREAD_KEY);
+  if (previous !== threadId) window.dispatchEvent(new CustomEvent(SELECTED_THREAD_EVENT, { detail: { threadId } }));
 }
