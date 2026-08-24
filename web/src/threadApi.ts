@@ -22,6 +22,9 @@ export interface ThreadChatResult {
 const SELECTED_THREAD_KEY = "chef:selected-thread";
 export const SELECTED_THREAD_EVENT = "chef:selected-thread-changed";
 
+let threadMessagesGeneration = 0;
+let latestThreadMessagesRequest: Promise<ChatMessage[]> | null = null;
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     headers: { "content-type": "application/json", ...(init?.headers ?? {}) },
@@ -69,8 +72,24 @@ export async function archiveThread(threadId: string): Promise<UiThread> {
 }
 
 export async function threadMessages(threadId: string): Promise<ChatMessage[]> {
-  const response = await request<{ ok: boolean; data: ChatMessage[] }>(`/api/threads/${encodeURIComponent(threadId)}/messages`);
-  return response.data;
+  const generation = ++threadMessagesGeneration;
+  const pending = request<{ ok: boolean; data: ChatMessage[] }>(
+    `/api/threads/${encodeURIComponent(threadId)}/messages`,
+  ).then((response) => response.data);
+  latestThreadMessagesRequest = pending;
+
+  try {
+    const messages = await pending;
+    if (generation !== threadMessagesGeneration && latestThreadMessagesRequest) {
+      return await latestThreadMessagesRequest;
+    }
+    return messages;
+  } catch (error) {
+    if (generation !== threadMessagesGeneration && latestThreadMessagesRequest) {
+      return await latestThreadMessagesRequest;
+    }
+    throw error;
+  }
 }
 
 export async function sendThreadMessage(threadId: string, message: string): Promise<ThreadChatResult> {
