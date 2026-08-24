@@ -209,15 +209,20 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
     return task?.error?.trim() ?? null;
   }, [approvalTaskIds, currentMissionTasks]);
 
-  const lastMissionActivity = useMemo(() => {
-    if (currentMissionTaskIds.size === 0) return null;
+  const recentMissionActivity = useMemo(() => {
+    if (currentMissionTaskIds.size === 0) return [];
+    const recent: string[] = [];
     for (const event of [...events].sort((a, b) => b.seq - a.seq)) {
       if (!event.taskId || !currentMissionTaskIds.has(event.taskId)) continue;
       const text = activityText(event);
-      if (text) return text;
+      if (!text || text === recent[recent.length - 1]) continue;
+      recent.push(text);
+      if (recent.length === 4) break;
     }
-    return null;
+    return recent;
   }, [currentMissionTaskIds, events]);
+
+  const lastMissionActivity = recentMissionActivity[0] ?? null;
 
   const homeState = useMemo<HomeState>(() => {
     if (
@@ -589,6 +594,20 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
                   </div>
                 )}
               </div>
+
+              {recentMissionActivity.length > 0 && (
+                <div className="mt-4 rounded-xl border border-white/[0.06] bg-black/15 px-4 py-3 text-left" aria-label="Recent Mission activity">
+                  <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-600">Recent activity</div>
+                  <div className="mt-2 space-y-2">
+                    {recentMissionActivity.map((activity, index) => (
+                      <div key={`${index}-${activity}`} className="flex gap-2 text-xs leading-5 text-zinc-400">
+                        <span className="mt-2 h-1 w-1 shrink-0 rounded-full bg-zinc-600" />
+                        <p className="line-clamp-2 min-w-0">{activity}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {homeState === "attention" && (failureReason || lastMissionActivity) && (
                 <div className="mt-4 rounded-xl border border-rose-300/15 bg-rose-300/[0.04] px-4 py-3 text-left" aria-label="Current Mission failure context">
