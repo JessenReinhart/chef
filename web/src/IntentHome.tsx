@@ -158,12 +158,14 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
 
   const currentMissionTasks = useMemo(() => {
     if (!latestMission) return [];
-    const ids = new Set(latestMission.taskIds);
-    return tasks.filter((task) => ids.has(task.id));
+    const tasksById = new Map(tasks.map((task) => [task.id, task]));
+    return latestMission.taskIds
+      .map((taskId) => tasksById.get(taskId))
+      .filter((task): task is UiTask => task !== undefined);
   }, [latestMission, tasks]);
 
   const missionTasks = useMemo(
-    () => currentMissionTasks.slice(-6).reverse(),
+    () => currentMissionTasks.slice(0, 6),
     [currentMissionTasks],
   );
 
