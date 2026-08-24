@@ -159,9 +159,22 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
     [threadMissions],
   );
 
+  const missionByTaskId = useMemo(() => {
+    const owners = new Map<string, UiMission>();
+    for (const mission of threadMissions) {
+      for (const taskId of mission.taskIds) owners.set(taskId, mission);
+    }
+    return owners;
+  }, [threadMissions]);
+
   const missionApprovals = useMemo(
-    () => approvals.filter((approval) => threadTaskIds.has(approval.taskId)),
-    [approvals, threadTaskIds],
+    () => approvals
+      .filter((approval) => threadTaskIds.has(approval.taskId))
+      .map((approval) => ({
+        ...approval,
+        missionGoal: missionByTaskId.get(approval.taskId)?.goal ?? "Earlier work in this Thread",
+      })),
+    [approvals, missionByTaskId, threadTaskIds],
   );
 
   const approvalTaskIds = useMemo(
@@ -612,7 +625,9 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
                   <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-amber-300/60">Needs your attention</div>
                   {missionApprovals.slice(0, 2).map((approval) => (
                     <div key={approval.id} className="mt-3 border-t border-amber-200/10 pt-3 first:border-0 first:pt-0">
-                      <p className="text-xs leading-5 text-zinc-300">{approval.reason}</p>
+                      <div className="text-[10px] font-medium text-zinc-500">For this Mission</div>
+                      <p className="mt-1 line-clamp-2 text-[11px] leading-4 text-amber-100/80">{approval.missionGoal}</p>
+                      <p className="mt-2 text-xs leading-5 text-zinc-300">{approval.reason}</p>
                       <div className="mt-3 flex gap-2">
                         <button
                           type="button"
