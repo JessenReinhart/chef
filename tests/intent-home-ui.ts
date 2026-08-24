@@ -56,6 +56,16 @@ assert.match(home, /latestMission\?\.status === "planning"/, "Mission planning m
 assert.match(home, /latestMission\?\.status === "active"/, "an active Mission must keep Home in a working state even between Task projections");
 assert.match(home, /latestMission\?\.status === "verifying"/, "Mission verification must remain working until the Mission reaches a terminal state");
 assert.match(home, /const ids = new Set\(latestMission\.taskIds\);\s+return tasks\.filter/, "current-work task rendering must remain scoped to the latest Mission");
+assert.match(home, /const currentMissionTaskIds = useMemo/, "failure activity must have an explicit current-Mission task boundary");
+assert.match(home, /new Set\(latestMission\?\.taskIds \?\? \[\]\)/, "failure activity must derive only from the current Mission task lineage");
+assert.match(home, /setEvents\(snapshot\.events\)/, "Home must project existing durable runtime activity instead of creating a second failure store");
+assert.match(home, /event\.type !== "session\.data"/, "last useful activity must use worker output rather than raw runtime lifecycle events");
+assert.match(home, /currentMissionTaskIds\.has\(event\.taskId\)/, "last useful activity must exclude prior Missions and sibling Threads");
+assert.match(home, /candidate\.error\?\.trim\(\)/, "failed or blocked Task error text must be available as a human-readable reason");
+assert.match(home, /Current Mission failure context/, "Simple Mode must expose actionable failure context without opening Workbench");
+assert.match(home, /What happened/, "failure context should use product language rather than runtime terminology");
+assert.match(home, /Last useful activity/, "failure context should include bounded recent worker output when available");
+assert.match(home, /normalized\.length <= 320/, "last useful activity must remain bounded on the default Home surface");
 assert.match(home, /task\.status === "failed" \|\| task\.status === "blocked" \|\| task\.status === "cancelled"/, "cancelled work must keep the aggregate Home status in the attention state");
 assert.match(home, /message\.metadata\?\.missionId === latestMission\.id/, "current-work output must be scoped to the latest Mission instead of any prior Thread reply");
 assert.match(home, /if \(!latestMission \|\| submitting\) return null;/, "a new follow-up must hide the previous Mission output while the new request is starting");
