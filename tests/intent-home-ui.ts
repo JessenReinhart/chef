@@ -35,6 +35,11 @@ assert.match(home, /\.slice\(0, 3\)/, "prior Mission history must stay bounded o
 assert.match(home, /Recent Mission outcomes/, "selected Thread prior outcomes must be inspectable without opening Workbench");
 assert.match(home, /missionOutcomePresentation\(mission\.status\)/, "prior Mission history must use human-readable outcome labels");
 assert.match(home, /Recent conversation/, "selected Thread history must be visible without opening Workbench");
+assert.match(home, /messages\.slice\(-4\)/, "default Thread conversation history must stay bounded to the four most recent turns");
+assert.match(home, /messages\.length > 4/, "older conversation disclosure should appear only when older turns exist");
+assert.match(home, /Earlier conversation · \{messages\.length - 4\} messages/, "Simple Mode must expose a plain-language older-history control");
+assert.match(home, /messages\.slice\(0, -4\)/, "expanded history must use the already-loaded selected-Thread message projection");
+assert.match(home, /<details key=\{selectedThreadId \?\? "no-thread"\}/, "switching Threads must remount and collapse expanded history instead of leaking disclosure state");
 assert.match(home, /saveSelectedThreadId/, "selected Thread should survive reload when possible");
 assert.match(threadApi, /method: "PATCH"/, "Thread rename must use the existing PATCH lifecycle route");
 assert.match(threadApi, /\/api\/threads\/\$\{encodeURIComponent\(threadId\)\}\/archive/, "Thread archive must use the canonical archive route");
