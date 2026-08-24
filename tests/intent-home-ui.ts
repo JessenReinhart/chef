@@ -72,7 +72,11 @@ assert.match(home, /latestMission\?\.status === "paused"/, "Mission-level pause 
 assert.match(home, /latestMission\?\.status === "planning"/, "Mission planning must keep Home in a working state before Task rows exist");
 assert.match(home, /latestMission\?\.status === "active"/, "an active Mission must keep Home in a working state even between Task projections");
 assert.match(home, /latestMission\?\.status === "verifying"/, "Mission verification must remain working until the Mission reaches a terminal state");
-assert.match(home, /const ids = new Set\(latestMission\.taskIds\);\s+return tasks\.filter/, "current-work task rendering must remain scoped to the latest Mission");
+assert.match(home, /const tasksById = new Map\(tasks\.map\(\(task\) => \[task\.id, task\]\)\)/, "current-work task lookup must not inherit workspace task-array order");
+assert.match(home, /latestMission\.taskIds\s+\.map\(\(taskId\) => tasksById\.get\(taskId\)\)/, "current-work tasks must follow the Mission's authoritative taskId plan order");
+assert.match(home, /\.filter\(\(task\): task is UiTask => task !== undefined\)/, "missing task projections must be ignored without disturbing Mission task order");
+assert.match(home, /currentMissionTasks\.slice\(0, 6\)/, "the default current-work list must stay bounded while preserving plan sequence");
+assert.doesNotMatch(home, /currentMissionTasks\.slice\(-6\)\.reverse\(\)/, "Home must not reverse storage order to approximate current Mission plan order");
 assert.match(home, /const currentMissionTaskIds = useMemo/, "failure activity must have an explicit current-Mission task boundary");
 assert.match(home, /new Set\(latestMission\?\.taskIds \?\? \[\]\)/, "failure activity must derive only from the current Mission task lineage");
 assert.match(home, /setEvents\(snapshot\.events\)/, "Home must project existing durable runtime activity instead of creating a second failure store");
@@ -125,4 +129,4 @@ assert.match(rooms, /if \(!open \|\| !selectedChannel\)/, "closed Rooms should n
 const threadSendCalls = home.match(/sendThreadMessage\(/g) ?? [];
 assert.equal(threadSendCalls.length, 1, "the default home should have one authoritative Thread-scoped Chef intent submission path");
 
-console.log("intent-home-ui: ok — Chef keeps Thread-scoped intent, history, approvals, recovery, navigation status, and Workbench progressive depth coherent");
+console.log("intent-home-ui: ok — Chef keeps Thread-scoped intent, history, approvals, recovery, navigation status, Mission task order, and Workbench progressive depth coherent");
