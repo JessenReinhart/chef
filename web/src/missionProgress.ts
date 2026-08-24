@@ -28,7 +28,7 @@ function stringArray(payload: Payload, key: string): string[] {
 
 function missionStatusText(status: string): MissionProgressItem["tone"] {
   if (status === "completed") return "success";
-  if (status === "failed" || status === "blocked" || status === "waiting_for_approval") return "attention";
+  if (status === "failed" || status === "blocked" || status === "waiting_for_approval" || status === "cancelled") return "attention";
   if (status === "active" || status === "planning" || status === "verifying") return "active";
   return "neutral";
 }
