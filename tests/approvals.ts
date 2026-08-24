@@ -48,7 +48,9 @@ class GatedProvider {
 async function waitFor(predicate: () => boolean | Promise<boolean>, timeoutMs = 5_000): Promise<void> {
   const start = Date.now();
   while (!(await predicate())) {
-    if (Date.now() - start > timeoutMs) return;
+    if (Date.now() - start > timeoutMs) {
+      throw new Error(`waitFor timed out after ${timeoutMs}ms`);
+    }
     const { promise, resolve } = Promise.withResolvers<void>();
     setTimeout(resolve, 10);
     await promise;
@@ -57,7 +59,10 @@ async function waitFor(predicate: () => boolean | Promise<boolean>, timeoutMs = 
 
 const dir = await mkdtemp(join(tmpdir(), "chef-approvals-"));
 const script = join(dir, "worker.mjs");
-await writeFile(script, "process.stdin.resume();", "utf8");
+// This worker must stay alive long enough to observe the accepted Task in the
+// running state, then exit on its own. The approval regression must not depend
+// on a global Mission timeout to eventually release `await execution`.
+await writeFile(script, "setTimeout(() => process.exit(0), 1_000);", "utf8");
 
 async function runScenario(decision: ApprovalDecision): Promise<void> {
   const chef = createChef({
