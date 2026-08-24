@@ -480,9 +480,24 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
           {messages.length > 0 && (
             <div className="mt-4 rounded-2xl border border-white/[0.07] bg-black/20 p-4 text-left" aria-label="Selected Thread history">
               <div className="mb-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-600">Recent conversation</div>
+              {messages.length > 4 && (
+                <details key={selectedThreadId ?? "no-thread"} className="mb-3 rounded-xl border border-white/[0.06] bg-white/[0.015] px-3 py-2">
+                  <summary className="cursor-pointer select-none text-[10px] font-medium text-zinc-500 transition hover:text-zinc-300">
+                    Earlier conversation · {messages.length - 4} messages
+                  </summary>
+                  <div className="mt-3 space-y-2 border-t border-white/[0.05] pt-3">
+                    {messages.slice(0, -4).map((message, index) => (
+                      <div key={`${message.timestamp}-earlier-${index}`} className="flex gap-2 text-xs leading-5">
+                        <span className="w-9 shrink-0 text-[10px] font-semibold uppercase text-zinc-600">{message.role === "user" ? "You" : "Chef"}</span>
+                        <span className="text-zinc-400">{message.content}</span>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              )}
               <div className="space-y-2">
                 {messages.slice(-4).map((message, index) => (
-                  <div key={`${message.timestamp}-${index}`} className="flex gap-2 text-xs leading-5">
+                  <div key={`${message.timestamp}-recent-${index}`} className="flex gap-2 text-xs leading-5">
                     <span className="w-9 shrink-0 text-[10px] font-semibold uppercase text-zinc-600">{message.role === "user" ? "You" : "Chef"}</span>
                     <span className="line-clamp-2 text-zinc-400">{message.content}</span>
                   </div>
