@@ -34,6 +34,12 @@ assert.match(home, /mission\.id !== latestMission\?\.id/, "prior Mission history
 assert.match(home, /\.slice\(0, 3\)/, "prior Mission history must stay bounded on the default Home surface");
 assert.match(home, /Recent Mission outcomes/, "selected Thread prior outcomes must be inspectable without opening Workbench");
 assert.match(home, /missionOutcomePresentation\(mission\.status\)/, "prior Mission history must use human-readable outcome labels");
+assert.match(home, /const missionResults = useMemo/, "Home must derive prior Mission results from the already loaded selected-Thread message history");
+assert.match(home, /message\.role !== "assistant" \|\| typeof missionId !== "string" \|\| results\.has\(missionId\)/, "prior result indexing must accept only Mission-scoped assistant messages and keep the latest durable result");
+assert.match(home, /const missionId = message\.metadata\?\.missionId;/, "prior result indexing must use durable Mission metadata instead of message position");
+assert.match(home, /const result = missionResults\.get\(mission\.id\) \?\? null;/, "each prior Mission row must resolve only its own durable result");
+assert.match(home, /line-clamp-2 text-left text-\[11px\]/, "prior Mission results must stay concise on the default Home surface");
+assert.match(home, /aria-label=\{`Result from \$\{mission\.goal\}`\}/, "prior Mission result previews must remain identifiable without exposing runtime IDs");
 assert.match(home, /Recent conversation/, "selected Thread history must be visible without opening Workbench");
 assert.match(home, /saveSelectedThreadId/, "selected Thread should survive reload when possible");
 assert.match(threadApi, /method: "PATCH"/, "Thread rename must use the existing PATCH lifecycle route");
@@ -88,4 +94,4 @@ assert.match(rooms, /if \(!open \|\| !selectedChannel\)/, "closed Rooms should n
 const threadSendCalls = home.match(/sendThreadMessage\(/g) ?? [];
 assert.equal(threadSendCalls.length, 1, "the default home should have one authoritative Thread-scoped Chef intent submission path");
 
-console.log("intent-home-ui: ok — Chef keeps Thread-scoped intent, history, approvals, recovery, and Workbench progressive depth coherent");
+console.log("intent-home-ui: ok — Chef keeps Thread-scoped intent, history, prior results, approvals, recovery, and Workbench progressive depth coherent");
