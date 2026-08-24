@@ -116,6 +116,18 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
     [latestMission?.id, missionChronology],
   );
 
+  const missionResults = useMemo(() => {
+    const results = new Map<string, string>();
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const message = messages[index];
+      const missionId = message.metadata?.missionId;
+      if (message.role !== "assistant" || typeof missionId !== "string" || results.has(missionId)) continue;
+      const content = message.content.trim();
+      if (content) results.set(missionId, content);
+    }
+    return results;
+  }, [messages]);
+
   const missionTasks = useMemo(() => {
     if (!latestMission) return [];
     const ids = new Set(latestMission.taskIds);
@@ -500,11 +512,19 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
                   <div className="space-y-1">
                     {recentPriorMissions.map((mission) => {
                       const outcome = missionOutcomePresentation(mission.status);
+                      const result = missionResults.get(mission.id) ?? null;
                       return (
-                        <div key={mission.id} className="flex items-center gap-3 rounded-xl px-3 py-2">
-                          <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${outcome.dot}`} />
-                          <span className="min-w-0 flex-1 truncate text-xs text-zinc-400">{mission.goal}</span>
-                          <span className={`shrink-0 text-[10px] font-medium ${outcome.text}`}>{outcome.label}</span>
+                        <div key={mission.id} className="rounded-xl px-3 py-2">
+                          <div className="flex items-center gap-3">
+                            <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${outcome.dot}`} />
+                            <span className="min-w-0 flex-1 truncate text-xs text-zinc-400">{mission.goal}</span>
+                            <span className={`shrink-0 text-[10px] font-medium ${outcome.text}`}>{outcome.label}</span>
+                          </div>
+                          {result && (
+                            <p className="ml-4 mt-1 line-clamp-2 text-left text-[11px] leading-4 text-zinc-600" aria-label={`Result from ${mission.goal}`}>
+                              {result}
+                            </p>
+                          )}
                         </div>
                       );
                     })}
