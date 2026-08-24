@@ -142,9 +142,16 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
       || latestMission?.status === "failed"
       || latestMission?.status === "blocked"
       || latestMission?.status === "cancelled"
+      || latestMission?.status === "waiting_for_approval"
+      || latestMission?.status === "paused"
       || missionTasks.some((task) => task.status === "failed" || task.status === "blocked" || task.status === "cancelled")
     ) return "attention";
-    if (missionTasks.some((task) => task.status === "running" || task.status === "assigned" || task.status === "spawning")) return "working";
+    if (
+      latestMission?.status === "planning"
+      || latestMission?.status === "active"
+      || latestMission?.status === "verifying"
+      || missionTasks.some((task) => task.status === "running" || task.status === "assigned" || task.status === "spawning")
+    ) return "working";
     if (latestMission?.status === "completed" || (missionTasks.length > 0 && missionTasks.every((task) => task.status === "completed"))) return "done";
     return "ready";
   }, [latestMission?.status, missionApprovals.length, missionTasks]);
