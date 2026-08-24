@@ -24,7 +24,12 @@ assert.match(home, /archiveSelectedThread\(\)/, "Thread archive must be availabl
 assert.match(home, /nextThreads\.find\(\(thread\) => thread\.status === "active"\)/, "archiving the selected Thread must move selection to another active Thread when possible");
 assert.match(home, /saveSelectedThreadId\(nextActive\?\.id \?\? null\)/, "archiving must not leave an archived Thread persisted as the active selection");
 assert.match(home, /mission\.metadata\?\.threadId === selectedThreadId/, "Mission status on Home must be scoped to the selected Thread");
+assert.match(home, /const missionChronology = useMemo/, "Home must derive one stable Mission chronology for current work and history");
+assert.match(home, /sort\(\(a, b\) => b\.createdAt - a\.createdAt\)/, "Mission chronology must follow creation time instead of mutation time");
+assert.doesNotMatch(home, /sort\(\(a, b\) => b\.updatedAt - a\.updatedAt\)/, "updating an older Mission must not make it current again");
+assert.match(home, /const latestMission = missionChronology\[0\] \?\? null;/, "current work must use the newest created Mission in the selected Thread");
 assert.match(home, /const recentPriorMissions = useMemo/, "Home must derive bounded prior Mission history from the selected Thread projection");
+assert.match(home, /missionChronology\s+\.filter\(\(mission\) => mission\.id !== latestMission\?\.id\)/, "prior Mission history must share the same creation chronology as current work");
 assert.match(home, /mission\.id !== latestMission\?\.id/, "prior Mission history must not duplicate the current Mission");
 assert.match(home, /\.slice\(0, 3\)/, "prior Mission history must stay bounded on the default Home surface");
 assert.match(home, /Recent Mission outcomes/, "selected Thread prior outcomes must be inspectable without opening Workbench");

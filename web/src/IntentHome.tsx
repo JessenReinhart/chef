@@ -102,17 +102,18 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
     return missions.filter((mission) => mission.metadata?.threadId === selectedThreadId);
   }, [missions, selectedThreadId]);
 
-  const latestMission = useMemo(
-    () => [...threadMissions].sort((a, b) => b.updatedAt - a.updatedAt)[0] ?? null,
+  const missionChronology = useMemo(
+    () => [...threadMissions].sort((a, b) => b.createdAt - a.createdAt),
     [threadMissions],
   );
 
+  const latestMission = missionChronology[0] ?? null;
+
   const recentPriorMissions = useMemo(
-    () => [...threadMissions]
-      .sort((a, b) => b.updatedAt - a.updatedAt)
+    () => missionChronology
       .filter((mission) => mission.id !== latestMission?.id)
       .slice(0, 3),
-    [latestMission?.id, threadMissions],
+    [latestMission?.id, missionChronology],
   );
 
   const missionTasks = useMemo(() => {
