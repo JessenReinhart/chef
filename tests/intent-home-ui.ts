@@ -75,7 +75,7 @@ assert.match(home, /latestMission\?\.status === "verifying"/, "Mission verificat
 assert.match(home, /const tasksById = new Map\(tasks\.map\(\(task\) => \[task\.id, task\]\)\)/, "current-work task lookup must not inherit workspace task-array order");
 assert.match(home, /latestMission\.taskIds\s+\.map\(\(taskId\) => tasksById\.get\(taskId\)\)/, "current-work tasks must follow the Mission's authoritative taskId plan order");
 assert.match(home, /\.filter\(\(task\): task is UiTask => task !== undefined\)/, "missing task projections must be ignored without disturbing Mission task order");
-assert.match(home, /currentMissionTasks\.slice\(0, 6\)/, "the default current-work list must stay bounded while preserving plan sequence");
+assert.match(home, /currentMissionTasks\.slice\(-6\)/, "the default current-work list must show the latest planned tasks while preserving plan sequence");
 assert.doesNotMatch(home, /currentMissionTasks\.slice\(-6\)\.reverse\(\)/, "Home must not reverse storage order to approximate current Mission plan order");
 assert.match(home, /const currentMissionTaskIds = useMemo/, "failure activity must have an explicit current-Mission task boundary");
 assert.match(home, /new Set\(latestMission\?\.taskIds \?\? \[\]\)/, "failure activity must derive only from the current Mission task lineage");
