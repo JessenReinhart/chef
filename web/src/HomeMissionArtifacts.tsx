@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { loadSelectedThreadId, SELECTED_THREAD_EVENT } from "./threadApi";
 import type { UiMission } from "./types";
@@ -29,8 +29,10 @@ export function HomeMissionArtifacts() {
   const [mission, setMission] = useState<UiMission | null>(null);
   const [artifacts, setArtifacts] = useState<HomeArtifact[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const refreshSequence = useRef(0);
 
   const refresh = useCallback(async () => {
+    const sequence = ++refreshSequence.current;
     setTarget(document.querySelector("main"));
     const selectedThreadId = loadSelectedThreadId();
     if (!selectedThreadId) {
@@ -50,6 +52,8 @@ export function HomeMissionArtifacts() {
 
       const state = await stateResponse.json() as StateSnapshot;
       const artifactBody = await artifactResponse.json() as { ok?: boolean; data?: HomeArtifact[] };
+      if (sequence !== refreshSequence.current || loadSelectedThreadId() !== selectedThreadId) return;
+
       const currentMission = [...(state.missions ?? [])]
         .filter((candidate) => candidate.metadata?.threadId === selectedThreadId)
         .sort((a, b) => b.createdAt - a.createdAt)[0] ?? null;
@@ -58,6 +62,7 @@ export function HomeMissionArtifacts() {
       setArtifacts(artifactBody.ok && Array.isArray(artifactBody.data) ? artifactBody.data : []);
       setError(null);
     } catch (cause) {
+      if (sequence !== refreshSequence.current || loadSelectedThreadId() !== selectedThreadId) return;
       setMission(null);
       setArtifacts([]);
       setError(cause instanceof Error ? cause.message : "Mission outputs are temporarily unavailable");
