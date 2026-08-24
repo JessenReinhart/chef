@@ -23,6 +23,13 @@ assert.match(home, /renameSelectedThread\(\)/, "Thread rename must be available 
 assert.match(home, /archiveSelectedThread\(\)/, "Thread archive must be available directly from Home");
 assert.match(home, /nextThreads\.find\(\(thread\) => thread\.status === "active"\)/, "archiving the selected Thread must move selection to another active Thread when possible");
 assert.match(home, /saveSelectedThreadId\(nextActive\?\.id \?\? null\)/, "archiving must not leave an archived Thread persisted as the active selection");
+assert.match(home, /const threadMissionSummaries = useMemo/, "Thread navigation must derive status metadata from durable Mission state");
+assert.match(home, /mission\.metadata\?\.threadId === thread\.id/, "Thread navigation metadata must stay scoped to each Thread's Mission lineage");
+assert.match(home, /sort\(\(a, b\) => b\.createdAt - a\.createdAt\)/, "Thread status must use Mission creation chronology rather than mutation order");
+assert.match(home, /active: threadMissionList\[0\] \? isMissionActive\(threadMissionList\[0\]\.status\) : false/, "Thread active-work status must follow the newest Mission only");
+assert.match(home, /summary\.count === 1 \? "Mission" : "Missions"/, "Thread chips must show a compact human-readable Mission count");
+assert.match(home, /summary\.active \? " · active" : ""/, "Thread chips must mark non-terminal latest Missions as active work");
+assert.match(home, /status !== "completed" && status !== "failed" && status !== "blocked" && status !== "cancelled"/, "terminal Missions must not leave a Thread marked active");
 assert.match(home, /mission\.metadata\?\.threadId === selectedThreadId/, "Mission status on Home must be scoped to the selected Thread");
 assert.match(home, /const missionChronology = useMemo/, "Home must derive one stable Mission chronology for current work and history");
 assert.match(home, /sort\(\(a, b\) => b\.createdAt - a\.createdAt\)/, "Mission chronology must follow creation time instead of mutation time");
@@ -113,4 +120,4 @@ assert.match(rooms, /if \(!open \|\| !selectedChannel\)/, "closed Rooms should n
 const threadSendCalls = home.match(/sendThreadMessage\(/g) ?? [];
 assert.equal(threadSendCalls.length, 1, "the default home should have one authoritative Thread-scoped Chef intent submission path");
 
-console.log("intent-home-ui: ok — Chef keeps Thread-scoped intent, history, approvals, recovery, and Workbench progressive depth coherent");
+console.log("intent-home-ui: ok — Chef keeps Thread-scoped intent, history, approvals, recovery, navigation status, and Workbench progressive depth coherent");

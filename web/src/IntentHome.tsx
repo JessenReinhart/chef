@@ -45,6 +45,10 @@ function missionOutcomePresentation(status: UiMission["status"]): { label: strin
   return { label: "In progress", dot: "bg-red-400", text: "text-red-300" };
 }
 
+function isMissionActive(status: UiMission["status"]): boolean {
+  return status !== "completed" && status !== "failed" && status !== "blocked" && status !== "cancelled";
+}
+
 function titleFromMessage(message: string): string {
   const normalized = message.replace(/\s+/g, " ").trim();
   return normalized.length <= 48 ? normalized : `${normalized.slice(0, 45)}…`;
@@ -118,6 +122,20 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
     () => threads.find((thread) => thread.id === selectedThreadId) ?? null,
     [selectedThreadId, threads],
   );
+
+  const threadMissionSummaries = useMemo(() => {
+    const summaries = new Map<string, { count: number; active: boolean }>();
+    for (const thread of threads) {
+      const threadMissionList = missions
+        .filter((mission) => mission.metadata?.threadId === thread.id)
+        .sort((a, b) => b.createdAt - a.createdAt);
+      summaries.set(thread.id, {
+        count: threadMissionList.length,
+        active: threadMissionList[0] ? isMissionActive(threadMissionList[0].status) : false,
+      });
+    }
+    return summaries;
+  }, [missions, threads]);
 
   const threadMissions = useMemo(() => {
     if (!selectedThreadId) return [];
@@ -385,21 +403,29 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
       <main className="relative z-10 mx-auto flex w-full max-w-4xl flex-col px-6 pb-16 pt-[7vh] sm:pt-[9vh]">
         <section className="mx-auto w-full max-w-3xl text-center">
           <div className="mb-4 flex items-center justify-center gap-2 overflow-x-auto pb-1" aria-label="Conversation Threads">
-            {threads.filter((thread) => thread.status === "active").map((thread) => (
-              <button
-                key={thread.id}
-                type="button"
-                onClick={() => void selectThread(thread.id)}
-                aria-pressed={thread.id === selectedThreadId}
-                className={`shrink-0 rounded-full border px-3 py-1.5 text-[11px] transition ${
-                  thread.id === selectedThreadId
-                    ? "border-red-300/30 bg-red-300/[0.09] text-red-200"
-                    : "border-white/[0.08] bg-black/20 text-zinc-500 hover:border-white/15 hover:text-zinc-300"
-                }`}
-              >
-                {thread.title}
-              </button>
-            ))}
+            {threads.filter((thread) => thread.status === "active").map((thread) => {
+              const summary = threadMissionSummaries.get(thread.id);
+              return (
+                <button
+                  key={thread.id}
+                  type="button"
+                  onClick={() => void selectThread(thread.id)}
+                  aria-pressed={thread.id === selectedThreadId}
+                  className={`shrink-0 rounded-full border px-3 py-1.5 text-[11px] transition ${
+                    thread.id === selectedThreadId
+                      ? "border-red-300/30 bg-red-300/[0.09] text-red-200"
+                      : "border-white/[0.08] bg-black/20 text-zinc-500 hover:border-white/15 hover:text-zinc-300"
+                  }`}
+                >
+                  <span>{thread.title}</span>
+                  {summary && summary.count > 0 && (
+                    <span className="ml-1.5 text-[9px] text-zinc-600">
+                      · {summary.count} {summary.count === 1 ? "Mission" : "Missions"}{summary.active ? " · active" : ""}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
             <button
               type="button"
               onClick={() => void startNewThread()}
