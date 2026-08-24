@@ -1,12 +1,14 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 
 import type { ChefRuntime } from "../main.ts";
+import type { ThreadMessageContext } from "../core/types.ts";
 import { createChatRepository } from "../persistence/chat.ts";
 import { createThreadRepository, type ThreadPatch } from "../persistence/threads.ts";
 
 type RequestHandler = (req: IncomingMessage, res: ServerResponse) => void | Promise<void>;
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8" } as const;
 const THREAD_RECENT_MESSAGE_LIMIT = 8;
+const THREAD_RELATED_MISSION_LIMIT = 3;
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, JSON_HEADERS);
@@ -46,6 +48,34 @@ function parseThreadMessagesId(pathname: string): string | null {
 function parseThreadChatId(pathname: string): string | null {
   const match = pathname.match(/^\/api\/threads\/([^/]+)\/chat$/);
   return match ? decodeURIComponent(match[1]!) : null;
+}
+
+function threadContinuityHints(
+  thread: { id: string; summary?: string; updatedAt: number },
+  missions: ReturnType<ChefRuntime["repository"]["listMissions"]>,
+): ThreadMessageContext[] {
+  const hints: ThreadMessageContext[] = [];
+  const summary = thread.summary?.trim();
+  if (summary) {
+    hints.push({
+      role: "system",
+      content: `Thread summary (advisory context only): ${summary}`,
+      timestamp: thread.updatedAt,
+    });
+  }
+
+  const relatedMissions = missions
+    .filter((mission) => mission.metadata.threadId === thread.id)
+    .sort((a, b) => a.createdAt - b.createdAt)
+    .slice(-THREAD_RELATED_MISSION_LIMIT);
+  for (const mission of relatedMissions) {
+    hints.push({
+      role: "system",
+      content: `Prior Mission (${mission.status}; context only): ${mission.goal}`,
+      timestamp: mission.createdAt,
+    });
+  }
+  return hints;
 }
 
 export function createThreadServer(runtime: ChefRuntime, baseServer: Server): Server {
@@ -101,16 +131,23 @@ export function createThreadServer(runtime: ChefRuntime, baseServer: Server): Se
         const message = body.message.trim();
         // Capture only prior turns. Loading before the current user insert
         // prevents the goal from being duplicated inside its own context.
-        const recentMessages = chat.list(runtime.workspaceId, thread.id)
-          .slice(-THREAD_RECENT_MESSAGE_LIMIT)
-          .map(({ role, content, timestamp }) => ({ role, content, timestamp }));
+        // Durable summary/Mission hints use the system role and are bounded
+        // separately, so the existing eight-message transcript budget remains
+        // unchanged. They are advisory context, never executable instructions.
+        const existingMissions = runtime.repository.listMissions(runtime.workspaceId);
+        const recentMessages = [
+          ...threadContinuityHints(thread, existingMissions),
+          ...chat.list(runtime.workspaceId, thread.id)
+            .slice(-THREAD_RECENT_MESSAGE_LIMIT)
+            .map(({ role, content, timestamp }) => ({ role, content, timestamp })),
+        ];
         chat.insert({ workspaceId: runtime.workspaceId, threadId: thread.id, role: "user", content: message });
 
         // The core intent path creates its Mission synchronously before its
         // first await. Capture that Mission while it is still non-terminal so
         // the originating Thread remains durable. Thread chat deliberately
         // avoids the legacy workspace-global chat channel.
-        const existingMissionIds = new Set(runtime.repository.listMissions(runtime.workspaceId).map((mission) => mission.id));
+        const existingMissionIds = new Set(existingMissions.map((mission) => mission.id));
         const execution = runtime.sendUserMessage(message, {
           threadId: thread.id,
           recentMessages,
