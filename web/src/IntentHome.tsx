@@ -409,6 +409,32 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
     );
   }
 
+  function renderApproval(approval: (typeof missionApprovals)[number]) {
+    return (
+      <div key={approval.id} className="mt-3 border-t border-amber-200/10 pt-3 first:border-0 first:pt-0">
+        <div className="text-[10px] font-medium text-zinc-500">For this Mission</div>
+        <p className="mt-1 line-clamp-2 text-[11px] leading-4 text-amber-100/80">{approval.missionGoal}</p>
+        <p className="mt-2 text-xs leading-5 text-zinc-300">{approval.reason}</p>
+        <div className="mt-3 flex gap-2">
+          <button
+            type="button"
+            onClick={() => void decideApproval(approval.id, "accept")}
+            className="rounded-lg bg-amber-200 px-3 py-1.5 text-[10px] font-bold text-amber-950"
+          >
+            Allow
+          </button>
+          <button
+            type="button"
+            onClick={() => void decideApproval(approval.id, "reject")}
+            className="rounded-lg border border-white/10 px-3 py-1.5 text-[10px] font-medium text-zinc-400 hover:text-zinc-100"
+          >
+            Deny
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="relative h-screen w-screen overflow-auto bg-[#09090b] text-zinc-100 selection:bg-red-400 selection:text-black">
       <div
@@ -688,29 +714,17 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
               {missionApprovals.length > 0 && (
                 <div className="rounded-2xl border border-amber-300/20 bg-amber-300/[0.05] p-5">
                   <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-amber-300/60">Needs your attention</div>
-                  {missionApprovals.slice(0, 2).map((approval) => (
-                    <div key={approval.id} className="mt-3 border-t border-amber-200/10 pt-3 first:border-0 first:pt-0">
-                      <div className="text-[10px] font-medium text-zinc-500">For this Mission</div>
-                      <p className="mt-1 line-clamp-2 text-[11px] leading-4 text-amber-100/80">{approval.missionGoal}</p>
-                      <p className="mt-2 text-xs leading-5 text-zinc-300">{approval.reason}</p>
-                      <div className="mt-3 flex gap-2">
-                        <button
-                          type="button"
-                          onClick={() => void decideApproval(approval.id, "accept")}
-                          className="rounded-lg bg-amber-200 px-3 py-1.5 text-[10px] font-bold text-amber-950"
-                        >
-                          Allow
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => void decideApproval(approval.id, "reject")}
-                          className="rounded-lg border border-white/10 px-3 py-1.5 text-[10px] font-medium text-zinc-400 hover:text-zinc-100"
-                        >
-                          Deny
-                        </button>
+                  {missionApprovals.slice(0, 2).map(renderApproval)}
+                  {missionApprovals.length > 2 && (
+                    <details className="mt-3 border-t border-amber-200/10 pt-3" aria-label="More pending approvals">
+                      <summary className="cursor-pointer select-none text-[10px] font-semibold text-amber-200/80 transition hover:text-amber-100">
+                        More approvals · {missionApprovals.length - 2}
+                      </summary>
+                      <div className="mt-3 border-t border-amber-200/10 pt-3">
+                        {missionApprovals.slice(2).map(renderApproval)}
                       </div>
-                    </div>
-                  ))}
+                    </details>
+                  )}
                 </div>
               )}
 
