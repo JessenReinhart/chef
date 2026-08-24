@@ -562,7 +562,12 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
                   return (
                     <div key={task.id} className="flex items-center gap-3 rounded-xl px-3 py-2.5 transition hover:bg-white/[0.025]">
                       <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${presentation.dot}`} />
-                      <span className="min-w-0 flex-1 truncate text-xs text-zinc-300">{task.title}</span>
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-xs text-zinc-300">{task.title}</div>
+                        {task.assignedTo && (
+                          <div className="mt-0.5 truncate text-[10px] text-zinc-600">Worker · {task.assignedTo}</div>
+                        )}
+                      </div>
                       {canRetry ? (
                         <button
                           type="button"
