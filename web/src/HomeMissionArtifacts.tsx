@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { loadSelectedThreadId } from "./threadApi";
+import { loadSelectedThreadId, SELECTED_THREAD_EVENT } from "./threadApi";
 import type { UiMission } from "./types";
 
 type HomeArtifact = {
@@ -16,7 +16,6 @@ type HomeArtifact = {
 type StateSnapshot = { missions?: UiMission[] };
 
 const MAX_HOME_ARTIFACTS = 4;
-const THREAD_SELECTION_EVENT = "chef:selected-thread-changed";
 
 function artifactSummary(artifact: HomeArtifact): string | null {
   const value = artifact.metadata.summary ?? artifact.metadata.preview ?? artifact.metadata.description;
@@ -69,10 +68,10 @@ export function HomeMissionArtifacts() {
     void refresh();
     const timer = window.setInterval(() => void refresh(), 1800);
     const onThreadChanged = () => void refresh();
-    window.addEventListener(THREAD_SELECTION_EVENT, onThreadChanged);
+    window.addEventListener(SELECTED_THREAD_EVENT, onThreadChanged);
     return () => {
       window.clearInterval(timer);
-      window.removeEventListener(THREAD_SELECTION_EVENT, onThreadChanged);
+      window.removeEventListener(SELECTED_THREAD_EVENT, onThreadChanged);
     };
   }, [refresh]);
 
