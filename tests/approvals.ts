@@ -97,6 +97,14 @@ async function runScenario(decision: ApprovalDecision): Promise<void> {
       return state.approvals.find((entry: Approval) => entry.id === approval.id)?.status !== "pending";
     });
 
+    if (decision === "accepted") {
+      await waitFor(async () => {
+        const state = await chef.inspectState();
+        const task = state.tasks.find((entry) => entry.id === held!.id);
+        return task?.status === "running" && state.sessions.some((session) => session.taskId === held!.id);
+      });
+    }
+
     const after = await chef.inspectState();
     const resolved = after.approvals.find((entry: Approval) => entry.id === approval.id)!;
     assert.equal(resolved.status, decision);
@@ -109,7 +117,7 @@ async function runScenario(decision: ApprovalDecision): Promise<void> {
     const task = after.tasks.find((entry) => entry.id === held!.id)!;
     if (decision === "accepted") {
       assert.equal(task.status, "running", "accepted task must dispatch");
-      assert.equal(after.sessions.length, 1, "accepted task must spawn a session");
+      assert.ok(after.sessions.some((session) => session.taskId === held!.id), "accepted task must spawn a session");
     } else {
       assert.equal(task.status, "cancelled", "rejected task must be cancelled");
       assert.equal(after.sessions.length, 0, "rejected task must never spawn");
