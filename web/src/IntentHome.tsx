@@ -11,6 +11,7 @@ import {
   threadMessages,
   type UiThread,
 } from "./threadApi";
+import { createThreadHistoryLoader } from "./threadSelection";
 import type { ChatMessage, UiMission, UiRuntimeEvent, UiTask } from "./types";
 
 type Approval = { id: string; reason: string; taskId: string; status: string };
@@ -89,8 +90,10 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
   const [retryingTaskId, setRetryingTaskId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lastReport, setLastReport] = useState<string | null>(null);
+  const threadHistory = useMemo(() => createThreadHistoryLoader(threadMessages), []);
 
   const refresh = useCallback(async () => {
+    const selectionSnapshot = threadHistory.snapshot();
     try {
       const [snapshot, listedThreads] = await Promise.all([api.stateRaw(), listThreads()]);
       const activeThreads = listedThreads.filter((thread) => thread.status === "active");
@@ -103,14 +106,18 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
       setEvents(snapshot.events);
       setApprovals(snapshot.approvals.filter((approval) => approval.status === "pending"));
       setThreads(listedThreads);
-      setMessages(selectedMessages);
-      setSelectedThreadId(selected?.id ?? null);
-      saveSelectedThreadId(selected?.id ?? null);
-      setError(null);
+      if (threadHistory.isCurrent(selectionSnapshot)) {
+        setMessages(selectedMessages);
+        setSelectedThreadId(selected?.id ?? null);
+        saveSelectedThreadId(selected?.id ?? null);
+        setError(null);
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Chef could not refresh the workspace");
+      if (threadHistory.isCurrent(selectionSnapshot)) {
+        setError(err instanceof Error ? err.message : "Chef could not refresh the workspace");
+      }
     }
-  }, [selectedThreadId]);
+  }, [selectedThreadId, threadHistory]);
 
   useEffect(() => {
     void refresh();
@@ -259,7 +266,10 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
     setSelectedThreadId(threadId);
     setLastReport(null);
     try {
-      setMessages(await threadMessages(threadId));
+      const result = await threadHistory.load(threadId);
+      if (!result.current) return;
+      setMessages(result.messages);
+      setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Chef could not open this Thread");
     }
@@ -271,6 +281,7 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
     setError(null);
     try {
       const thread = await createThread("New thread");
+      threadHistory.invalidate();
       setThreads((current) => [...current, thread]);
       saveSelectedThreadId(thread.id);
       setSelectedThreadId(thread.id);
@@ -311,7 +322,13 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
       setThreads(nextThreads);
       setSelectedThreadId(nextActive?.id ?? null);
       saveSelectedThreadId(nextActive?.id ?? null);
-      setMessages(nextActive ? await threadMessages(nextActive.id) : []);
+      if (nextActive) {
+        const result = await threadHistory.load(nextActive.id);
+        if (result.current) setMessages(result.messages);
+      } else {
+        threadHistory.invalidate();
+        setMessages([]);
+      }
       setLastReport(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Chef could not archive this Thread");
@@ -330,6 +347,7 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
       let threadId = selectedThreadId;
       if (!threadId) {
         const thread = await createThread(titleFromMessage(message));
+        threadHistory.invalidate();
         setThreads((current) => [...current, thread]);
         threadId = thread.id;
         saveSelectedThreadId(thread.id);
