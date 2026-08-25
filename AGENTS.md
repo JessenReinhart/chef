@@ -115,6 +115,7 @@ npm run build
 - Inline property access on a cast is disallowed (`ts-no-inline-cast-access`): use a named const with a reason or a real type guard.
 - `ReturnType<typeof fn>` contracts are disallowed (`ts-no-return-type`): export named types at the owning module.
 - Existing duplicated contracts such as `ContextReference`, `HarnessEvent`, or `SessionStatus` require care when changing imports/exports.
+- Comments should explain non-obvious rationale, invariants, constraints, or tradeoffs. Do not narrate obvious code or preserve PR history such as `Fix 1` in production comments.
 
 ## Important Files
 - `src/main.ts` — `createChef()` composition root and `ChefRuntime` facade.
@@ -145,12 +146,17 @@ npm run build
 - The root `typecheck` command is intended to be gating; inspect its actual result instead of assuming errors are tolerated.
 
 ## Testing & QA
+- Read `docs/ENGINEERING_QUALITY_GUARDRAILS.md` before adding or restructuring tests.
 - No Jest/Vitest framework; tests are executable Node scripts using `node:assert`.
 - Tests use real temporary SQLite databases and, where appropriate, real PTY harness behavior.
 - `npm test` is the canonical root regression suite and currently covers lifecycle, persistence, concurrency, replay, direct worker interaction, approvals/capabilities, tools, canvas behavior, context delivery/scopes, product-runtime v0.2 behavior, HTTP/server surfaces, and specialized harnesses.
 - Web changes should also pass `cd web && npx tsc -b && npm run build`.
 - CI exists, but a new PR must not be described as green until checks actually report success.
 - Keep tests deterministic and cleanup in `try/finally`; avoid `process.exit()` in shared regression paths.
+- Prefer behavior, scenario, and runtime-invariant tests over implementation-shape assertions.
+- Do not add source-text or regex assertions to prove ordinary UI/product behavior. Existing source-regex UI suites are legacy debt and should not be expanded. Static source checks are acceptable only for true static architecture rules that cannot be expressed behaviorally.
+- Before creating a new test file, check whether the scenario belongs in an existing domain suite. Test organization should follow durable product/runtime boundaries, not issue history.
+- Coverage percentage and test count are not goals by themselves. Prefer fewer high-signal assertions over fragmented low-signal coverage.
 
 ## Known Operational Constraints
 - `src/orchestrator/orchestrator.ts:#consumeSession` must forward every `exit`/`crash` event to `Scheduler.handleSessionEvent`; do not skip terminal events merely because the Task already appears terminal.
@@ -160,10 +166,12 @@ npm run build
 
 ## Autonomous / AI Assistant Verification
 Before implementing unattended work:
-1. Read current `master`, recent commits, open PRs, and relevant docs.
+1. Read current `master`, recent commits, open PRs, relevant docs, and `docs/ENGINEERING_QUALITY_GUARDRAILS.md`.
 2. Verify negative claims directly in the repository.
 3. Avoid overlapping files/semantics with active PRs unless the task is explicitly a follow-up.
 4. Prefer one bounded change with an explicit acceptance criterion.
 5. Run relevant tests/build/typecheck and report only evidence actually observed.
-6. Review the final diff from a critic perspective for runtime-authority violations, duplicated sources of truth, lifecycle regressions, speculative architecture, or scope creep.
-7. If no clear safe task exists, no-op rather than inventing work.
+6. Review every new or changed test for behavioral value: it should fail for a real product/runtime regression, not a harmless refactor.
+7. Review comments for durable rationale. Remove comments that only narrate code or patch history.
+8. Review the final diff from a critic perspective for runtime-authority violations, duplicated sources of truth, lifecycle regressions, speculative architecture, scope creep, brittle tests, or comment noise.
+9. If no clear safe task exists, no-op rather than inventing work.
