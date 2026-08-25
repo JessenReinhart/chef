@@ -13,6 +13,7 @@ import type {
   Plan,
   PlanProposalContext,
   PlanTaskOutcome,
+  RuntimeEvent,
   WorkspaceId,
 } from "../src/core/types.ts";
 
@@ -200,6 +201,29 @@ async function assertGeneratedAppRuns(appPath: string): Promise<void> {
   }
 }
 
+function eventStatus(event: RuntimeEvent): unknown {
+  if (typeof event.payload !== "object" || event.payload === null) return undefined;
+  return (event.payload as Record<string, unknown>).status;
+}
+
+function assertObservableMissionLifecycle(events: readonly RuntimeEvent[]): void {
+  const missionCreated = events.findIndex((event) =>
+    event.type === "mission.created" && eventStatus(event) === "planning"
+  );
+  const missionActive = events.findIndex((event) =>
+    event.type === "mission.status" && eventStatus(event) === "active"
+  );
+  const workerActivity = events.findIndex((event) => event.type.startsWith("task."));
+  const missionCompleted = events.findIndex((event) =>
+    event.type === "mission.status" && eventStatus(event) === "completed"
+  );
+
+  assert.ok(missionCreated >= 0, "golden path must visibly enter planning");
+  assert.ok(missionActive > missionCreated, "golden path must visibly leave planning before worker activity");
+  assert.ok(workerActivity > missionActive, "golden path must expose worker activity after Mission activation");
+  assert.ok(missionCompleted > workerActivity, "golden path must visibly complete only after worker activity");
+}
+
 /**
  * P0 golden path: the permanent boring acceptance task traverses the real
  * Mission -> Plan -> Task -> PTY lifecycle, produces a discoverable result in
@@ -222,12 +246,16 @@ async function main(): Promise<void> {
 
     assert.ok(chef.workspaceId, "start() must expose the selected workspace id");
     const workspaceId = chef.workspaceId;
+    const liveEvents: RuntimeEvent[] = [];
+    const unsubscribe = chef.subscribeEvents((event) => liveEvents.push(event));
     const result = await chef.sendUserMessage(TODO_REQUEST);
+    unsubscribe();
 
     assert.equal(result.workspaceId, workspaceId);
     assert.equal(result.ok, true, `orchestrator failed: ${result.report}`);
     assert.equal(result.taskIds.length, 1, "simple todo acceptance task should execute as one worker task");
     assert.match(result.report, /todo app/i, "completion report must identify the requested result");
+    assertObservableMissionLifecycle(liveEvents);
 
     const snapshot = await chef.inspectState();
     assert.equal(snapshot.workspaceId, workspaceId);
@@ -238,6 +266,7 @@ async function main(): Promise<void> {
     assert.equal(snapshot.plans[0].status, "completed", "the executed plan must complete durably");
     assert.deepEqual(snapshot.plans[0].taskIds, result.taskIds, "plan must retain task lineage");
     assert.ok(snapshot.events.some((event) => event.type.startsWith("task.")), "task lifecycle events must be recorded");
+    assertObservableMissionLifecycle(snapshot.events);
     assert.equal(snapshot.artifacts.length, 1, "worker must produce one durable result artifact");
     assert.equal(snapshot.artifacts[0].name, "todo-app", "artifact must make the generated result discoverable");
     assert.ok(snapshot.artifacts[0].uri.includes(TODO_APP), "artifact URI must point at the generated app");
@@ -261,6 +290,7 @@ async function main(): Promise<void> {
     const restored = await reopened.inspectState();
     assert.equal(restored.tasks.length, snapshot.tasks.length, "task history must survive reopen");
     assert.equal(restored.events.length, snapshot.events.length, "event history must survive reopen");
+    assertObservableMissionLifecycle(restored.events);
     assert.equal(restored.artifacts.length, snapshot.artifacts.length, "result location must survive reopen");
     assert.equal(restored.sessions.length, snapshot.sessions.length, "session history must survive reopen");
     assert.equal(restored.plans.length, snapshot.plans.length, "plan history must survive reopen");
