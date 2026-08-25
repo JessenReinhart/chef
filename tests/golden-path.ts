@@ -3,7 +3,7 @@ import { once } from "node:events";
 import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { GenericTerminalHarness } from "../src/harness/generic.ts";
 import { createChef } from "../src/main.ts";
 import type {
@@ -18,6 +18,48 @@ import type {
 
 const TODO_REQUEST = "Create a simple todo app";
 const TODO_APP = "todo-app.mjs";
+const TODO_APP_SOURCE = String.raw`import { createServer } from "node:http";
+
+const todos = [];
+const page = () => [
+  "<!doctype html>",
+  "<html lang=\"en\">",
+  "<head><meta charset=\"utf-8\"><title>Chef Todo</title></head>",
+  "<body><main>",
+  "<h1>Chef Todo</h1>",
+  "<form id=\"todo-form\"><input id=\"todo-input\" aria-label=\"New todo\"><button>Add</button></form>",
+  "<ul id=\"todo-list\"></ul>",
+  "</main>",
+  "<script>",
+  "const form=document.querySelector('#todo-form');",
+  "const input=document.querySelector('#todo-input');",
+  "const list=document.querySelector('#todo-list');",
+  "form.addEventListener('submit',(event)=>{event.preventDefault();const text=input.value.trim();if(!text)return;const item=document.createElement('li');item.textContent=text;list.append(item);input.value='';});",
+  "</script>",
+  "</body></html>",
+].join("");
+
+const server = createServer((req, res) => {
+  if (req.url === "/health") {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ ok: true }));
+    return;
+  }
+  if (req.url === "/api/todos") {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify(todos));
+    return;
+  }
+  res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+  res.end(page());
+});
+
+server.listen(Number(process.env.PORT || 0), "127.0.0.1", () => {
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("Expected TCP listener");
+  console.log("LISTENING:" + address.port);
+});
+`;
 
 class TodoAcceptanceDecisionProvider implements DecisionProvider {
   readonly name = "golden-todo-acceptance";
@@ -85,59 +127,8 @@ const os = require("os");
 const path = require("path");
 const crypto = require("crypto");
 
-const appPath = path.join(process.cwd(), "${TODO_APP}");
-const appSource = ${JSON.stringify(`import { createServer } from "node:http";
-
-const todos = [];
-const page = () => \`<!doctype html>
-<html lang="en">
-<head><meta charset="utf-8"><title>Chef Todo</title></head>
-<body>
-  <main>
-    <h1>Chef Todo</h1>
-    <form id="todo-form"><input id="todo-input" aria-label="New todo"><button>Add</button></form>
-    <ul id="todo-list"></ul>
-  </main>
-  <script>
-    const form = document.querySelector('#todo-form');
-    const input = document.querySelector('#todo-input');
-    const list = document.querySelector('#todo-list');
-    form.addEventListener('submit', (event) => {
-      event.preventDefault();
-      const text = input.value.trim();
-      if (!text) return;
-      const item = document.createElement('li');
-      item.textContent = text;
-      list.append(item);
-      input.value = '';
-    });
-  </script>
-</body>
-</html>\`;
-
-const server = createServer((req, res) => {
-  if (req.url === "/health") {
-    res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify({ ok: true }));
-    return;
-  }
-  if (req.url === "/api/todos") {
-    res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify(todos));
-    return;
-  }
-  res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-  res.end(page());
-});
-
-server.listen(Number(process.env.PORT || 0), "127.0.0.1", () => {
-  const address = server.address();
-  if (!address || typeof address === "string") throw new Error("Expected TCP listener");
-  console.log(\`LISTENING:\${address.port}\`);
-});
-`)};
-
-fs.writeFileSync(appPath, appSource, "utf8");
+const appPath = path.join(process.cwd(), ${JSON.stringify(TODO_APP)});
+fs.writeFileSync(appPath, ${JSON.stringify(TODO_APP_SOURCE)}, "utf8");
 
 const sid = process.env.CHEF_SESSION_ID;
 if (!sid) throw new Error("CHEF_SESSION_ID is required for the golden acceptance worker");
@@ -169,7 +160,7 @@ console.log("todo-builder: created " + appPath);
 
 async function assertGeneratedAppRuns(appPath: string): Promise<void> {
   const child = spawn(process.execPath, [appPath], {
-    cwd: join(appPath, ".."),
+    cwd: dirname(appPath),
     env: { ...process.env, PORT: "0" },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -253,7 +244,7 @@ async function main(): Promise<void> {
     assert.ok(snapshot.sessions.every((session) => session.status !== "running"), "no session may remain stuck after completion");
 
     const generatedSource = await readFile(appPath, "utf8");
-    assert.match(generatedSource, /createServer/, "todo app must be written inside the selected project");
+    assert.equal(generatedSource, TODO_APP_SOURCE, "todo app must be written inside the selected project");
     await assertGeneratedAppRuns(appPath);
 
     const messagesBeforeClose = chef.repository.listMessages(workspaceId);
