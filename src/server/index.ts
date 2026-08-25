@@ -14,6 +14,7 @@ import { createThreadServer } from "./thread-http.ts";
 import { createOrchestratorConfigServer } from "./orchestrator-config-http.ts";
 import { createWebUiServer } from "./web-ui-http.ts";
 import { applyOrchestratorProviderEnv } from "./orchestrator-config.ts";
+import { createMissionDecisionProvider } from "../orchestrator/fast-path-decision-provider.ts";
 import { createChef } from "../main.ts";
 import { mkdirSync } from "node:fs";
 import { spawn } from "node:child_process";
@@ -41,7 +42,13 @@ if (process.env.CHEF_PROVIDER && process.env.CHEF_API_KEY) {
   delete process.env.ANTHROPIC_API_KEY;
   delete process.env.OPENAI_API_KEY;
 }
-const chef = createChef({ dbPath, projectDir, orchestratorTimeoutMs: missionTimeoutMs });
+const missionDecisionProvider = createMissionDecisionProvider();
+const chef = createChef({
+  dbPath,
+  projectDir,
+  orchestratorTimeoutMs: missionTimeoutMs,
+  decisionProvider: missionDecisionProvider ?? undefined,
+});
 if (inheritedAnthropicKey === undefined) delete process.env.ANTHROPIC_API_KEY;
 else process.env.ANTHROPIC_API_KEY = inheritedAnthropicKey;
 if (inheritedOpenAIKey === undefined) delete process.env.OPENAI_API_KEY;
