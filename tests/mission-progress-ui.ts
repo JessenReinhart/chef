@@ -18,6 +18,18 @@ function missionStatusEvent(id: string, status: string, missionId = "mission-1")
   };
 }
 
+function taskEvent(id: string, type: string, payload: Record<string, unknown>, taskId = "task-1"): UiRuntimeEvent {
+  return {
+    id,
+    seq: Number(id.replace(/\D/g, "")) || 1,
+    timestamp: 1_000,
+    source: { type: "runtime", id: "task-machine" },
+    type,
+    payload,
+    taskId,
+  };
+}
+
 const cancelled = summarizeMissionProgressEvent(missionStatusEvent("event-1", "cancelled"));
 assert.ok(cancelled);
 assert.equal(cancelled.text, "Mission cancelled.");
@@ -34,6 +46,35 @@ assert.equal(active.tone, "active", "active Missions must keep their active proj
 const paused = summarizeMissionProgressEvent(missionStatusEvent("event-4", "paused"));
 assert.ok(paused);
 assert.equal(paused.tone, "neutral", "paused Missions retain the existing neutral projection in this slice");
+
+const failedTask = summarizeMissionProgressEvent(taskEvent("event-5", "task.failed", { from: "running", to: "failed", error: "worker exited" }));
+assert.ok(failedTask);
+assert.equal(failedTask.text, "A worker step failed: worker exited");
+assert.equal(failedTask.tone, "attention", "worker failures must be visible in Simple Mode");
+
+const retryingTask = summarizeMissionProgressEvent(taskEvent("event-6", "task.running", { from: "failed", to: "running", retryCount: 1 }));
+assert.ok(retryingTask);
+assert.equal(retryingTask.text, "Chef is retrying a work step (retry 1).");
+assert.equal(retryingTask.tone, "active", "retries must read as active recovery, not frozen work");
+
+const blockedTask = summarizeMissionProgressEvent(taskEvent("event-7", "task.blocked", { from: "running", to: "blocked", error: "dependency unavailable" }));
+assert.ok(blockedTask);
+assert.equal(blockedTask.text, "A work step is blocked: dependency unavailable");
+assert.equal(blockedTask.tone, "attention");
+
+const crashedSession = summarizeMissionProgressEvent({
+  id: "event-8",
+  seq: 8,
+  timestamp: 1_000,
+  source: { type: "runtime", id: "scheduler" },
+  type: "session.crashed",
+  payload: { reason: "orphan on startup" },
+  taskId: "task-1",
+  sessionId: "session-1",
+});
+assert.ok(crashedSession);
+assert.equal(crashedSession.text, "A worker session stopped unexpectedly: orphan on startup");
+assert.equal(crashedSession.tone, "attention");
 
 assert.equal(
   deriveMissionHomeState({ submitting: true, needsAttention: false, working: false, done: false }),
@@ -88,4 +129,16 @@ assert.deepEqual(
   "Simple Mode progress must use current-Mission runtime events and exclude unrelated work",
 );
 
-console.log("mission-progress-ui: ok — submitted work leaves Ready and current Mission events project truthful live progress");
+const recoveryEvents: UiRuntimeEvent[] = [
+  taskEvent("event-20", "task.failed", { from: "running", to: "failed", error: "worker crashed" }, "task-1"),
+  taskEvent("event-21", "task.running", { from: "failed", to: "running", retryCount: 1 }, "task-1"),
+  taskEvent("event-22", "task.failed", { from: "running", to: "failed", error: "unrelated failure" }, "task-other"),
+];
+const scopedRecovery = summarizeMissionProgressForMission(recoveryEvents, "mission-1", ["task-1"]);
+assert.deepEqual(
+  scopedRecovery.map((item) => item.text),
+  ["Chef is retrying a work step (retry 1).", "A worker step failed: worker crashed"],
+  "current-Mission recovery activity must stay visible without leaking unrelated failures",
+);
+
+console.log("mission-progress-ui: ok — submitted work, worker failures, and retries project truthful current-Mission progress");
