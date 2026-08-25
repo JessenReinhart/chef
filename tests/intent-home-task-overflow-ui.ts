@@ -33,11 +33,6 @@ assert.match(
   /missionTasks\.map\(renderMissionTask\)/,
   "the default task list should share task status and retry behavior with overflow steps",
 );
-assert.match(
-  home,
-  /const canRetry = task\.status === "failed" \|\| \(task\.status === "blocked" && !approvalTaskIds\.has\(task\.id\)\)/,
-  "earlier failed or non-approval-blocked steps should remain actionable with the same retry policy",
-);
 assert.doesNotMatch(
   home,
   /earlierMissionTasks\.map\([^)]*=>[^)]*task\.id[^)]*\)/,

@@ -11,7 +11,7 @@ import {
   threadMessages,
   type UiThread,
 } from "./threadApi";
-import { createThreadHistoryLoader } from "./threadSelection";
+import { createThreadHistoryLoader, resolveHomeThreadSelection } from "./threadSelection";
 import type { ChatMessage, UiMission, UiRuntimeEvent, UiTask } from "./types";
 
 type Approval = { id: string; reason: string; taskId: string; status: string };
@@ -96,9 +96,8 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
     const selectionSnapshot = threadHistory.snapshot();
     try {
       const [snapshot, listedThreads] = await Promise.all([api.stateRaw(), listThreads()]);
-      const activeThreads = listedThreads.filter((thread) => thread.status === "active");
       const rememberedId = selectedThreadId ?? loadSelectedThreadId();
-      const selected = activeThreads.find((thread) => thread.id === rememberedId) ?? activeThreads[0] ?? null;
+      const selected = resolveHomeThreadSelection(listedThreads, rememberedId).selectedThread;
       const selectedMessages = selected ? await threadMessages(selected.id) : [];
 
       setTasks(snapshot.tasks);
@@ -125,10 +124,12 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
     return () => window.clearInterval(timer);
   }, [refresh]);
 
-  const selectedThread = useMemo(
-    () => threads.find((thread) => thread.id === selectedThreadId) ?? null,
+  const threadNavigation = useMemo(
+    () => resolveHomeThreadSelection(threads, selectedThreadId),
     [selectedThreadId, threads],
   );
+  const { activeThreads, archivedThreads, selectedThread } = threadNavigation;
+  const archivedThreadSelected = threadNavigation.readOnly;
 
   const threadMissionSummaries = useMemo(() => {
     const summaries = new Map<string, { count: number; active: boolean }>();
@@ -302,7 +303,7 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
   }
 
   async function renameSelectedThread() {
-    if (!selectedThread || managingThread) return;
+    if (!selectedThread || selectedThread.status !== "active" || managingThread) return;
     const nextTitle = window.prompt("Rename Thread", selectedThread.title)?.trim();
     if (!nextTitle || nextTitle === selectedThread.title) return;
     setManagingThread(true);
@@ -318,7 +319,7 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
   }
 
   async function archiveSelectedThread() {
-    if (!selectedThread || managingThread) return;
+    if (!selectedThread || selectedThread.status !== "active" || managingThread) return;
     if (!window.confirm(`Archive “${selectedThread.title}”? You can keep its history, but it will leave the active Thread list.`)) return;
     setManagingThread(true);
     setError(null);
@@ -347,6 +348,10 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
   async function submitGoal() {
     const message = goal.trim();
     if (!message || submitting) return;
+    if (archivedThreadSelected) {
+      setError("Archived Threads are read-only. Select an active Thread or start a new Thread to continue working.");
+      return;
+    }
     setSubmitting(true);
     setLastReport(null);
     setError(null);
@@ -395,20 +400,20 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
   }
 
   function prepareFailedMissionFollowup() {
-    if (!latestMission || (latestMission.status !== "failed" && latestMission.status !== "blocked") || !selectedThreadId) return;
+    if (!latestMission || archivedThreadSelected || (latestMission.status !== "failed" && latestMission.status !== "blocked") || !selectedThreadId) return;
     setGoal(failureFollowupPrompt(latestMission.goal, failureReason ?? lastMissionActivity));
     setError(null);
   }
 
   function prepareCancelledMissionFollowup() {
-    if (!latestMission || latestMission.status !== "cancelled" || !selectedThreadId) return;
+    if (!latestMission || archivedThreadSelected || latestMission.status !== "cancelled" || !selectedThreadId) return;
     setGoal(`Continue this work: ${latestMission.goal}`);
     setError(null);
   }
 
   function renderMissionTask(task: UiTask) {
     const presentation = taskPresentation(task.status);
-    const canRetry = task.status === "failed" || (task.status === "blocked" && !approvalTaskIds.has(task.id));
+    const canRetry = !archivedThreadSelected && (task.status === "failed" || (task.status === "blocked" && !approvalTaskIds.has(task.id)));
     return (
       <div key={task.id} className="flex items-center gap-3 rounded-xl px-3 py-2.5 transition hover:bg-white/[0.025]">
         <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${presentation.dot}`} />
@@ -444,14 +449,16 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
           <button
             type="button"
             onClick={() => void decideApproval(approval.id, "accept")}
-            className="rounded-lg bg-amber-200 px-3 py-1.5 text-[10px] font-bold text-amber-950"
+            disabled={archivedThreadSelected}
+            className="rounded-lg bg-amber-200 px-3 py-1.5 text-[10px] font-bold text-amber-950 disabled:cursor-not-allowed disabled:opacity-40"
           >
             Allow
           </button>
           <button
             type="button"
             onClick={() => void decideApproval(approval.id, "reject")}
-            className="rounded-lg border border-white/10 px-3 py-1.5 text-[10px] font-medium text-zinc-400 hover:text-zinc-100"
+            disabled={archivedThreadSelected}
+            className="rounded-lg border border-white/10 px-3 py-1.5 text-[10px] font-medium text-zinc-400 hover:text-zinc-100 disabled:cursor-not-allowed disabled:opacity-40"
           >
             Deny
           </button>
@@ -489,7 +496,7 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
       <main className="relative z-10 mx-auto flex w-full max-w-4xl flex-col px-6 pb-16 pt-[7vh] sm:pt-[9vh]">
         <section className="mx-auto w-full max-w-3xl text-center">
           <div className="mb-4 flex items-center justify-center gap-2 overflow-x-auto pb-1" aria-label="Conversation Threads">
-            {threads.filter((thread) => thread.status === "active").map((thread) => {
+            {activeThreads.map((thread) => {
               const summary = threadMissionSummaries.get(thread.id);
               return (
                 <button
@@ -522,13 +529,45 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
             </button>
           </div>
 
+          {archivedThreads.length > 0 && (
+            <details className="mx-auto mb-4 w-fit max-w-full rounded-xl border border-white/[0.06] bg-black/15 px-3 py-2 text-left" aria-label="Archived Threads">
+              <summary className="cursor-pointer select-none text-[10px] font-medium text-zinc-600 transition hover:text-zinc-400">
+                Archived Threads · {archivedThreads.length}
+              </summary>
+              <div className="mt-2 flex max-w-[min(42rem,85vw)] flex-wrap gap-2 border-t border-white/[0.05] pt-2">
+                {archivedThreads.map((thread) => {
+                  const summary = threadMissionSummaries.get(thread.id);
+                  return (
+                    <button
+                      key={thread.id}
+                      type="button"
+                      onClick={() => void selectThread(thread.id)}
+                      aria-pressed={thread.id === selectedThreadId}
+                      className={`rounded-full border px-3 py-1.5 text-[10px] transition ${
+                        thread.id === selectedThreadId
+                          ? "border-zinc-500/50 bg-zinc-500/[0.12] text-zinc-200"
+                          : "border-white/[0.06] text-zinc-600 hover:border-white/15 hover:text-zinc-400"
+                      }`}
+                    >
+                      <span>{thread.title}</span>
+                      <span className="ml-1.5 text-[9px] text-zinc-700">· Archived</span>
+                      {summary && summary.count > 0 && (
+                        <span className="ml-1 text-[9px] text-zinc-700">· {summary.count} {summary.count === 1 ? "Mission" : "Missions"}</span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </details>
+          )}
+
           <div className="mb-3 flex items-center justify-center gap-2">
             <div className="inline-flex items-center gap-2 rounded-full border border-white/[0.08] bg-black/20 px-3 py-1.5 text-[11px] font-medium text-zinc-400 backdrop-blur">
               <span className={`h-1.5 w-1.5 rounded-full ${status.dot} ${status.ring}`} />
               {status.label}
-              {selectedThread && <span className="text-zinc-600">· {selectedThread.title}</span>}
+              {selectedThread && <span className="text-zinc-600">· {selectedThread.title}{archivedThreadSelected ? " · Archived" : ""}</span>}
             </div>
-            {selectedThread && (
+            {selectedThread?.status === "active" && (
               <div className="flex items-center gap-1" aria-label="Selected Thread actions">
                 <button
                   type="button"
@@ -550,14 +589,16 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
             )}
           </div>
           <h1 className="text-balance text-4xl font-semibold tracking-[-0.04em] text-white sm:text-5xl">
-            What are we doing?
+            {archivedThreadSelected ? "Looking back" : "What are we doing?"}
           </h1>
           <p className="mx-auto mt-4 max-w-xl text-sm leading-6 text-zinc-500">
-            Give Chef the outcome. Chef keeps this conversation and its work together in the selected Thread.
+            {archivedThreadSelected
+              ? "This archived Thread is kept as read-only history. Select an active Thread or start a new one when you want Chef to do more work."
+              : "Give Chef the outcome. Chef keeps this conversation and its work together in the selected Thread."}
           </p>
 
           <form
-            className="mt-8 rounded-2xl border border-white/10 bg-[#111114]/95 p-2 text-left shadow-[0_30px_90px_rgba(0,0,0,0.38)] backdrop-blur"
+            className={`mt-8 rounded-2xl border bg-[#111114]/95 p-2 text-left shadow-[0_30px_90px_rgba(0,0,0,0.38)] backdrop-blur ${archivedThreadSelected ? "border-white/[0.06] opacity-70" : "border-white/10"}`}
             onSubmit={(event) => {
               event.preventDefault();
               void submitGoal();
@@ -567,24 +608,27 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
               value={goal}
               onChange={(event) => setGoal(event.target.value)}
               onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey) {
+                if (!archivedThreadSelected && event.key === "Enter" && !event.shiftKey) {
                   event.preventDefault();
                   void submitGoal();
                 }
               }}
+              disabled={archivedThreadSelected}
               rows={3}
-              placeholder="Fix the login bug, investigate the report, prepare a summary…"
-              className="block w-full resize-none bg-transparent px-4 py-3 text-[15px] leading-6 text-zinc-100 outline-none placeholder:text-zinc-700"
+              placeholder={archivedThreadSelected ? "Archived Threads are read-only" : "Fix the login bug, investigate the report, prepare a summary…"}
+              className="block w-full resize-none bg-transparent px-4 py-3 text-[15px] leading-6 text-zinc-100 outline-none placeholder:text-zinc-700 disabled:cursor-not-allowed"
               aria-label="Tell Chef what you want to accomplish"
             />
             <div className="flex items-center justify-between border-t border-white/[0.06] px-2 pt-2">
-              <span className="px-2 text-[10px] text-zinc-700">Enter to send · Shift+Enter for a new line</span>
+              <span className="px-2 text-[10px] text-zinc-700">
+                {archivedThreadSelected ? "History only · choose an active Thread to continue" : "Enter to send · Shift+Enter for a new line"}
+              </span>
               <button
                 type="submit"
-                disabled={!goal.trim() || submitting}
+                disabled={archivedThreadSelected || !goal.trim() || submitting}
                 className="rounded-xl bg-red-400 px-4 py-2 text-xs font-bold text-[#190708] transition hover:bg-red-300 disabled:cursor-not-allowed disabled:opacity-30"
               >
-                {submitting ? "Starting…" : "Give to Chef"}
+                {archivedThreadSelected ? "Read only" : submitting ? "Starting…" : "Give to Chef"}
               </button>
             </div>
           </form>
@@ -692,7 +736,7 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
                 </div>
               )}
 
-              {(latestMission?.status === "failed" || latestMission?.status === "blocked") && selectedThreadId && (
+              {!archivedThreadSelected && (latestMission?.status === "failed" || latestMission?.status === "blocked") && selectedThreadId && (
                 <div className="mt-4 rounded-xl border border-rose-300/15 bg-rose-300/[0.04] px-4 py-3 text-left" aria-label="Failed Mission recovery">
                   <p className="text-xs leading-5 text-zinc-400">
                     Start a fresh follow-up in this Thread with the failure context already filled in. You can edit it before sending.
@@ -707,7 +751,7 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
                 </div>
               )}
 
-              {latestMission?.status === "cancelled" && selectedThreadId && (
+              {!archivedThreadSelected && latestMission?.status === "cancelled" && selectedThreadId && (
                 <div className="mt-4 rounded-xl border border-amber-300/15 bg-amber-300/[0.04] px-4 py-3 text-left" aria-label="Cancelled Mission recovery">
                   <p className="text-xs leading-5 text-zinc-400">
                     This Mission was cancelled. Keep its history intact and continue as fresh work in this Thread.

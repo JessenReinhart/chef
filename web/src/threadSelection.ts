@@ -1,8 +1,33 @@
+import type { UiThread } from "./threadApi";
 import type { ChatMessage } from "./types";
 
 export type ThreadHistoryLoad =
   | { current: true; messages: ChatMessage[] }
   | { current: false };
+
+export type HomeThreadSelection = {
+  activeThreads: UiThread[];
+  archivedThreads: UiThread[];
+  selectedThread: UiThread | null;
+  readOnly: boolean;
+};
+
+export function resolveHomeThreadSelection(
+  threads: readonly UiThread[],
+  rememberedId: string | null,
+): HomeThreadSelection {
+  const activeThreads = threads.filter((thread) => thread.status === "active");
+  const archivedThreads = threads.filter((thread) => thread.status === "archived");
+  const remembered = rememberedId ? threads.find((thread) => thread.id === rememberedId) ?? null : null;
+  const selectedThread = remembered ?? activeThreads[0] ?? null;
+
+  return {
+    activeThreads,
+    archivedThreads,
+    selectedThread,
+    readOnly: selectedThread?.status === "archived",
+  };
+}
 
 export function createThreadHistoryLoader(
   loadThreadMessages: (threadId: string) => Promise<ChatMessage[]>,
