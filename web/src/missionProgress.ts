@@ -1,6 +1,7 @@
 import type { UiRuntimeEvent } from "./types";
 
 export type MissionProgressTone = "neutral" | "active" | "attention" | "success";
+export type MissionHomeState = "ready" | "working" | "attention" | "done";
 
 export interface MissionProgressItem {
   id: string;
@@ -31,6 +32,19 @@ function missionStatusText(status: string): MissionProgressItem["tone"] {
   if (status === "failed" || status === "blocked" || status === "waiting_for_approval" || status === "cancelled") return "attention";
   if (status === "active" || status === "planning" || status === "verifying") return "active";
   return "neutral";
+}
+
+export function deriveMissionHomeState(input: {
+  submitting: boolean;
+  needsAttention: boolean;
+  working: boolean;
+  done: boolean;
+}): MissionHomeState {
+  if (input.submitting) return "working";
+  if (input.needsAttention) return "attention";
+  if (input.working) return "working";
+  if (input.done) return "done";
+  return "ready";
 }
 
 /** Convert durable runtime events into a compact, human-oriented Mission update. */
@@ -138,4 +152,30 @@ export function summarizeMissionProgress(events: UiRuntimeEvent[], limit = 5): M
     .map(summarizeMissionProgressEvent)
     .filter((item): item is MissionProgressItem => item !== null)
     .slice(-limit);
+}
+
+export function summarizeMissionProgressForMission(
+  events: UiRuntimeEvent[],
+  missionId: string,
+  taskIds: Iterable<string>,
+  limit = 3,
+): MissionProgressItem[] {
+  const ownedTaskIds = new Set(taskIds);
+  const seenText = new Set<string>();
+  const recent: MissionProgressItem[] = [];
+
+  for (const event of [...events].sort((a, b) => b.seq - a.seq)) {
+    const belongsToMission = (event.source.type === "mission" && event.source.id === missionId)
+      || event.correlationId === missionId
+      || (event.taskId !== undefined && ownedTaskIds.has(event.taskId));
+    if (!belongsToMission) continue;
+
+    const item = summarizeMissionProgressEvent(event);
+    if (!item || seenText.has(item.text)) continue;
+    seenText.add(item.text);
+    recent.push(item);
+    if (recent.length === limit) break;
+  }
+
+  return recent;
 }
