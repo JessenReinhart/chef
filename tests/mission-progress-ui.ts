@@ -1,28 +1,29 @@
 import { strict as assert } from "node:assert";
 
 import {
+  deriveMissionHeartbeat,
   deriveMissionHomeState,
   summarizeMissionProgressEvent,
   summarizeMissionProgressForMission,
 } from "../web/src/missionProgress.ts";
 import type { UiRuntimeEvent } from "../web/src/types.ts";
 
-function missionStatusEvent(id: string, status: string, missionId = "mission-1"): UiRuntimeEvent {
+function missionStatusEvent(id: string, status: string, missionId = "mission-1", timestamp = 1_000): UiRuntimeEvent {
   return {
     id,
     seq: Number(id.replace(/\D/g, "")) || 1,
-    timestamp: 1_000,
+    timestamp,
     source: { type: "mission", id: missionId },
     type: "mission.status",
     payload: { status },
   };
 }
 
-function taskEvent(id: string, type: string, payload: Record<string, unknown>, taskId = "task-1"): UiRuntimeEvent {
+function taskEvent(id: string, type: string, payload: Record<string, unknown>, taskId = "task-1", timestamp = 1_000): UiRuntimeEvent {
   return {
     id,
     seq: Number(id.replace(/\D/g, "")) || 1,
-    timestamp: 1_000,
+    timestamp,
     source: { type: "runtime", id: "task-machine" },
     type,
     payload,
@@ -118,7 +119,7 @@ const progressEvents: UiRuntimeEvent[] = [
   missionStatusEvent("event-13", "planning", "mission-2"),
 ];
 
-const scopedProgress = summarizeMissionProgressForMission(progressEvents, "mission-1", ["task-1", "task-2"]);
+const scopedProgress = summarizeMissionProgressForMission(progressEvents, "mission-1", ["task-1", "task-2"], 3, 1_200);
 assert.deepEqual(
   scopedProgress.map((item) => item.text),
   [
@@ -134,11 +135,106 @@ const recoveryEvents: UiRuntimeEvent[] = [
   taskEvent("event-21", "task.running", { from: "failed", to: "running", retryCount: 1 }, "task-1"),
   taskEvent("event-22", "task.failed", { from: "running", to: "failed", error: "unrelated failure" }, "task-other"),
 ];
-const scopedRecovery = summarizeMissionProgressForMission(recoveryEvents, "mission-1", ["task-1"]);
+const scopedRecovery = summarizeMissionProgressForMission(recoveryEvents, "mission-1", ["task-1"], 3, 1_000);
 assert.deepEqual(
   scopedRecovery.map((item) => item.text),
   ["Chef is retrying a work step (retry 1).", "A worker step failed: worker crashed"],
   "current-Mission recovery activity must stay visible without leaking unrelated failures",
 );
 
-console.log("mission-progress-ui: ok — submitted work, worker failures, and retries project truthful current-Mission progress");
+const heartbeatEvents: UiRuntimeEvent[] = [
+  missionStatusEvent("event-30", "active", "mission-heartbeat", 1_000),
+  taskEvent("event-31", "task.running", { from: "assigned", to: "running", retryCount: 0 }, "task-heartbeat", 2_000),
+  {
+    id: "event-32",
+    seq: 32,
+    timestamp: 5_000,
+    source: { type: "runtime", id: "session-heartbeat" },
+    type: "session.data",
+    payload: { data: "worker is still processing" },
+    taskId: "task-heartbeat",
+    sessionId: "session-heartbeat",
+  },
+];
+
+assert.equal(
+  deriveMissionHeartbeat(heartbeatEvents, "mission-heartbeat", ["task-heartbeat"], 14_999),
+  null,
+  "heartbeat must not appear before ten seconds of real runtime silence",
+);
+
+const heartbeat = deriveMissionHeartbeat(heartbeatEvents, "mission-heartbeat", ["task-heartbeat"], 15_000);
+assert.ok(heartbeat);
+assert.equal(heartbeat.text, "Chef is still working. Last runtime activity was 10 seconds ago.");
+assert.equal(heartbeat.tone, "active");
+
+const heartbeatProgress = summarizeMissionProgressForMission(
+  heartbeatEvents,
+  "mission-heartbeat",
+  ["task-heartbeat"],
+  3,
+  17_000,
+);
+assert.equal(heartbeatProgress[0]?.eventType, "mission.heartbeat", "stale active work must surface a heartbeat before older activity");
+assert.equal(heartbeatProgress[0]?.text, "Chef is still working. Last runtime activity was 12 seconds ago.");
+
+const completedHeartbeatEvents = [
+  ...heartbeatEvents,
+  missionStatusEvent("event-33", "completed", "mission-heartbeat", 6_000),
+];
+assert.equal(
+  deriveMissionHeartbeat(completedHeartbeatEvents, "mission-heartbeat", ["task-heartbeat"], 20_000),
+  null,
+  "completed Missions must never keep emitting working heartbeats",
+);
+
+const failedHeartbeatEvents = [
+  ...heartbeatEvents,
+  missionStatusEvent("event-34", "failed", "mission-heartbeat", 6_000),
+];
+assert.equal(
+  deriveMissionHeartbeat(failedHeartbeatEvents, "mission-heartbeat", ["task-heartbeat"], 20_000),
+  null,
+  "failed Missions must surface recovery state instead of a misleading working heartbeat",
+);
+
+const statuslessRunningEvents = [
+  taskEvent("event-40", "task.running", { from: "assigned", to: "running", retryCount: 0 }, "task-statusless", 1_000),
+];
+assert.ok(
+  deriveMissionHeartbeat(statuslessRunningEvents, "mission-statusless", ["task-statusless"], 11_000),
+  "a running owned worker can truthfully support a heartbeat even when mission.status has not arrived",
+);
+
+for (const terminalType of ["task.completed", "task.failed", "task.blocked"] as const) {
+  const terminalEvents = [
+    taskEvent("event-41", "task.running", { from: "assigned", to: "running", retryCount: 0 }, "task-statusless", 1_000),
+    taskEvent("event-42", terminalType, {}, "task-statusless", 2_000),
+  ];
+  assert.equal(
+    deriveMissionHeartbeat(terminalEvents, "mission-statusless", ["task-statusless"], 20_000),
+    null,
+    `${terminalType} must suppress a working heartbeat when mission.status is unavailable`,
+  );
+}
+
+const crashedStatuslessEvents: UiRuntimeEvent[] = [
+  taskEvent("event-43", "task.running", { from: "assigned", to: "running", retryCount: 0 }, "task-statusless", 1_000),
+  {
+    id: "event-44",
+    seq: 44,
+    timestamp: 2_000,
+    source: { type: "runtime", id: "session-statusless" },
+    type: "session.crashed",
+    payload: { reason: "worker exited" },
+    taskId: "task-statusless",
+    sessionId: "session-statusless",
+  },
+];
+assert.equal(
+  deriveMissionHeartbeat(crashedStatuslessEvents, "mission-statusless", ["task-statusless"], 20_000),
+  null,
+  "a crashed worker session must never degrade into a misleading still-working heartbeat",
+);
+
+console.log("mission-progress-ui: ok — submitted work, scoped progress, recovery, and truthful long-running heartbeat behavior are covered");

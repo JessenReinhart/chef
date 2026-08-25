@@ -13,6 +13,8 @@ export interface MissionProgressItem {
 
 type Payload = Record<string, unknown>;
 
+const HEARTBEAT_AFTER_MS = 10_000;
+
 function objectPayload(event: UiRuntimeEvent): Payload {
   return event.payload && typeof event.payload === "object" ? event.payload as Payload : {};
 }
@@ -37,6 +39,36 @@ function missionStatusText(status: string): MissionProgressItem["tone"] {
   if (status === "failed" || status === "blocked" || status === "waiting_for_approval" || status === "cancelled") return "attention";
   if (status === "active" || status === "planning" || status === "verifying") return "active";
   return "neutral";
+}
+
+function belongsToMission(event: UiRuntimeEvent, missionId: string, taskIds: Set<string>): boolean {
+  return (event.source.type === "mission" && event.source.id === missionId)
+    || event.correlationId === missionId
+    || (event.taskId !== undefined && taskIds.has(event.taskId));
+}
+
+function activeHeartbeatLabel(status: string | undefined): string | null {
+  if (status === "planning") return "Chef is still planning";
+  if (status === "verifying") return "Chef is still verifying";
+  if (status === "active") return "Chef is still working";
+  return null;
+}
+
+function inferredHeartbeatLabel(scoped: UiRuntimeEvent[]): string | null {
+  const latestWorkerEvent = scoped.find((event) =>
+    event.type === "task.assigned"
+    || event.type === "task.running"
+    || event.type === "task.completed"
+    || event.type === "task.failed"
+    || event.type === "task.blocked"
+    || event.type === "session.data"
+    || event.type === "session.crashed"
+  );
+  if (!latestWorkerEvent) return null;
+  if (latestWorkerEvent.type === "task.assigned" || latestWorkerEvent.type === "task.running" || latestWorkerEvent.type === "session.data") {
+    return "Chef is still working";
+  }
+  return null;
 }
 
 export function deriveMissionHomeState(input: {
@@ -196,21 +228,59 @@ export function summarizeMissionProgress(events: UiRuntimeEvent[], limit = 5): M
     .slice(-limit);
 }
 
+export function deriveMissionHeartbeat(
+  events: UiRuntimeEvent[],
+  missionId: string,
+  taskIds: Iterable<string>,
+  now = Date.now(),
+  thresholdMs = HEARTBEAT_AFTER_MS,
+): MissionProgressItem | null {
+  const ownedTaskIds = new Set(taskIds);
+  const scoped = events
+    .filter((event) => belongsToMission(event, missionId, ownedTaskIds))
+    .sort((a, b) => b.seq - a.seq);
+  const latest = scoped[0];
+  if (!latest) return null;
+
+  const latestMissionStatus = scoped.find(
+    (event) => event.type === "mission.status" && event.source.type === "mission" && event.source.id === missionId,
+  );
+  const status = latestMissionStatus ? stringValue(objectPayload(latestMissionStatus), "status") : undefined;
+  const label = activeHeartbeatLabel(status) ?? (status === undefined ? inferredHeartbeatLabel(scoped) : null);
+  if (!label) return null;
+
+  const silentForMs = Math.max(0, now - latest.timestamp);
+  if (silentForMs < thresholdMs) return null;
+  const silentForSeconds = Math.max(1, Math.floor(silentForMs / 1_000));
+
+  return {
+    id: `heartbeat:${missionId}`,
+    eventType: "mission.heartbeat",
+    timestamp: now,
+    text: `${label}. Last runtime activity was ${silentForSeconds} seconds ago.`,
+    tone: "active",
+  };
+}
+
 export function summarizeMissionProgressForMission(
   events: UiRuntimeEvent[],
   missionId: string,
   taskIds: Iterable<string>,
   limit = 3,
+  now = Date.now(),
 ): MissionProgressItem[] {
   const ownedTaskIds = new Set(taskIds);
   const seenText = new Set<string>();
   const recent: MissionProgressItem[] = [];
+  const heartbeat = deriveMissionHeartbeat(events, missionId, ownedTaskIds, now);
+
+  if (heartbeat && limit > 0) {
+    recent.push(heartbeat);
+    seenText.add(heartbeat.text);
+  }
 
   for (const event of [...events].sort((a, b) => b.seq - a.seq)) {
-    const belongsToMission = (event.source.type === "mission" && event.source.id === missionId)
-      || event.correlationId === missionId
-      || (event.taskId !== undefined && ownedTaskIds.has(event.taskId));
-    if (!belongsToMission) continue;
+    if (!belongsToMission(event, missionId, ownedTaskIds)) continue;
 
     const item = summarizeMissionProgressEvent(event);
     if (!item || seenText.has(item.text)) continue;
