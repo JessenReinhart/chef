@@ -75,6 +75,12 @@ function activityText(event: UiRuntimeEvent): string | null {
   return normalized.length <= 320 ? normalized : `${normalized.slice(0, 317)}…`;
 }
 
+function missionResultPreview(content: string): string | null {
+  const normalized = content.replace(/\s+/g, " ").trim();
+  if (!normalized) return null;
+  return normalized.length <= 220 ? normalized : `${normalized.slice(0, 217)}…`;
+}
+
 export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void }) {
   const [tasks, setTasks] = useState<UiTask[]>([]);
   const [missions, setMissions] = useState<UiMission[]>([]);
@@ -162,6 +168,20 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
       .slice(0, 3),
     [latestMission?.id, missionChronology],
   );
+
+  const priorMissionResults = useMemo(() => {
+    const missionIds = new Set(recentPriorMissions.map((mission) => mission.id));
+    const results = new Map<string, string>();
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const message = messages[index];
+      const missionId = message.metadata?.missionId;
+      if (message.role !== "assistant" || !missionId || !missionIds.has(missionId) || results.has(missionId)) continue;
+      const preview = missionResultPreview(message.content);
+      if (preview) results.set(missionId, preview);
+      if (results.size === missionIds.size) break;
+    }
+    return results;
+  }, [messages, recentPriorMissions]);
 
   const currentMissionTasks = useMemo(() => {
     if (!latestMission) return [];
@@ -728,11 +748,19 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
                   <div className="space-y-1">
                     {recentPriorMissions.map((mission) => {
                       const outcome = missionOutcomePresentation(mission.status);
+                      const result = priorMissionResults.get(mission.id);
                       return (
-                        <div key={mission.id} className="flex items-center gap-3 rounded-xl px-3 py-2">
-                          <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${outcome.dot}`} />
-                          <span className="min-w-0 flex-1 truncate text-xs text-zinc-400">{mission.goal}</span>
-                          <span className={`shrink-0 text-[10px] font-medium ${outcome.text}`}>{outcome.label}</span>
+                        <div key={mission.id} className="rounded-xl px-3 py-2">
+                          <div className="flex items-center gap-3">
+                            <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${outcome.dot}`} />
+                            <span className="min-w-0 flex-1 truncate text-xs text-zinc-400">{mission.goal}</span>
+                            <span className={`shrink-0 text-[10px] font-medium ${outcome.text}`}>{outcome.label}</span>
+                          </div>
+                          {result && (
+                            <p className="mt-1 line-clamp-3 pl-4 text-[11px] leading-4 text-zinc-500" aria-label="Prior Mission result">
+                              {result}
+                            </p>
+                          )}
                         </div>
                       );
                     })}
