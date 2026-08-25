@@ -51,7 +51,23 @@ function activeHeartbeatLabel(status: string | undefined): string | null {
   if (status === "planning") return "Chef is still planning";
   if (status === "verifying") return "Chef is still verifying";
   if (status === "active") return "Chef is still working";
-  if (status === undefined) return "Chef is still working";
+  return null;
+}
+
+function inferredHeartbeatLabel(scoped: UiRuntimeEvent[]): string | null {
+  const latestWorkerEvent = scoped.find((event) =>
+    event.type === "task.assigned"
+    || event.type === "task.running"
+    || event.type === "task.completed"
+    || event.type === "task.failed"
+    || event.type === "task.blocked"
+    || event.type === "session.data"
+    || event.type === "session.crashed"
+  );
+  if (!latestWorkerEvent) return null;
+  if (latestWorkerEvent.type === "task.assigned" || latestWorkerEvent.type === "task.running" || latestWorkerEvent.type === "session.data") {
+    return "Chef is still working";
+  }
   return null;
 }
 
@@ -230,7 +246,7 @@ export function deriveMissionHeartbeat(
     (event) => event.type === "mission.status" && event.source.type === "mission" && event.source.id === missionId,
   );
   const status = latestMissionStatus ? stringValue(objectPayload(latestMissionStatus), "status") : undefined;
-  const label = activeHeartbeatLabel(status);
+  const label = activeHeartbeatLabel(status) ?? (status === undefined ? inferredHeartbeatLabel(scoped) : null);
   if (!label) return null;
 
   const silentForMs = Math.max(0, now - latest.timestamp);
