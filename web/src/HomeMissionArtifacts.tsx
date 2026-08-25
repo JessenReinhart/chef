@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { loadSelectedThreadId, SELECTED_THREAD_EVENT } from "./threadApi";
+import { artifactHandoff } from "./artifactHandoff";
 import type { UiMission } from "./types";
 
 type HomeArtifact = {
@@ -107,6 +108,7 @@ export function HomeMissionArtifacts() {
         <div className="mt-3 grid gap-2 sm:grid-cols-2">
           {missionArtifacts.map((artifact) => {
             const summary = artifactSummary(artifact);
+            const handoff = artifactHandoff(artifact);
             return (
               <article key={`${artifact.id}:${artifact.version}`} className="rounded-xl border border-white/[0.07] bg-black/20 p-3">
                 <div className="flex items-start justify-between gap-3">
@@ -120,11 +122,33 @@ export function HomeMissionArtifacts() {
                       download
                       className="shrink-0 rounded-lg border border-white/10 px-2.5 py-1 text-[10px] font-medium text-zinc-400 transition hover:border-white/20 hover:text-zinc-100"
                     >
-                      Download
+                      Save copy
                     </a>
                   )}
                 </div>
                 {summary && <p className="mt-2 line-clamp-3 text-[11px] leading-4 text-zinc-500">{summary}</p>}
+                {(handoff.location || handoff.runCommand || handoff.verification) && (
+                  <dl className="mt-3 space-y-2 border-t border-white/[0.06] pt-3 text-[10px] leading-4">
+                    {handoff.location && (
+                      <div>
+                        <dt className="font-medium uppercase tracking-[0.12em] text-zinc-600">Result location</dt>
+                        <dd className="mt-0.5 break-all font-mono text-zinc-400" title={handoff.location}>{handoff.location}</dd>
+                      </div>
+                    )}
+                    {handoff.runCommand && (
+                      <div>
+                        <dt className="font-medium uppercase tracking-[0.12em] text-zinc-600">Run</dt>
+                        <dd className="mt-0.5 break-all font-mono text-zinc-300" title={handoff.runCommand}>{handoff.runCommand}</dd>
+                      </div>
+                    )}
+                    {handoff.verification && (
+                      <div>
+                        <dt className="font-medium uppercase tracking-[0.12em] text-zinc-600">Verified</dt>
+                        <dd className="mt-0.5 text-zinc-400">{handoff.verification}</dd>
+                      </div>
+                    )}
+                  </dl>
+                )}
               </article>
             );
           })}
