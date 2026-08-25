@@ -1,28 +1,19 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
+import {
+  MAX_SHELF_RESULTS,
+  MAX_VISIBLE_RESULTS,
+  SPATIAL_RESULT_SLOTS,
+  canDownload,
+  metadataRows,
+  previewText,
+  provenanceLabel,
+  recentArtifacts,
+  type ArtifactType,
+  type LivingArtifact,
+} from "./artifactProjection";
 import "./living-artifact.css";
 import "./artifact-preview.css";
-
-type ArtifactType = "file" | "document" | "code" | "image" | "research" | "result";
-
-type LivingArtifact = {
-  id: string;
-  workspaceId: string;
-  type: ArtifactType;
-  name: string;
-  uri: string;
-  version: number;
-  createdBy: string;
-  taskId?: string;
-  sessionId?: string;
-  metadata: Record<string, unknown>;
-};
-
-const MAX_VISIBLE_RESULTS = 4;
-const MAX_SHELF_RESULTS = 24;
-const MAX_PREVIEW_LENGTH = 800;
-const MAX_METADATA_ROWS = 8;
-const SPATIAL_RESULT_SLOTS = ["near", "upper", "outer", "lower"] as const;
 
 function artifactIcon(type: ArtifactType): string {
   switch (type) {
@@ -44,38 +35,6 @@ function artifactLabel(type: ArtifactType): string {
     case "file": return "File";
     default: return "Result";
   }
-}
-
-function canDownload(artifact: LivingArtifact): boolean {
-  return artifact.uri.startsWith("file:");
-}
-
-function provenanceLabel(artifact: LivingArtifact): string {
-  const task = artifact.taskId ? ` · task ${artifact.taskId.slice(0, 8)}` : "";
-  return `v${artifact.version} · by ${artifact.createdBy}${task}`;
-}
-
-function previewText(artifact: LivingArtifact): string | null {
-  const candidate = artifact.metadata.preview
-    ?? artifact.metadata.summary
-    ?? artifact.metadata.description
-    ?? artifact.metadata.content;
-  if (typeof candidate !== "string" || candidate.trim().length === 0) return null;
-  const text = candidate.trim();
-  return text.length > MAX_PREVIEW_LENGTH ? `${text.slice(0, MAX_PREVIEW_LENGTH)}…` : text;
-}
-
-function metadataRows(artifact: LivingArtifact): Array<[string, string]> {
-  return Object.entries(artifact.metadata)
-    .filter(([key]) => !["preview", "summary", "description", "content"].includes(key))
-    .flatMap(([key, value]) => {
-      if (value === null || value === undefined) return [];
-      if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-        return [[key, String(value)] as [string, string]];
-      }
-      return [];
-    })
-    .slice(0, MAX_METADATA_ROWS);
 }
 
 export function LivingArtifactFeature() {
@@ -132,11 +91,11 @@ export function LivingArtifactFeature() {
   }, [enabled, refresh]);
 
   const visibleArtifacts = useMemo(
-    () => artifacts.slice(-MAX_VISIBLE_RESULTS).reverse(),
+    () => recentArtifacts(artifacts, MAX_VISIBLE_RESULTS),
     [artifacts],
   );
   const shelfArtifacts = useMemo(
-    () => artifacts.slice(-MAX_SHELF_RESULTS).reverse(),
+    () => recentArtifacts(artifacts, MAX_SHELF_RESULTS),
     [artifacts],
   );
   const selectedArtifact = useMemo(
