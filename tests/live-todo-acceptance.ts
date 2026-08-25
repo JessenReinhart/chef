@@ -20,6 +20,23 @@ async function closeServer(server: Server | undefined): Promise<void> {
   await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
 }
 
+async function stopProcessTree(child: ChildProcess | undefined): Promise<void> {
+  if (!child || child.exitCode !== null || !child.pid) return;
+
+  if (process.platform === "win32") {
+    const killer = spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"], { stdio: "ignore" });
+    await new Promise<void>((resolve) => killer.once("exit", () => resolve()));
+    return;
+  }
+
+  child.kill("SIGTERM");
+  await Promise.race([
+    new Promise<void>((resolve) => child!.once("exit", () => resolve())),
+    new Promise<void>((resolve) => setTimeout(resolve, 2_000)),
+  ]);
+  if (child.exitCode === null) child.kill("SIGKILL");
+}
+
 async function freePort(): Promise<number> {
   const server = createNetServer();
   await new Promise<void>((resolve, reject) => {
@@ -119,7 +136,7 @@ async function main(): Promise<void> {
     app = spawn(npm, ["start"], {
       cwd: projectDir,
       env: { ...process.env, PORT: String(appPort) },
-      stdio: "pipe",
+      stdio: "ignore",
     });
 
     const appResponse = await waitForHttp(`http://127.0.0.1:${appPort}/`, app);
@@ -130,9 +147,7 @@ async function main(): Promise<void> {
     console.log(`live-todo-acceptance: ok (${chef.llmStatus.provider}/${chef.llmStatus.model}; worker candidates: ${workers.map((worker) => worker.id).join(", ")})`);
     console.log(`Chef summary: ${body.data?.report ?? "(no report)"}`);
   } finally {
-    if (app && app.exitCode === null) {
-      app.kill(process.platform === "win32" ? undefined : "SIGTERM");
-    }
+    await stopProcessTree(app);
     await closeServer(apiServer);
     if (chef) await chef.close();
     if (passed && process.env.CHEF_E2E_KEEP_PROJECT !== "1") {
