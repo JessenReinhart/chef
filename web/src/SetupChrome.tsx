@@ -3,15 +3,7 @@ import { createPortal } from "react-dom";
 import { HarnessReadinessPanel } from "./HarnessReadinessPanel";
 import { OrchestratorSettings } from "./OrchestratorSettings";
 import { ProjectSwitcher } from "./ProjectSwitcher";
-
-export type SetupChromeSurface = "home" | "workbench";
-
-export function setupChromeFeatures(surface: SetupChromeSurface): { projectSwitcher: boolean; setupTools: boolean } {
-  return {
-    projectSwitcher: true,
-    setupTools: surface === "workbench",
-  };
-}
+import { setupChromeFeatures, type SetupChromeSurface } from "./setupChromeFeatures";
 
 export function SetupChrome({ surface = "workbench" }: { surface?: SetupChromeSurface }) {
   const [leftHost, setLeftHost] = useState<HTMLElement | null>(null);
