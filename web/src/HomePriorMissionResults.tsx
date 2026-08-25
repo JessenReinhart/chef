@@ -1,42 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { loadSelectedThreadId, SELECTED_THREAD_EVENT, threadMessages } from "./threadApi";
+import { priorMissionResults } from "./priorMissionResults";
 import type { ChatMessage, UiMission } from "./types";
 
-const MAX_PRIOR_MISSIONS = 3;
-const MAX_PREVIEW_LENGTH = 220;
-
 type StateSnapshot = { missions?: UiMission[] };
-
-type PriorMissionResult = {
-  mission: UiMission;
-  result: string;
-};
-
-export function priorMissionResults(
-  missions: UiMission[],
-  messages: ChatMessage[],
-  selectedThreadId: string,
-): PriorMissionResult[] {
-  const chronology = missions
-    .filter((mission) => mission.metadata?.threadId === selectedThreadId)
-    .sort((a, b) => b.createdAt - a.createdAt);
-
-  const priorMissions = chronology.slice(1, MAX_PRIOR_MISSIONS + 1);
-  return priorMissions.flatMap((mission) => {
-    const message = [...messages].reverse().find(
-      (candidate) => candidate.role === "assistant" && candidate.metadata?.missionId === mission.id,
-    );
-    const normalized = message?.content.replace(/\s+/g, " ").trim();
-    if (!normalized) return [];
-    return [{
-      mission,
-      result: normalized.length <= MAX_PREVIEW_LENGTH
-        ? normalized
-        : `${normalized.slice(0, MAX_PREVIEW_LENGTH - 1)}…`,
-    }];
-  });
-}
 
 export function HomePriorMissionResults() {
   const [target, setTarget] = useState<Element | null>(null);
