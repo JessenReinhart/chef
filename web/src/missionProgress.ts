@@ -22,6 +22,11 @@ function stringValue(payload: Payload, key: string): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
+function numberValue(payload: Payload, key: string): number | undefined {
+  const value = payload[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
 function stringArray(payload: Payload, key: string): string[] {
   const value = payload[key];
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
@@ -82,6 +87,43 @@ export function summarizeMissionProgressEvent(event: UiRuntimeEvent): MissionPro
       };
       text = labels[status] ?? `Mission status changed to ${status}.`;
       tone = missionStatusText(status);
+      break;
+    }
+    case "task.assigned": {
+      text = "Chef assigned a worker to a work step.";
+      tone = "active";
+      break;
+    }
+    case "task.running": {
+      const retryCount = numberValue(payload, "retryCount") ?? 0;
+      text = retryCount > 0
+        ? `Chef is retrying a work step (retry ${retryCount}).`
+        : "A worker started a work step.";
+      tone = "active";
+      break;
+    }
+    case "task.failed": {
+      const error = stringValue(payload, "error");
+      text = error ? `A worker step failed: ${error}` : "A worker step failed and needs recovery.";
+      tone = "attention";
+      break;
+    }
+    case "task.blocked": {
+      const reason = stringValue(payload, "reason") ?? stringValue(payload, "error");
+      text = reason ? `A work step is blocked: ${reason}` : "A work step is blocked and needs attention.";
+      tone = "attention";
+      break;
+    }
+    case "task.completed": {
+      const summary = stringValue(payload, "resultSummary");
+      text = summary ? `A work step finished: ${summary}` : "A work step finished.";
+      tone = "success";
+      break;
+    }
+    case "session.crashed": {
+      const reason = stringValue(payload, "reason");
+      text = reason ? `A worker session stopped unexpectedly: ${reason}` : "A worker session stopped unexpectedly; Chef needs to recover it.";
+      tone = "attention";
       break;
     }
     case "orchestrator.plan.proposed": {
