@@ -1,5 +1,6 @@
 import { strict as assert } from "node:assert";
-import { createThreadHistoryLoader } from "../web/src/threadSelection.ts";
+import { createThreadHistoryLoader, resolveHomeThreadSelection } from "../web/src/threadSelection.ts";
+import type { UiThread } from "../web/src/threadApi.ts";
 import type { ChatMessage } from "../web/src/types.ts";
 
 type PendingLoad = {
@@ -37,5 +38,23 @@ assert.deepEqual(await staleFailure, { current: false }, "a stale Thread failure
 const snapshot = history.snapshot();
 history.invalidate();
 assert.equal(history.isCurrent(snapshot), false, "selection changes outside history loading should invalidate older requests");
+
+const threads = [
+  { id: "active-a", workspaceId: "ws", title: "Current work", status: "active", createdAt: 1, updatedAt: 4 },
+  { id: "archived-a", workspaceId: "ws", title: "Old investigation", status: "archived", createdAt: 2, updatedAt: 3 },
+] as UiThread[];
+
+const rememberedArchive = resolveHomeThreadSelection(threads, "archived-a");
+assert.deepEqual(rememberedArchive.activeThreads.map((thread) => thread.id), ["active-a"]);
+assert.deepEqual(rememberedArchive.archivedThreads.map((thread) => thread.id), ["archived-a"]);
+assert.equal(rememberedArchive.selectedThread?.id, "archived-a", "refresh should preserve a remembered archived Thread so its history stays discoverable");
+assert.equal(rememberedArchive.readOnly, true, "archived Thread selection must be read-only for new work");
+
+const defaultSelection = resolveHomeThreadSelection(threads, null);
+assert.equal(defaultSelection.selectedThread?.id, "active-a", "Home should still prefer an active Thread when there is no remembered selection");
+assert.equal(defaultSelection.readOnly, false);
+
+const missingSelection = resolveHomeThreadSelection(threads, "missing");
+assert.equal(missingSelection.selectedThread?.id, "active-a", "a stale remembered id should recover to an active Thread");
 
 console.log("thread-selection-race: ok");
