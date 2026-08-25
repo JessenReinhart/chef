@@ -36,6 +36,16 @@ const SCRIPTS_DIR = join(defaultSidebandRoot(), "scripts");
 const TIMED_OUT = Symbol("orchestrator-timeout");
 const ORCHESTRATOR_SOURCE = { type: "orchestrator", id: "orchestrator" } as const;
 
+class MissionTimeoutError extends Error {
+  readonly timeoutMs: number;
+
+  constructor(timeoutMs: number, label: string) {
+    super(`Timed out after ${timeoutMs}ms: ${label}`);
+    this.name = "MissionTimeoutError";
+    this.timeoutMs = timeoutMs;
+  }
+}
+
 const SLEEP_STEP_MS = 50;
 const SESSION_ACTIVE_WAIT_MS = 1_000;
 
@@ -241,6 +251,7 @@ export class Orchestrator {
     try {
       await this.#withTimeout(this.#executePlan(workspaceId, plan, controller.signal), `plan ${plan.id}`, controller);
     } catch (error) {
+      if (error instanceof MissionTimeoutError) this.#recordMissionTimeout(workspaceId, mission.id, plan.id, error);
       executionError = error instanceof Error ? error.message : String(error);
     } finally {
       if (this.#missionControllers.get(mission.id) === controller) this.#missionControllers.delete(mission.id);
@@ -344,6 +355,7 @@ export class Orchestrator {
       await this.#withTimeout(this.#executePlan(workspaceId, plan, controller.signal), `plan ${plan.id}`, controller);
       this.#appendEvent(workspaceId, { type: "chat.plan.applied", payload: { planId: plan.id, status: "completed" } });
     } catch (error) {
+      if (error instanceof MissionTimeoutError) this.#recordMissionTimeout(workspaceId, mission.id, plan.id, error);
       executionError = error instanceof Error ? error.message : String(error);
       this.#appendEvent(workspaceId, { type: "chat.plan.applied", payload: { planId: plan.id, status: "failed", error: executionError } });
     } finally {
@@ -591,6 +603,7 @@ export class Orchestrator {
     try {
       await this.#withTimeout(this.#executePlan(plan.workspaceId, plan, controller.signal), `plan ${planId}`, controller);
     } catch (error) {
+      if (error instanceof MissionTimeoutError && plan.missionId) this.#recordMissionTimeout(plan.workspaceId, plan.missionId, plan.id, error);
       plan.status = "failed";
       throw error;
     }
@@ -653,6 +666,7 @@ export class Orchestrator {
       try {
         await this.#withTimeout(this.#executePlan(workspaceId, plan, controller.signal), `plan ${plan.id}`, controller);
       } catch (error) {
+        if (error instanceof MissionTimeoutError) this.#recordMissionTimeout(workspaceId, missionId, plan.id, error);
         executionError = error instanceof Error ? error.message : String(error);
       } finally {
         if (this.#missionControllers.get(missionId) === controller) this.#missionControllers.delete(missionId);
@@ -959,6 +973,13 @@ export class Orchestrator {
     return event;
   }
 
+  #recordMissionTimeout(workspaceId: WorkspaceId, missionId: string, planId: string, error: MissionTimeoutError): void {
+    this.#appendEvent(workspaceId, {
+      type: "mission.timeout",
+      payload: { missionId, planId, timeoutMs: error.timeoutMs, cause: "mission_timeout" },
+    });
+  }
+
   #patchFailure(workspaceId: WorkspaceId, error: string): CanvasPatchResult {
     this.#appendEvent(workspaceId, { type: "canvas.patch.failed", payload: { error } });
     return { ok: false, error };
@@ -1059,7 +1080,7 @@ export class Orchestrator {
       const result = await Promise.race([work, timeout]);
       if (result === TIMED_OUT) {
         try { await work; } catch { /* timeout remains the primary error */ }
-        throw new Error(`Timed out after ${timeoutMs}ms: ${label}`);
+        throw new MissionTimeoutError(timeoutMs, label);
       }
       return result;
     } finally {
