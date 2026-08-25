@@ -10,7 +10,8 @@ import { createLLMDecisionProvider } from "./llm-decision-provider.ts";
 const MAX_FAST_PATH_GOAL_LENGTH = 240;
 const SIMPLE_QUALIFIER = /\b(simple|small|basic|minimal|tiny)\b/i;
 const IMPLEMENTATION_ACTION = /\b(create|build|make|implement|add|fix|update|change|rename|remove)\b/i;
-const COMPLEXITY_MARKER = /\b(research|compare|evaluate|analy[sz]e|audit|investigate|architecture|architect|migrate|migration|benchmark|parallel|multiple|multi[- ]agent|across)\b|\b(and then|then verify|then test|after that)\b/i;
+const INFORMATION_ACTION = /\b(research|explain|summari[sz]e)\b/i;
+const COMPLEXITY_MARKER = /\b(compare|evaluate|analy[sz]e|audit|investigate|architecture|architect|migrate|migration|benchmark|parallel|multiple|multi[- ]agent|across)\b|\b(and then|then verify|then test|after that)\b|\b(and|then)\s+(create|build|implement|fix|update|change|remove)\b/i;
 
 /**
  * Keep the shortcut deliberately narrow. A false negative only costs one
@@ -21,9 +22,13 @@ export function shouldUseSingleWorkerFastPath(goal: string): boolean {
   const normalized = goal.trim();
   if (!normalized || normalized.length > MAX_FAST_PATH_GOAL_LENGTH) return false;
   if (normalized.includes("\n") || normalized.includes(";")) return false;
-  return SIMPLE_QUALIFIER.test(normalized)
-    && IMPLEMENTATION_ACTION.test(normalized)
-    && !COMPLEXITY_MARKER.test(normalized);
+  if (COMPLEXITY_MARKER.test(normalized)) return false;
+
+  const simpleImplementation = SIMPLE_QUALIFIER.test(normalized)
+    && IMPLEMENTATION_ACTION.test(normalized);
+  const straightforwardInformationRequest = INFORMATION_ACTION.test(normalized);
+
+  return simpleImplementation || straightforwardInformationRequest;
 }
 
 export class SingleWorkerFastPathDecisionProvider implements DecisionProvider {
