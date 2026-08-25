@@ -12,10 +12,14 @@ import {
   type UiThread,
 } from "./threadApi";
 import { createThreadHistoryLoader, resolveHomeThreadSelection } from "./threadSelection";
+import {
+  deriveMissionHomeState,
+  summarizeMissionProgressForMission,
+  type MissionHomeState,
+} from "./missionProgress";
 import type { ChatMessage, UiMission, UiRuntimeEvent, UiTask } from "./types";
 
 type Approval = { id: string; reason: string; taskId: string; status: string };
-type HomeState = "ready" | "working" | "attention" | "done";
 
 function taskPresentation(status: UiTask["status"]): { label: string; dot: string; text: string } {
   if (status === "completed") return { label: "Done", dot: "bg-emerald-400", text: "text-emerald-300" };
@@ -28,7 +32,7 @@ function taskPresentation(status: UiTask["status"]): { label: string; dot: strin
   return { label: "Waiting", dot: "bg-slate-500", text: "text-slate-400" };
 }
 
-function missionPresentation(state: HomeState): { label: string; dot: string; ring: string } {
+function missionPresentation(state: MissionHomeState): { label: string; dot: string; ring: string } {
   if (state === "working") return { label: "Chef is working", dot: "bg-red-400", ring: "shadow-[0_0_0_5px_rgba(248,113,113,0.10)]" };
   if (state === "attention") return { label: "Needs your attention", dot: "bg-amber-300", ring: "shadow-[0_0_0_5px_rgba(252,211,77,0.10)]" };
   if (state === "done") return { label: "Work complete", dot: "bg-emerald-400", ring: "shadow-[0_0_0_5px_rgba(52,211,153,0.10)]" };
@@ -224,7 +228,14 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
     return task?.error?.trim() ?? null;
   }, [approvalTaskIds, currentMissionTasks]);
 
-  const recentMissionActivity = useMemo(() => {
+  const structuredMissionActivity = useMemo(
+    () => latestMission
+      ? summarizeMissionProgressForMission(events, latestMission.id, currentMissionTaskIds, 3)
+      : [],
+    [currentMissionTaskIds, events, latestMission],
+  );
+
+  const recentWorkerActivity = useMemo(() => {
     if (currentMissionTaskIds.size === 0) return [];
     const recent: string[] = [];
     let previousText: string | null = null;
@@ -239,27 +250,20 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
     return recent;
   }, [currentMissionTaskIds, events]);
 
+  const recentMissionActivity = useMemo(() => {
+    const structured = structuredMissionActivity.map((item) => item.text);
+    if (structured.length >= 3) return structured;
+    return [...structured, ...recentWorkerActivity.filter((text) => !structured.includes(text))].slice(0, 3);
+  }, [recentWorkerActivity, structuredMissionActivity]);
+
   const lastMissionActivity = recentMissionActivity[0] ?? null;
 
-  const homeState = useMemo<HomeState>(() => {
-    if (
-      missionApprovals.length > 0
-      || latestMission?.status === "failed"
-      || latestMission?.status === "blocked"
-      || latestMission?.status === "cancelled"
-      || latestMission?.status === "waiting_for_approval"
-      || latestMission?.status === "paused"
-      || missionTasks.some((task) => task.status === "failed" || task.status === "blocked" || task.status === "cancelled")
-    ) return "attention";
-    if (
-      latestMission?.status === "planning"
-      || latestMission?.status === "active"
-      || latestMission?.status === "verifying"
-      || missionTasks.some((task) => task.status === "running" || task.status === "assigned" || task.status === "spawning")
-    ) return "working";
-    if (latestMission?.status === "completed" || (missionTasks.length > 0 && missionTasks.every((task) => task.status === "completed"))) return "done";
-    return "ready";
-  }, [latestMission?.status, missionApprovals.length, missionTasks]);
+  const homeState = useMemo<MissionHomeState>(() => deriveMissionHomeState({
+    submitting,
+    missionStatus: latestMission?.status,
+    approvalCount: missionApprovals.length,
+    taskStatuses: missionTasks.map((task) => task.status),
+  }), [latestMission?.status, missionApprovals.length, missionTasks, submitting]);
 
   const status = missionPresentation(homeState);
   const currentMissionAssistantMessage = useMemo(() => {
@@ -669,14 +673,14 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
           )}
         </section>
 
-        {(latestMission || missionApprovals.length > 0 || missionTasks.length > 0 || currentMissionAssistantMessage || lastReport) && (
+        {(submitting || latestMission || missionApprovals.length > 0 || missionTasks.length > 0 || currentMissionAssistantMessage || lastReport) && (
           <section className="mt-12 grid gap-4 lg:grid-cols-[1.25fr_0.75fr]">
             <div className="rounded-2xl border border-white/[0.08] bg-white/[0.025] p-5">
               <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0">
                   <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-600">Current work</div>
                   <h2 className="mt-2 truncate text-base font-semibold text-zinc-100">
-                    {latestMission?.goal ?? "Thread activity"}
+                    {latestMission?.goal ?? (submitting ? goal.trim() : "Thread activity")}
                   </h2>
                 </div>
                 <div className="flex shrink-0 items-center gap-2 rounded-full border border-white/[0.07] px-2.5 py-1 text-[10px] text-zinc-500">
@@ -698,13 +702,15 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
                 )}
                 {missionTasks.length > 0 ? missionTasks.map(renderMissionTask) : (
                   <div className="rounded-xl border border-dashed border-white/[0.07] px-4 py-6 text-center text-xs text-zinc-600">
-                    {homeState === "working"
-                      ? "Chef is preparing or verifying this Mission."
-                      : homeState === "attention"
-                        ? "This Mission needs attention before work can continue."
-                        : homeState === "done"
-                          ? "This Mission is complete."
-                          : "Chef is ready for a new goal in this Thread."}
+                    {submitting && !latestMission
+                      ? "Request received. Chef is starting the Mission now."
+                      : homeState === "working"
+                        ? "Chef is preparing or verifying this Mission."
+                        : homeState === "attention"
+                          ? "This Mission needs attention before work can continue."
+                          : homeState === "done"
+                            ? "This Mission is complete."
+                            : "Chef is ready for a new goal in this Thread."}
                   </div>
                 )}
               </div>
