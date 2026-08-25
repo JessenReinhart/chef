@@ -28,6 +28,18 @@ const runtime = {
   repository,
   sendUserMessage(message: string, context?: { threadId?: string; recentMessages?: ThreadMessageContext[] }) {
     planningCalls.push({ message, context });
+    if (message === "Complete after async startup") {
+      return Promise.resolve().then(() => {
+        repository.insertMission({ workspaceId: "workspace-a", goal: message, status: "planning", createdBy: "user" });
+        return { workspaceId: "workspace-a", taskIds: [] as string[], report: `Completed: ${message}`, ok: true };
+      });
+    }
+    if (message === "Fail after async startup") {
+      return Promise.resolve().then(() => {
+        repository.insertMission({ workspaceId: "workspace-a", goal: message, status: "planning", createdBy: "user" });
+        throw new Error("async startup failed");
+      });
+    }
     repository.insertMission({ workspaceId: "workspace-a", goal: message, status: "planning", createdBy: "user" });
     if (message === "Fail during startup") {
       throw new Error("startup failed");
@@ -195,6 +207,22 @@ try {
     body: JSON.stringify({ message: "Do not continue archived work" }),
   })).status, 409, "archived Threads must reject new turns");
 
+  const asyncSuccessThread = threads.create({ workspaceId: "workspace-a", title: "Async success" });
+  const asyncSuccessResponse = await fetch(`${origin}/api/threads/${asyncSuccessThread.id}/chat`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ message: "Complete after async startup" }),
+  });
+  assert.equal(asyncSuccessResponse.status, 200);
+  const asyncSuccessBody = await asyncSuccessResponse.json() as { data: { missionId?: string; threadId: string } };
+  assert.ok(asyncSuccessBody.data.missionId, "async-created Mission should be reported in the Thread response");
+  assert.equal(asyncSuccessBody.data.threadId, asyncSuccessThread.id);
+  assert.equal(
+    repository.getMission(asyncSuccessBody.data.missionId!)?.metadata.threadId,
+    asyncSuccessThread.id,
+    "async-created successful Mission must retain Thread lineage",
+  );
+
   const failingThread = threads.create({ workspaceId: "workspace-a", title: "Startup failure" });
   const failingResponse = await fetch(`${origin}/api/threads/${failingThread.id}/chat`, {
     method: "POST",
@@ -209,6 +237,22 @@ try {
     failedMission.metadata.threadId,
     failingThread.id,
     "Mission lineage must survive a synchronous startup failure after Mission creation",
+  );
+
+  const asyncFailingThread = threads.create({ workspaceId: "workspace-a", title: "Async startup failure" });
+  const asyncFailingResponse = await fetch(`${origin}/api/threads/${asyncFailingThread.id}/chat`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ message: "Fail after async startup" }),
+  });
+  assert.equal(asyncFailingResponse.status, 500, "async Mission startup failures must surface as request failures");
+  assert.deepEqual(await asyncFailingResponse.json(), { error: "async startup failed" });
+  const asyncFailedMission = repository.listMissions("workspace-a").find((mission) => mission.goal === "Fail after async startup");
+  assert.ok(asyncFailedMission, "async rejection fixture should create a durable Mission before rejecting");
+  assert.equal(
+    asyncFailedMission.metadata.threadId,
+    asyncFailingThread.id,
+    "Mission lineage must survive an async startup failure after Mission creation",
   );
 
   assert.equal((await fetch(`${origin}/api/threads/${foreignThread.id}`)).status, 404, "foreign workspace thread must be hidden");
@@ -251,7 +295,7 @@ try {
   const fallback = await fetch(`${origin}/api/state`);
   assert.equal(fallback.status, 200);
   assert.deepEqual(await fallback.json(), { fallback: "/api/state" });
-  console.log("thread-http: ok — CRUD, isolated history, bounded planning context, and startup-failure lineage are workspace scoped");
+  console.log("thread-http: ok — CRUD, isolated history, bounded planning context, and sync/async startup lineage are workspace scoped");
 } finally {
   await new Promise<void>((resolve) => server.close(() => resolve()));
   repository.close();

@@ -170,9 +170,17 @@ export function createThreadServer(runtime: ChefRuntime, baseServer: Server): Se
           linkOriginatingMission();
           throw error;
         }
-        const mission = linkOriginatingMission();
+        let mission = linkOriginatingMission();
 
-        const result = await execution;
+        let result: Awaited<ReturnType<ChefRuntime["sendUserMessage"]>>;
+        try {
+          result = await execution;
+        } catch (error) {
+          linkOriginatingMission();
+          throw error;
+        }
+        mission ??= linkOriginatingMission();
+
         chat.insert({
           workspaceId: runtime.workspaceId,
           threadId: thread.id,
