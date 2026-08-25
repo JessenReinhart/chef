@@ -153,6 +153,8 @@ const outbox = path.join(os.tmpdir(), "chef-sideband", sid, "outbox");
 fs.mkdirSync(outbox, { recursive: true });
 fs.writeFileSync(path.join(outbox, envelope.id + ".json"), JSON.stringify(envelope));
 console.log("todo-builder: created " + appPath);
+const ingestionDeadline = Date.now() + 800;
+while (Date.now() < ingestionDeadline) { /* keep PTY alive for sideband polling */ }
 `;
   await writeFile(workerScript, source, "utf8");
   return workerScript;
