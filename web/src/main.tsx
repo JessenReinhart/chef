@@ -48,6 +48,7 @@ function ChefRoot() {
       <IntentHome onOpenWorkbench={openWorkbench} />
       <HomeMissionArtifacts />
       <HomePriorMissionResults />
+      <SetupChrome surface="home" />
       <IntentOnboarding />
     </>;
   }
@@ -80,7 +81,7 @@ function ChefRoot() {
     <App key={viewMode} />
     <ContextScopeFeature />
     <CanvasNodeDeleteFeature />
-    <SetupChrome />
+    <SetupChrome surface="workbench" />
     <DecisionLibraryFeature />
     <LivingWorkspaceFeature />
     <LivingArtifactFeature />
