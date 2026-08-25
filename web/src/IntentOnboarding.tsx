@@ -5,18 +5,18 @@ const ONBOARDING_KEY = "chef:intent-onboarding-complete";
 const steps = [
   {
     number: "01",
+    title: "Choose the project",
+    body: "Confirm the local project shown in the header, or open the folder you want Chef to work in. You can switch projects without opening Workbench.",
+  },
+  {
+    number: "02",
     title: "Tell Chef the outcome",
     body: "Describe what you want done. You do not need to design a workflow, choose nodes, or assign agents first.",
   },
   {
-    number: "02",
-    title: "Work starts automatically",
-    body: "Send the goal once. Chef plans and coordinates the work from there. There is no separate Run step in the normal flow.",
-  },
-  {
     number: "03",
-    title: "Step in only when needed",
-    body: "Stay on Home to watch progress. Chef surfaces approvals and blockers here. Open Workbench only when you want to inspect or intervene.",
+    title: "Work starts automatically",
+    body: "Send the goal once, then stay on Home for progress, approvals, blockers, and the final result. Step in only when needed, and open Workbench only when you want deeper inspection or control.",
   },
 ] as const;
 
@@ -37,10 +37,10 @@ export function IntentOnboarding() {
           <div>
             <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-red-300/70">First mission</div>
             <h2 id="chef-onboarding-title" className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-white sm:text-3xl">
-              Chef works from intent, not buttons.
+              Chef works from your project and intent.
             </h2>
             <p className="mt-3 max-w-xl text-sm leading-6 text-zinc-500">
-              The normal path is deliberately simple. Give Chef the outcome, then stay here unless Chef asks you for something.
+              The normal path is deliberately simple. Pick the project, give Chef the outcome, then stay here unless Chef asks you for something.
             </p>
           </div>
           <button
@@ -65,7 +65,7 @@ export function IntentOnboarding() {
 
         <div className="mt-6 flex flex-col gap-3 border-t border-white/[0.07] pt-5 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-[11px] leading-5 text-zinc-600">
-            Happy path: <span className="text-zinc-400">type → send → watch → respond only if asked → result</span>
+            Happy path: <span className="text-zinc-400">project → type → send → watch → respond only if asked → result</span>
           </p>
           <button
             type="button"
