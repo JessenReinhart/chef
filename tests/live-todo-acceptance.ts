@@ -6,13 +6,27 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
+import type { RuntimeEvent } from "../src/core/types.ts";
 import { createChef, type ChefRuntime } from "../src/main.ts";
 import { createHttpServer } from "../src/server/http-server.ts";
 
 const DEFAULT_TIMEOUT_MS = 10 * 60_000;
+const MAX_PROGRESS_TRACE = 20;
 
 function hasLLMKey(): boolean {
   return Boolean(process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY || process.env.CHEF_API_KEY);
+}
+
+function isMeaningfulProgress(event: RuntimeEvent): boolean {
+  return event.type.startsWith("mission.") || event.type.startsWith("task.") || event.type.startsWith("session.");
+}
+
+function formatProgressTrace(events: readonly RuntimeEvent[]): string {
+  if (events.length === 0) return "(no Mission/Task/Session progress events observed)";
+  return events
+    .slice(-MAX_PROGRESS_TRACE)
+    .map((event) => `${event.seq} ${event.type}${event.taskId ? ` task=${event.taskId}` : ""}${event.sessionId ? ` session=${event.sessionId}` : ""}`)
+    .join("\n");
 }
 
 async function closeServer(server: Server | undefined): Promise<void> {
@@ -77,7 +91,11 @@ async function main(): Promise<void> {
   let chef: ChefRuntime | undefined;
   let apiServer: Server | undefined;
   let app: ChildProcess | undefined;
+  let unsubscribeEvents: (() => void) | undefined;
   let passed = false;
+  let requestCompleted = false;
+  const progressEvents: RuntimeEvent[] = [];
+  const inFlightProgressEvents: RuntimeEvent[] = [];
 
   try {
     chef = createChef({ dbPath, projectDir, orchestratorTimeoutMs: timeoutMs });
@@ -94,6 +112,12 @@ async function main(): Promise<void> {
     });
     const apiPort = (apiServer.address() as AddressInfo).port;
 
+    unsubscribeEvents = chef.subscribeEvents((event) => {
+      if (!isMeaningfulProgress(event)) return;
+      progressEvents.push(event);
+      if (!requestCompleted) inFlightProgressEvents.push(event);
+    });
+
     const request = [
       "Create a simple todo app in this selected project.",
       "Keep it intentionally small and reliable.",
@@ -109,8 +133,13 @@ async function main(): Promise<void> {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ message: request }),
     });
+    requestCompleted = true;
     const body = await response.json() as { ok?: boolean; data?: { ok?: boolean; taskIds?: string[]; report?: string }; error?: string };
 
+    assert.ok(
+      inFlightProgressEvents.length > 0,
+      `Chef produced no Mission/Task/Session progress while the canonical request was in flight. Recent progress trace:\n${formatProgressTrace(progressEvents)}`,
+    );
     assert.equal(response.status, 200, `Chef HTTP request failed: ${JSON.stringify(body)}`);
     assert.equal(body.ok, true, body.error ?? body.data?.report ?? "Chef reported failure");
     assert.equal(body.data?.ok, true, body.data?.report ?? "Mission did not complete successfully");
@@ -145,8 +174,12 @@ async function main(): Promise<void> {
 
     passed = true;
     console.log(`live-todo-acceptance: ok (${chef.llmStatus.provider}/${chef.llmStatus.model}; worker candidates: ${workers.map((worker) => worker.id).join(", ")})`);
+    console.log(`Observed ${inFlightProgressEvents.length} in-flight Mission/Task/Session progress events.`);
     console.log(`Chef summary: ${body.data?.report ?? "(no report)"}`);
   } finally {
+    requestCompleted = true;
+    unsubscribeEvents?.();
+    if (!passed) console.error(`Recent Chef progress trace:\n${formatProgressTrace(progressEvents)}`);
     await stopProcessTree(app);
     await closeServer(apiServer);
     if (chef) await chef.close();
