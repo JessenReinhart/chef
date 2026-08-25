@@ -29,6 +29,9 @@ const runtime = {
   sendUserMessage(message: string, context?: { threadId?: string; recentMessages?: ThreadMessageContext[] }) {
     planningCalls.push({ message, context });
     repository.insertMission({ workspaceId: "workspace-a", goal: message, status: "planning", createdBy: "user" });
+    if (message === "Fail during startup") {
+      throw new Error("startup failed");
+    }
     return Promise.resolve({ workspaceId: "workspace-a", taskIds: [] as string[], report: `Completed: ${message}`, ok: true });
   },
 } as never;
@@ -192,6 +195,22 @@ try {
     body: JSON.stringify({ message: "Do not continue archived work" }),
   })).status, 409, "archived Threads must reject new turns");
 
+  const failingThread = threads.create({ workspaceId: "workspace-a", title: "Startup failure" });
+  const failingResponse = await fetch(`${origin}/api/threads/${failingThread.id}/chat`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ message: "Fail during startup" }),
+  });
+  assert.equal(failingResponse.status, 500, "Mission startup failures must still surface as request failures");
+  assert.deepEqual(await failingResponse.json(), { error: "startup failed" });
+  const failedMission = repository.listMissions("workspace-a").find((mission) => mission.goal === "Fail during startup");
+  assert.ok(failedMission, "startup failure fixture should create a durable Mission before throwing");
+  assert.equal(
+    failedMission.metadata.threadId,
+    failingThread.id,
+    "Mission lineage must survive a synchronous startup failure after Mission creation",
+  );
+
   assert.equal((await fetch(`${origin}/api/threads/${foreignThread.id}`)).status, 404, "foreign workspace thread must be hidden");
   assert.equal((await fetch(`${origin}/api/threads/${foreignThread.id}/messages`)).status, 404, "foreign workspace Thread history must be hidden");
   assert.equal((await fetch(`${origin}/api/threads/${foreignThread.id}/chat`, {
@@ -232,7 +251,7 @@ try {
   const fallback = await fetch(`${origin}/api/state`);
   assert.equal(fallback.status, 200);
   assert.deepEqual(await fallback.json(), { fallback: "/api/state" });
-  console.log("thread-http: ok — CRUD, isolated history, and bounded Thread planning context are workspace scoped");
+  console.log("thread-http: ok — CRUD, isolated history, bounded planning context, and startup-failure lineage are workspace scoped");
 } finally {
   await new Promise<void>((resolve) => server.close(() => resolve()));
   repository.close();
