@@ -143,23 +143,34 @@ export function createThreadServer(runtime: ChefRuntime, baseServer: Server): Se
         ];
         chat.insert({ workspaceId: runtime.workspaceId, threadId: thread.id, role: "user", content: message });
 
-        // The core intent path creates its Mission synchronously before its
-        // first await. Capture that Mission while it is still non-terminal so
-        // the originating Thread remains durable. Thread chat deliberately
-        // avoids the legacy workspace-global chat channel.
+        // The core intent path normally creates its Mission synchronously before
+        // its first await. Link any Mission created for this turn immediately,
+        // including the failure path where startup throws after Mission creation.
+        // Thread chat deliberately avoids the legacy workspace-global chat channel.
         const existingMissionIds = new Set(existingMissions.map((mission) => mission.id));
-        const execution = runtime.sendUserMessage(message, {
-          threadId: thread.id,
-          recentMessages,
-        });
-        const mission = runtime.repository.listMissions(runtime.workspaceId).find(
-          (candidate) => !existingMissionIds.has(candidate.id) && candidate.goal === message,
-        );
-        if (mission) {
-          runtime.repository.updateMission(mission.id, {
-            metadata: { ...mission.metadata, threadId: thread.id },
+        const linkOriginatingMission = () => {
+          const mission = runtime.repository.listMissions(runtime.workspaceId).find(
+            (candidate) => !existingMissionIds.has(candidate.id) && candidate.goal === message,
+          );
+          if (mission) {
+            return runtime.repository.updateMission(mission.id, {
+              metadata: { ...mission.metadata, threadId: thread.id },
+            });
+          }
+          return undefined;
+        };
+
+        let execution: ReturnType<ChefRuntime["sendUserMessage"]>;
+        try {
+          execution = runtime.sendUserMessage(message, {
+            threadId: thread.id,
+            recentMessages,
           });
+        } catch (error) {
+          linkOriginatingMission();
+          throw error;
         }
+        const mission = linkOriginatingMission();
 
         const result = await execution;
         chat.insert({
