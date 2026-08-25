@@ -76,6 +76,9 @@ if (!orchestratorSource.includes("this.#timeoutMs = options.timeoutMs;")) {
 if (!orchestratorSource.includes("if (timeoutMs === undefined) return work;")) {
   throw new Error("unconfigured Mission timeout must bypass timeout racing entirely");
 }
+if (!orchestratorSource.includes("class MissionTimeoutError extends Error")) {
+  throw new Error("configured Mission timeout must use a dedicated internal cause type");
+}
 
 // Explicit policy: configured timeout still cancels the Mission and cleans up
 // the real PTY process rather than merely racing and abandoning execution.
@@ -114,6 +117,28 @@ if (!orchestratorSource.includes("if (timeoutMs === undefined) return work;")) {
   if (timedOutPlan.status !== "failed") {
     throw new Error(`timed-out plan must be persisted as failed, got: ${timedOutPlan.status}`);
   }
+  const timedOutMission = snapshot.missions.find((mission) => mission.planId === timedOutPlan.id);
+  if (!timedOutMission) throw new Error("timed-out Mission must remain durably linked to its Plan");
+
+  const timeoutEvents = snapshot.events.filter((event) => event.type === "mission.timeout");
+  if (timeoutEvents.length !== 1) {
+    throw new Error(`expected exactly one durable mission.timeout event, got ${timeoutEvents.length}`);
+  }
+  const timeoutPayload = timeoutEvents[0].payload as {
+    missionId?: string;
+    planId?: string;
+    timeoutMs?: number;
+    cause?: string;
+  };
+  if (timeoutPayload.missionId !== timedOutMission.id) {
+    throw new Error(`timeout diagnostic Mission mismatch: ${String(timeoutPayload.missionId)}`);
+  }
+  if (timeoutPayload.planId !== timedOutPlan.id) {
+    throw new Error(`timeout diagnostic Plan mismatch: ${String(timeoutPayload.planId)}`);
+  }
+  if (timeoutPayload.timeoutMs !== 500 || timeoutPayload.cause !== "mission_timeout") {
+    throw new Error(`timeout diagnostic must preserve configured policy and cause: ${JSON.stringify(timeoutPayload)}`);
+  }
 
   // close() must not hang on a live PTY that timeout cancellation should have killed.
   const closeTimer = setTimeout(() => {
@@ -125,4 +150,37 @@ if (!orchestratorSource.includes("if (timeoutMs === undefined) return work;")) {
   rmSync(dir, { recursive: true, force: true });
 }
 
-console.log("timeout-cancellation: ok — default is opt-in, explicit timeout still tears down cleanly");
+// A spontaneous worker failure must stay on the crash/failure path and must
+// never be relabeled as a Mission timeout merely because timeout policy exists.
+{
+  const dir = mkdtempSync(join(tmpdir(), "chef-crash-test-"));
+  const dbPath = join(dir, "test.db");
+  const script = join(dir, "crash-agent.js");
+  writeFileSync(script, "process.exit(7);\n");
+
+  const provider = new SlowDecisionProvider(script, "crash-plan", "crash-task");
+  const chef = createChef({
+    dbPath,
+    projectDir: dir,
+    decisionProvider: provider,
+    orchestratorTimeoutMs: 5_000,
+  });
+
+  const result = await chef.sendUserMessage("run the crash plan");
+  if (result.ok) throw new Error(`expected plan failure on worker crash, got: ${result.report}`);
+
+  const snapshot = chef.repository.getWorkspaceSnapshot(chef.workspaceId);
+  const timeoutEvents = snapshot.events.filter((event) => event.type === "mission.timeout");
+  if (timeoutEvents.length !== 0) {
+    throw new Error("spontaneous worker crash must not emit mission.timeout");
+  }
+  const crashEvents = snapshot.events.filter((event) => event.type === "session.crash" || event.type === "task.failed");
+  if (crashEvents.length === 0) {
+    throw new Error("spontaneous worker failure must remain observable on the existing crash/failure path");
+  }
+
+  await chef.close();
+  rmSync(dir, { recursive: true, force: true });
+}
+
+console.log("timeout-cancellation: ok — timeout diagnostics are explicit and worker crashes stay distinct");
