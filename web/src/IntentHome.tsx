@@ -260,9 +260,19 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
 
   const homeState = useMemo<MissionHomeState>(() => deriveMissionHomeState({
     submitting,
-    missionStatus: latestMission?.status,
-    approvalCount: missionApprovals.length,
-    taskStatuses: missionTasks.map((task) => task.status),
+    needsAttention: missionApprovals.length > 0
+      || latestMission?.status === "failed"
+      || latestMission?.status === "blocked"
+      || latestMission?.status === "cancelled"
+      || latestMission?.status === "waiting_for_approval"
+      || latestMission?.status === "paused"
+      || missionTasks.some((task) => task.status === "failed" || task.status === "blocked" || task.status === "cancelled"),
+    working: latestMission?.status === "planning"
+      || latestMission?.status === "active"
+      || latestMission?.status === "verifying"
+      || missionTasks.some((task) => task.status === "running" || task.status === "assigned" || task.status === "spawning"),
+    done: latestMission?.status === "completed"
+      || (missionTasks.length > 0 && missionTasks.every((task) => task.status === "completed")),
   }), [latestMission?.status, missionApprovals.length, missionTasks, submitting]);
 
   const status = missionPresentation(homeState);
