@@ -198,4 +198,43 @@ assert.equal(
   "failed Missions must surface recovery state instead of a misleading working heartbeat",
 );
 
+const statuslessRunningEvents = [
+  taskEvent("event-40", "task.running", { from: "assigned", to: "running", retryCount: 0 }, "task-statusless", 1_000),
+];
+assert.ok(
+  deriveMissionHeartbeat(statuslessRunningEvents, "mission-statusless", ["task-statusless"], 11_000),
+  "a running owned worker can truthfully support a heartbeat even when mission.status has not arrived",
+);
+
+for (const terminalType of ["task.completed", "task.failed", "task.blocked"] as const) {
+  const terminalEvents = [
+    taskEvent("event-41", "task.running", { from: "assigned", to: "running", retryCount: 0 }, "task-statusless", 1_000),
+    taskEvent("event-42", terminalType, {}, "task-statusless", 2_000),
+  ];
+  assert.equal(
+    deriveMissionHeartbeat(terminalEvents, "mission-statusless", ["task-statusless"], 20_000),
+    null,
+    `${terminalType} must suppress a working heartbeat when mission.status is unavailable`,
+  );
+}
+
+const crashedStatuslessEvents: UiRuntimeEvent[] = [
+  taskEvent("event-43", "task.running", { from: "assigned", to: "running", retryCount: 0 }, "task-statusless", 1_000),
+  {
+    id: "event-44",
+    seq: 44,
+    timestamp: 2_000,
+    source: { type: "runtime", id: "session-statusless" },
+    type: "session.crashed",
+    payload: { reason: "worker exited" },
+    taskId: "task-statusless",
+    sessionId: "session-statusless",
+  },
+];
+assert.equal(
+  deriveMissionHeartbeat(crashedStatuslessEvents, "mission-statusless", ["task-statusless"], 20_000),
+  null,
+  "a crashed worker session must never degrade into a misleading still-working heartbeat",
+);
+
 console.log("mission-progress-ui: ok — submitted work, scoped progress, recovery, and truthful long-running heartbeat behavior are covered");
