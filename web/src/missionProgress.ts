@@ -1,4 +1,4 @@
-import type { UiMission, UiRuntimeEvent, UiTask } from "./types";
+import type { UiRuntimeEvent } from "./types";
 
 export type MissionProgressTone = "neutral" | "active" | "attention" | "success";
 export type MissionHomeState = "ready" | "working" | "attention" | "done";
@@ -36,30 +36,14 @@ function missionStatusText(status: string): MissionProgressItem["tone"] {
 
 export function deriveMissionHomeState(input: {
   submitting: boolean;
-  missionStatus?: UiMission["status"];
-  approvalCount: number;
-  taskStatuses: UiTask["status"][];
+  needsAttention: boolean;
+  working: boolean;
+  done: boolean;
 }): MissionHomeState {
   if (input.submitting) return "working";
-  if (
-    input.approvalCount > 0
-    || input.missionStatus === "failed"
-    || input.missionStatus === "blocked"
-    || input.missionStatus === "cancelled"
-    || input.missionStatus === "waiting_for_approval"
-    || input.missionStatus === "paused"
-    || input.taskStatuses.some((status) => status === "failed" || status === "blocked" || status === "cancelled")
-  ) return "attention";
-  if (
-    input.missionStatus === "planning"
-    || input.missionStatus === "active"
-    || input.missionStatus === "verifying"
-    || input.taskStatuses.some((status) => status === "running" || status === "assigned" || status === "spawning")
-  ) return "working";
-  if (
-    input.missionStatus === "completed"
-    || (input.taskStatuses.length > 0 && input.taskStatuses.every((status) => status === "completed"))
-  ) return "done";
+  if (input.needsAttention) return "attention";
+  if (input.working) return "working";
+  if (input.done) return "done";
   return "ready";
 }
 
