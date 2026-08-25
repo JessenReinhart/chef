@@ -4,11 +4,21 @@ import { HarnessReadinessPanel } from "./HarnessReadinessPanel";
 import { OrchestratorSettings } from "./OrchestratorSettings";
 import { ProjectSwitcher } from "./ProjectSwitcher";
 
-export function SetupChrome() {
+export type SetupChromeSurface = "home" | "workbench";
+
+export function setupChromeFeatures(surface: SetupChromeSurface): { projectSwitcher: boolean; setupTools: boolean } {
+  return {
+    projectSwitcher: true,
+    setupTools: surface === "workbench",
+  };
+}
+
+export function SetupChrome({ surface = "workbench" }: { surface?: SetupChromeSurface }) {
   const [leftHost, setLeftHost] = useState<HTMLElement | null>(null);
   const [rightHost, setRightHost] = useState<HTMLElement | null>(null);
   const [showHarnesses, setShowHarnesses] = useState(false);
   const [showAI, setShowAI] = useState(false);
+  const features = setupChromeFeatures(surface);
 
   useEffect(() => {
     const resolve = () => {
@@ -25,12 +35,12 @@ export function SetupChrome() {
   }, []);
 
   return <>
-    {leftHost && createPortal(<ProjectSwitcher />, leftHost)}
-    {rightHost && createPortal(<>
+    {features.projectSwitcher && leftHost && createPortal(<ProjectSwitcher />, leftHost)}
+    {features.setupTools && rightHost && createPortal(<>
       <button onClick={() => setShowHarnesses(true)} className="header-quiet-button">Agents</button>
       <button onClick={() => setShowAI(true)} className="header-quiet-button">AI</button>
     </>, rightHost)}
-    {showHarnesses && <HarnessReadinessPanel onClose={() => setShowHarnesses(false)} />}
-    {showAI && <OrchestratorSettings onClose={() => setShowAI(false)} />}
+    {features.setupTools && showHarnesses && <HarnessReadinessPanel onClose={() => setShowHarnesses(false)} />}
+    {features.setupTools && showAI && <OrchestratorSettings onClose={() => setShowAI(false)} />}
   </>;
 }
