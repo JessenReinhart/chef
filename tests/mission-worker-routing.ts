@@ -50,6 +50,15 @@ try {
   assert.equal(fastPath.tasks[0].description, canonicalGoal, "the worker receives the full user goal");
   assert.equal(plannerRequestCount, 0, "the canonical simple request must not pay a planner-provider round trip");
 
+  const straightforwardResearchGoal = "Research the best way on how to create a system with AI";
+  const researchRequestsBefore = plannerRequestCount;
+  const researchFastPath = await provider.proposePlan({ ...context, goal: straightforwardResearchGoal });
+  assert.ok(researchFastPath);
+  assert.equal(researchFastPath.tasks.length, 1, "straightforward research should have one owner");
+  assert.equal(researchFastPath.tasks[0].assignedTo, "codex", "straightforward research routes directly to an available worker");
+  assert.equal(researchFastPath.tasks[0].description, straightforwardResearchGoal, "the research worker receives the full request");
+  assert.equal(plannerRequestCount, researchRequestsBefore, "straightforward research must not pay a planner-provider round trip");
+
   responsePlan = {
     goal: context.goal,
     tasks: [{
@@ -130,7 +139,7 @@ try {
   assert.equal(plannerRequestCount, plannerRequestsBeforeComplexGoal + 1, "complex work must still invoke the planner");
   assert.equal(complexPlan.tasks.length, 2, "the planner remains free to decompose genuinely complex work");
 
-  console.log("mission-worker-routing: ok — simple work skips planning while complex work still decomposes");
+  console.log("mission-worker-routing: ok — simple implementation and research skip planning while complex work still decomposes");
 } finally {
   await new Promise<void>((resolve) => server.close(() => resolve()));
 }
