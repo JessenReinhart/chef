@@ -15,8 +15,8 @@ const steps = [
   },
   {
     number: "03",
-    title: "Watch Chef work",
-    body: "Send the goal once, then stay on Home for progress, approvals, blockers, and the final result. Open Workbench only when you want deeper inspection or control.",
+    title: "Work starts automatically",
+    body: "Send the goal once, then stay on Home for progress, approvals, blockers, and the final result. Step in only when needed, and open Workbench only when you want deeper inspection or control.",
   },
 ] as const;
 
