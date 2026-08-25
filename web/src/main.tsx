@@ -7,6 +7,7 @@ import { LivingWorkspaceFeature } from "./LivingWorkspaceFeature";
 import { LivingArtifactFeature } from "./LivingArtifactFeature";
 import { MissionArtifactsFeature } from "./MissionArtifactsFeature";
 import { HomeMissionArtifacts } from "./HomeMissionArtifacts";
+import { HomePriorMissionResults } from "./HomePriorMissionResults";
 import { SetupChrome } from "./SetupChrome";
 import { DecisionLibraryFeature } from "./DecisionLibraryFeature";
 import { ChannelRoomsFeature } from "./ChannelRoomsFeature";
@@ -46,6 +47,7 @@ function ChefRoot() {
     return <>
       <IntentHome onOpenWorkbench={openWorkbench} />
       <HomeMissionArtifacts />
+      <HomePriorMissionResults />
       <IntentOnboarding />
     </>;
   }
