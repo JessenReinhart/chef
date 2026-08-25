@@ -36,21 +36,21 @@ assert.ok(paused);
 assert.equal(paused.tone, "neutral", "paused Missions retain the existing neutral projection in this slice");
 
 assert.equal(
-  deriveMissionHomeState({ submitting: true, missionStatus: undefined, approvalCount: 0, taskStatuses: [] }),
+  deriveMissionHomeState({ submitting: true, needsAttention: false, working: false, done: false }),
   "working",
   "a request must leave Ready immediately, before the first runtime refresh",
 );
 assert.equal(
-  deriveMissionHomeState({ submitting: true, missionStatus: "failed", approvalCount: 0, taskStatuses: ["failed"] }),
+  deriveMissionHomeState({ submitting: true, needsAttention: true, working: false, done: false }),
   "working",
   "a newly submitted follow-up must not inherit a stale failed Mission presentation",
 );
 assert.equal(
-  deriveMissionHomeState({ submitting: false, missionStatus: "failed", approvalCount: 0, taskStatuses: ["failed"] }),
+  deriveMissionHomeState({ submitting: false, needsAttention: true, working: false, done: false }),
   "attention",
 );
 assert.equal(
-  deriveMissionHomeState({ submitting: false, missionStatus: "completed", approvalCount: 0, taskStatuses: ["completed"] }),
+  deriveMissionHomeState({ submitting: false, needsAttention: false, working: false, done: true }),
   "done",
 );
 
