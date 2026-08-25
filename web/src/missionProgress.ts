@@ -1,6 +1,7 @@
-import type { UiRuntimeEvent } from "./types";
+import type { UiMission, UiRuntimeEvent, UiTask } from "./types";
 
 export type MissionProgressTone = "neutral" | "active" | "attention" | "success";
+export type MissionHomeState = "ready" | "working" | "attention" | "done";
 
 export interface MissionProgressItem {
   id: string;
@@ -31,6 +32,35 @@ function missionStatusText(status: string): MissionProgressItem["tone"] {
   if (status === "failed" || status === "blocked" || status === "waiting_for_approval" || status === "cancelled") return "attention";
   if (status === "active" || status === "planning" || status === "verifying") return "active";
   return "neutral";
+}
+
+export function deriveMissionHomeState(input: {
+  submitting: boolean;
+  missionStatus?: UiMission["status"];
+  approvalCount: number;
+  taskStatuses: UiTask["status"][];
+}): MissionHomeState {
+  if (input.submitting) return "working";
+  if (
+    input.approvalCount > 0
+    || input.missionStatus === "failed"
+    || input.missionStatus === "blocked"
+    || input.missionStatus === "cancelled"
+    || input.missionStatus === "waiting_for_approval"
+    || input.missionStatus === "paused"
+    || input.taskStatuses.some((status) => status === "failed" || status === "blocked" || status === "cancelled")
+  ) return "attention";
+  if (
+    input.missionStatus === "planning"
+    || input.missionStatus === "active"
+    || input.missionStatus === "verifying"
+    || input.taskStatuses.some((status) => status === "running" || status === "assigned" || status === "spawning")
+  ) return "working";
+  if (
+    input.missionStatus === "completed"
+    || (input.taskStatuses.length > 0 && input.taskStatuses.every((status) => status === "completed"))
+  ) return "done";
+  return "ready";
 }
 
 /** Convert durable runtime events into a compact, human-oriented Mission update. */
@@ -138,4 +168,30 @@ export function summarizeMissionProgress(events: UiRuntimeEvent[], limit = 5): M
     .map(summarizeMissionProgressEvent)
     .filter((item): item is MissionProgressItem => item !== null)
     .slice(-limit);
+}
+
+export function summarizeMissionProgressForMission(
+  events: UiRuntimeEvent[],
+  missionId: string,
+  taskIds: Iterable<string>,
+  limit = 3,
+): MissionProgressItem[] {
+  const ownedTaskIds = new Set(taskIds);
+  const seenText = new Set<string>();
+  const recent: MissionProgressItem[] = [];
+
+  for (const event of [...events].sort((a, b) => b.seq - a.seq)) {
+    const belongsToMission = (event.source.type === "mission" && event.source.id === missionId)
+      || event.correlationId === missionId
+      || (event.taskId !== undefined && ownedTaskIds.has(event.taskId));
+    if (!belongsToMission) continue;
+
+    const item = summarizeMissionProgressEvent(event);
+    if (!item || seenText.has(item.text)) continue;
+    seenText.add(item.text);
+    recent.push(item);
+    if (recent.length === limit) break;
+  }
+
+  return recent;
 }
