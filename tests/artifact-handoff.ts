@@ -1,5 +1,6 @@
 import { strict as assert } from "node:assert";
 import { artifactHandoff } from "../web/src/artifactHandoff.ts";
+import { copyRunCommand } from "../web/src/resultActions.ts";
 
 const canonical = artifactHandoff({
   uri: "file:///tmp/chef-project/todo-app.mjs",
@@ -13,6 +14,25 @@ assert.equal(canonical.summary, "Created runnable todo app at /tmp/chef-project/
 assert.equal(canonical.location, "/tmp/chef-project/todo-app.mjs");
 assert.equal(canonical.runCommand, "node /tmp/chef-project/todo-app.mjs");
 assert.equal(canonical.verification, "Verified by golden-path");
+
+let copiedText = "";
+const copySuccess = await copyRunCommand(canonical.runCommand, {
+  async writeText(text) {
+    copiedText = text;
+  },
+});
+assert.deepEqual(copySuccess, { ok: true });
+assert.equal(copiedText, canonical.runCommand, "the action must copy the exact durable run instruction without rewriting it");
+
+const copyUnavailable = await copyRunCommand(canonical.runCommand, null);
+assert.deepEqual(copyUnavailable, { ok: false, error: "Clipboard access is unavailable" }, "Simple Mode must not claim a successful copy when clipboard access is unavailable");
+
+const copyFailure = await copyRunCommand(canonical.runCommand, {
+  async writeText() {
+    throw new Error("clipboard denied");
+  },
+});
+assert.deepEqual(copyFailure, { ok: false, error: "clipboard denied" }, "clipboard failures remain observable instead of becoming false success");
 
 const windows = artifactHandoff({
   uri: "file:///C:/Work/chef/todo-app.mjs",
