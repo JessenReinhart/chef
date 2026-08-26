@@ -117,6 +117,7 @@ function blocksHeartbeat(event: UiRuntimeEvent): boolean {
     || event.type === "task.blocked"
     || event.type === "session.crashed"
     || event.type === "node.failed"
+    || event.type === "orchestrator.plan.none"
     || event.type === "orchestrator.plan.error"
     || event.type === "approval.requested";
 }
@@ -290,6 +291,11 @@ export function summarizeMissionProgressEvent(event: UiRuntimeEvent): MissionPro
     case "node.failed": {
       const error = stringValue(payload, "error");
       text = error ? `A work item failed: ${error}` : "A work item failed and needs attention.";
+      tone = "attention";
+      break;
+    }
+    case "orchestrator.plan.none": {
+      text = "Chef could not build a plan for this Mission.";
       tone = "attention";
       break;
     }
