@@ -169,6 +169,11 @@ export function summarizeMissionProgressEvent(event: UiRuntimeEvent): MissionPro
       tone = "success";
       break;
     }
+    case "session.data": {
+      text = "A worker is actively producing output.";
+      tone = "active";
+      break;
+    }
     case "session.crashed": {
       const reason = stringValue(payload, "reason");
       text = reason ? `A worker session stopped unexpectedly: ${reason}` : "A worker session stopped unexpectedly; Chef needs to recover it.";
