@@ -2,17 +2,17 @@
 
 Use this opt-in diagnostic when validating Chef's canonical product journey against a real configured planner and a real detected CLI worker.
 
-It creates a temporary local project, submits the permanent boring acceptance task through Chef's HTTP chat surface, observes Mission/Task/Session progress while the request is still running, waits for the Mission to finish, then starts the generated app with `npm start` and verifies that `/` serves a todo UI.
+It creates a temporary local project, opens a real Chef Thread, submits the permanent boring todo-app acceptance task through the same `/api/threads/:id/chat` boundary used by Simple Mode, observes Mission/Task/Session progress while the request is still running, waits for the Mission to finish, then starts the generated app with `npm start` and verifies that `/` serves a todo UI.
 
 ## Run
 
-Configure Chef's normal LLM environment first, then run:
+Configure Chef's normal LLM provider first, then run:
 
 ```sh
-node --experimental-strip-types tests/live-todo-acceptance.ts
+npm run diagnostic:live-todo
 ```
 
-The diagnostic requires `CHEF_PROVIDER` plus one of `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `CHEF_API_KEY`. Custom/OpenAI-compatible providers should also set the same model/base URL variables used by normal Chef startup.
+The diagnostic loads Chef's normal persisted provider settings first, with the same environment-variable overrides supported by normal startup. A task-capable local CLI worker must also be detected.
 
 Optional variables:
 
@@ -23,7 +23,7 @@ Failed runs always print and preserve the temporary project path so the generate
 
 ## What this proves
 
-A passing run proves the selected-project boundary, HTTP task submission, observable in-flight Mission progress, real planner, real task-capable worker routing, durable Task/Session completion, generated-file discoverability, documented `npm start` contract, and a reachable generated application in one executable scenario.
+A passing run proves the selected-project boundary, Thread creation, Simple Mode's Thread chat submission path, observable in-flight Mission progress, real planner, real task-capable worker routing, durable Task/Session completion, generated-file discoverability, documented `npm start` contract, and a reachable generated application in one executable scenario.
 
 The progress assertion is intentionally made before terminal-state checks. A Mission that eventually finishes but emits no observable Mission/Task/Session progress while the request is in flight is not considered product-green.
 
