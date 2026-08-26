@@ -12,7 +12,6 @@ assert.match(artifacts, /sort\(\(a, b\) => b\.createdAt - a\.createdAt\)\[0\]/, 
 assert.match(artifacts, /const taskIds = new Set\(mission\.taskIds\)/, "artifact projection must derive the current Mission task boundary");
 assert.match(artifacts, /artifact\.taskId && taskIds\.has\(artifact\.taskId\)/, "sibling and prior-Mission artifacts must not leak onto Home");
 assert.match(artifacts, /\.slice\(-MAX_HOME_ARTIFACTS\)\s+\.reverse\(\)/, "Home artifact output must remain bounded and newest-first");
-assert.match(artifacts, /artifact\.metadata\.summary \?\? artifact\.metadata\.preview \?\? artifact\.metadata\.description/, "artifact cards should prefer human-readable summary metadata");
 assert.match(artifacts, /artifact\.uri\.startsWith\("file:"\)/, "only file-backed artifacts should expose download actions");
 assert.match(artifacts, /\/api\/artifacts\/\$\{encodeURIComponent\(artifact\.id\)\}\/download/, "Home downloads must reuse the canonical artifact endpoint");
 assert.match(artifacts, /Mission outputs are temporarily unavailable/, "artifact failure must degrade locally instead of breaking Home");

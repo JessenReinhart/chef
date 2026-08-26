@@ -18,13 +18,6 @@ type StateSnapshot = { missions?: UiMission[] };
 
 const MAX_HOME_ARTIFACTS = 4;
 
-function artifactSummary(artifact: HomeArtifact): string | null {
-  const value = artifact.metadata.summary ?? artifact.metadata.preview ?? artifact.metadata.description;
-  if (typeof value !== "string" || !value.trim()) return null;
-  const normalized = value.replace(/\s+/g, " ").trim();
-  return normalized.length <= 140 ? normalized : `${normalized.slice(0, 137)}…`;
-}
-
 export function HomeMissionArtifacts() {
   const [target, setTarget] = useState<Element | null>(null);
   const [mission, setMission] = useState<UiMission | null>(null);
@@ -107,7 +100,6 @@ export function HomeMissionArtifacts() {
       ) : (
         <div className="mt-3 grid gap-2 sm:grid-cols-2">
           {missionArtifacts.map((artifact) => {
-            const summary = artifactSummary(artifact);
             const handoff = artifactHandoff(artifact);
             return (
               <article key={`${artifact.id}:${artifact.version}`} className="rounded-xl border border-white/[0.07] bg-black/20 p-3">
@@ -126,7 +118,7 @@ export function HomeMissionArtifacts() {
                     </a>
                   )}
                 </div>
-                {summary && <p className="mt-2 line-clamp-3 text-[11px] leading-4 text-zinc-500">{summary}</p>}
+                {handoff.summary && <p className="mt-2 line-clamp-3 text-[11px] leading-4 text-zinc-500">{handoff.summary}</p>}
                 {(handoff.location || handoff.runCommand || handoff.verification) && (
                   <dl className="mt-3 space-y-2 border-t border-white/[0.06] pt-3 text-[10px] leading-4">
                     {handoff.location && (

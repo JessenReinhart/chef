@@ -4,6 +4,7 @@ export type ArtifactHandoffInput = {
 };
 
 export type ArtifactHandoff = {
+  summary: string | null;
   location: string | null;
   runCommand: string | null;
   verification: string | null;
@@ -15,6 +16,13 @@ function firstText(metadata: Record<string, unknown>, keys: string[]): string | 
     if (typeof value === "string" && value.trim()) return value.trim();
   }
   return null;
+}
+
+function summaryText(metadata: Record<string, unknown>): string | null {
+  const value = firstText(metadata, ["summary", "preview", "description", "content"]);
+  if (!value) return null;
+  const normalized = value.replace(/\s+/g, " ").trim();
+  return normalized.length <= 140 ? normalized : `${normalized.slice(0, 137)}…`;
 }
 
 function fileUriLocation(uri: string): string | null {
@@ -42,6 +50,7 @@ export function artifactHandoff(artifact: ArtifactHandoffInput): ArtifactHandoff
     ?? (verifiedBy ? `Verified by ${verifiedBy}` : null);
 
   return {
+    summary: summaryText(artifact.metadata),
     location: explicitLocation ?? fileUriLocation(artifact.uri),
     runCommand,
     verification,
