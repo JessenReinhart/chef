@@ -67,7 +67,7 @@ assert.ok(digest.every((item) => !item.text.includes("raw terminal output")));
 
 const orchestratorScoped = [
   event("active", "mission.status", { missionId: "mission-1", status: "active" }, 1_000),
-  event("plan", "orchestrator.plan.proposed", { planId: "plan-1", taskIds: ["task-1"], routingMode: "single-worker" }, 2_000),
+  event("plan", "orchestrator.plan.proposed", { planId: "plan-1", missionId: "mission-1", taskIds: ["task-1"], routingMode: "single-worker" }, 2_000),
   event("other", "mission.status", { missionId: "mission-2", status: "completed" }, 3_000),
 ];
 const missionDigest = summarizeMissionProgressForMission(
@@ -125,6 +125,11 @@ assert.equal(
   deriveMissionHeartbeat(completedTaskScoped, "mission-1", ["task-1"], 14_000, 10_000)?.text,
   "Chef is still verifying. Last runtime activity was 11 seconds ago.",
   "once every Mission task is durably complete, evaluation lag must be described as verification rather than worker activity",
+);
+assert.equal(
+  deriveMissionHeartbeat(completedTaskScoped, "mission-1", [], 14_000, 10_000)?.text,
+  "Chef is still verifying. Last runtime activity was 11 seconds ago.",
+  "durable Mission plan lineage must recover owned task IDs when the UI task list has not caught up yet",
 );
 
 const partiallyCompletedScoped: UiRuntimeEvent[] = [
@@ -214,4 +219,4 @@ assert.equal(
   "a real retry after approval rejection must restore heartbeat feedback",
 );
 
-console.log("mission-progress-summary: ok — routing, worker activity, verification lag, and recovery blockers produce truthful Simple Mode progress");
+console.log("mission-progress-summary: ok — routing, worker activity, recovered task lineage, verification lag, and recovery blockers produce truthful Simple Mode progress");
