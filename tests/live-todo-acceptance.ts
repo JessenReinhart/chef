@@ -155,8 +155,8 @@ async function main(): Promise<void> {
     assert.ok(threadId, "Created Thread must expose an id");
 
     const request = [
-      "Create a simple todo app in this selected project.",
-      "Keep it intentionally small and reliable.",
+      "Create a todo app in this selected project.",
+      "Keep it focused and reliable.",
       "Use only Node.js built-ins plus browser HTML/CSS/JavaScript so installation is not required.",
       "Create package.json with an npm start script.",
       "The server must listen on process.env.PORT and serve the todo UI from /.",
