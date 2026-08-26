@@ -68,14 +68,14 @@ try {
   const body = await response.json() as { ok?: boolean; data?: { ok?: boolean; missionId?: string; taskIds?: string[] } };
   assert.equal(body.ok, true);
   assert.equal(body.data?.ok, true);
-  assert.ok(body.data?.missionId, "completed Thread request must expose its Mission lineage");
+  const missionId = body.data?.missionId;
+  assert.ok(missionId, "completed Thread request must expose its Mission lineage");
   assert.ok((body.data?.taskIds?.length ?? 0) > 0, "completed Thread request must retain worker Task lineage");
 
   const finalSnapshot = await chef.inspectState();
   assert.ok(finalSnapshot.sessions.length > 0, "Thread request must persist its real worker Session");
   assert.ok(finalSnapshot.sessions.every((session) => session.command.length > 0), "worker Session command must be observable");
 
-  const missionId = body.data.missionId;
   const planningStarted = finalSnapshot.events.find((event) =>
     event.type === "orchestrator.plan.started"
     && (event.payload as { missionId?: unknown }).missionId === missionId
@@ -89,7 +89,7 @@ try {
   assert.ok(planningSucceeded, "successful planning must remain correlated to the Mission before Task creation");
   assert.ok(planningStarted.seq < planningSucceeded.seq, "planning-start evidence must precede the accepted plan");
 
-  const firstTaskId = body.data.taskIds?.[0];
+  const firstTaskId = body.data?.taskIds?.[0];
   const taskCreated = firstTaskId
     ? finalSnapshot.events.find((event) => event.type === "orchestrator.task.created" && event.taskId === firstTaskId)
     : undefined;
