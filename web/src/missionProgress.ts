@@ -77,6 +77,19 @@ function inferredHeartbeatLabel(scoped: UiRuntimeEvent[]): string | null {
   return null;
 }
 
+function allOwnedTasksCompleted(scoped: UiRuntimeEvent[], taskIds: Set<string>): boolean {
+  if (taskIds.size === 0) return false;
+  const latestTaskEvent = new Map<string, string>();
+
+  for (const event of scoped) {
+    if (!event.taskId || !taskIds.has(event.taskId) || latestTaskEvent.has(event.taskId)) continue;
+    if (!event.type.startsWith("task.")) continue;
+    latestTaskEvent.set(event.taskId, event.type);
+  }
+
+  return [...taskIds].every((taskId) => latestTaskEvent.get(taskId) === "task.completed");
+}
+
 function blocksHeartbeat(event: UiRuntimeEvent): boolean {
   if (event.type === "approval.resolved") {
     return stringValue(objectPayload(event), "decision") === "rejected";
@@ -304,7 +317,9 @@ export function deriveMissionHeartbeat(
   if (latestBlocker && (!latestRecovery || latestBlocker.seq > latestRecovery.seq)) return null;
 
   const status = latestMissionStatus ? stringValue(objectPayload(latestMissionStatus), "status") : undefined;
-  const label = activeHeartbeatLabel(status) ?? (status === undefined ? inferredHeartbeatLabel(scoped) : null);
+  const label = status === "active" && allOwnedTasksCompleted(scoped, ownedTaskIds)
+    ? "Chef is still verifying"
+    : activeHeartbeatLabel(status) ?? (status === undefined ? inferredHeartbeatLabel(scoped) : null);
   if (!label) return null;
 
   const silentForMs = Math.max(0, now - latest.timestamp);
