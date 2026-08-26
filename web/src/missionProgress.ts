@@ -78,6 +78,9 @@ function inferredHeartbeatLabel(scoped: UiRuntimeEvent[]): string | null {
 }
 
 function blocksHeartbeat(event: UiRuntimeEvent): boolean {
+  if (event.type === "approval.resolved") {
+    return stringValue(objectPayload(event), "decision") === "rejected";
+  }
   return event.type === "task.failed"
     || event.type === "task.blocked"
     || event.type === "session.crashed"
@@ -87,7 +90,10 @@ function blocksHeartbeat(event: UiRuntimeEvent): boolean {
 }
 
 function resumesHeartbeat(event: UiRuntimeEvent): boolean {
-  if (event.type === "task.assigned" || event.type === "task.running" || event.type === "approval.resolved") return true;
+  if (event.type === "task.assigned" || event.type === "task.running") return true;
+  if (event.type === "approval.resolved") {
+    return stringValue(objectPayload(event), "decision") !== "rejected";
+  }
   if (event.type !== "mission.status") return false;
   const status = stringValue(objectPayload(event), "status");
   return status === "planning" || status === "active" || status === "verifying";
