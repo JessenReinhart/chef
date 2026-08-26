@@ -61,6 +61,35 @@ try {
   assert.equal(researchFastPath.tasks[0].description, straightforwardResearchGoal, "the research worker receives the full request");
   assert.equal(plannerRequestCount, researchRequestsBefore, "straightforward research must not pay a planner-provider round trip");
 
+  const chainedDeliverableGoal = "Research the options and write a migration report";
+  const plannerRequestsBeforeChainedDeliverable = plannerRequestCount;
+  responsePlan = {
+    goal: chainedDeliverableGoal,
+    tasks: [
+      {
+        id: "task-research",
+        title: "Research options",
+        description: "Research the available options.",
+        dependencies: [],
+        priority: 1,
+        nodeType: "agent.llm",
+      },
+      {
+        id: "task-report",
+        title: "Write migration report",
+        description: "Turn the research into the requested migration report.",
+        dependencies: ["task-research"],
+        priority: 0,
+        nodeType: "agent.llm",
+      },
+    ],
+  };
+  const chainedDeliverablePlan = await provider.proposePlan({ ...context, goal: chainedDeliverableGoal });
+  assert.ok(chainedDeliverablePlan);
+  assert.equal(chainedDeliverablePlan.routingMode, "planner", "a chained research deliverable must not be collapsed into the single-worker shortcut");
+  assert.equal(plannerRequestCount, plannerRequestsBeforeChainedDeliverable + 1, "a chained research deliverable must invoke the planner");
+  assert.equal(chainedDeliverablePlan.tasks.length, 2, "the planner may preserve distinct research and deliverable stages");
+
   responsePlan = {
     goal: context.goal,
     tasks: [{
@@ -143,7 +172,7 @@ try {
   assert.equal(plannerRequestCount, plannerRequestsBeforeComplexGoal + 1, "complex work must still invoke the planner");
   assert.equal(complexPlan.tasks.length, 2, "the planner remains free to decompose genuinely complex work");
 
-  console.log("mission-worker-routing: ok — direct and planner routes remain behaviorally distinct and observable on the proposed plan");
+  console.log("mission-worker-routing: ok — simple work stays fast while chained deliverables and complex work use planning");
 } finally {
   await new Promise<void>((resolve) => server.close(() => resolve()));
 }
