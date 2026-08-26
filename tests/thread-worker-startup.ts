@@ -65,18 +65,40 @@ try {
 
   const response = await request;
   assert.equal(response.status, 200);
-  const body = await response.json() as { ok?: boolean; data?: { ok?: boolean; taskIds?: string[] } };
+  const body = await response.json() as { ok?: boolean; data?: { ok?: boolean; missionId?: string; taskIds?: string[] } };
   assert.equal(body.ok, true);
   assert.equal(body.data?.ok, true);
+  const missionId = body.data?.missionId;
+  assert.ok(missionId, "completed Thread request must expose its Mission lineage");
   assert.ok((body.data?.taskIds?.length ?? 0) > 0, "completed Thread request must retain worker Task lineage");
 
   const finalSnapshot = await chef.inspectState();
   assert.ok(finalSnapshot.sessions.length > 0, "Thread request must persist its real worker Session");
   assert.ok(finalSnapshot.sessions.every((session) => session.command.length > 0), "worker Session command must be observable");
+
+  const planningStarted = finalSnapshot.events.find((event) =>
+    event.type === "orchestrator.plan.started"
+    && (event.payload as { missionId?: unknown }).missionId === missionId
+  );
+  assert.ok(planningStarted, "successful worker startup must retain durable Mission-correlated planning-start evidence");
+
+  const planningSucceeded = finalSnapshot.events.find((event) =>
+    event.type === "orchestrator.plan.proposed"
+    && (event.payload as { missionId?: unknown }).missionId === missionId
+  );
+  assert.ok(planningSucceeded, "successful planning must remain correlated to the Mission before Task creation");
+  assert.ok(planningStarted.seq < planningSucceeded.seq, "planning-start evidence must precede the accepted plan");
+
+  const firstTaskId = body.data?.taskIds?.[0];
+  const taskCreated = firstTaskId
+    ? finalSnapshot.events.find((event) => event.type === "orchestrator.task.created" && event.taskId === firstTaskId)
+    : undefined;
+  assert.ok(taskCreated, "worker startup must retain durable Task creation evidence");
+  assert.ok(planningSucceeded.seq < taskCreated.seq, "accepted plan evidence must precede real worker Task creation");
 } finally {
   await new Promise<void>((resolve) => server.close(() => resolve()));
   await chef.close();
   await rm(dir, { recursive: true, force: true });
 }
 
-console.log("thread-worker-startup: ok — Thread chat reaches a real worker Session within a bounded startup budget");
+console.log("thread-worker-startup: ok — Thread chat durably shows planning before reaching a real worker Session within its startup budget");
