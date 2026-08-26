@@ -119,6 +119,7 @@ function blocksHeartbeat(event: UiRuntimeEvent): boolean {
     || event.type === "node.failed"
     || event.type === "orchestrator.plan.none"
     || event.type === "orchestrator.plan.error"
+    || event.type === "orchestrator.plan.interrupted"
     || event.type === "approval.requested";
 }
 
@@ -258,6 +259,14 @@ export function summarizeMissionProgressEvent(event: UiRuntimeEvent): MissionPro
         ? `Chef started coordinating ${count} planned step${count === 1 ? "" : "s"}.`
         : "Chef started executing the Mission plan.";
       tone = "active";
+      break;
+    }
+    case "orchestrator.plan.interrupted": {
+      const status = stringValue(payload, "status");
+      text = status
+        ? `Mission execution was interrupted (${status}).`
+        : "Mission execution was interrupted and needs attention.";
+      tone = "attention";
       break;
     }
     case "orchestrator.task.evaluated": {
