@@ -302,6 +302,10 @@ export function deriveMissionHeartbeat(
   thresholdMs = HEARTBEAT_AFTER_MS,
 ): MissionProgressItem | null {
   const ownedTaskIds = new Set(taskIds);
+  const seedScoped = events.filter((event) => belongsToMission(event, missionId, ownedTaskIds));
+  for (const event of seedScoped) {
+    for (const taskId of stringArray(objectPayload(event), "taskIds")) ownedTaskIds.add(taskId);
+  }
   const scoped = events
     .filter((event) => belongsToMission(event, missionId, ownedTaskIds))
     .sort((a, b) => b.seq - a.seq);
