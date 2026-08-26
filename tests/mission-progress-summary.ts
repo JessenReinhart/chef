@@ -136,4 +136,36 @@ assert.equal(
   "a timed-out Mission must not emit a false still-working heartbeat while terminal status catches up",
 );
 
-console.log("mission-progress-summary: ok — durable routing and real worker activity become human-readable Simple Mode progress");
+for (const blocker of [
+  { id: "failed", type: "task.failed", payload: { error: "worker exited" } },
+  { id: "blocked", type: "task.blocked", payload: { reason: "dependency unavailable" } },
+  { id: "crashed", type: "session.crashed", payload: { reason: "pty closed" } },
+]) {
+  const blockerEvent: UiRuntimeEvent = {
+    ...event(blocker.id, blocker.type, blocker.payload, 3_000),
+    taskId: "task-1",
+  };
+  const blockedScoped = [...orchestratorScoped.slice(0, 2), blockerEvent];
+  const blockedDigest = summarizeMissionProgressForMission(blockedScoped, "mission-1", ["task-1"], 3, 20_000);
+  assert.equal(blockedDigest[0]?.id, blocker.id, `${blocker.type} must remain the latest visible Mission update`);
+  assert.equal(blockedDigest[0]?.tone, "attention");
+  assert.equal(
+    deriveMissionHeartbeat(blockedScoped, "mission-1", ["task-1"], 20_000, 10_000),
+    null,
+    `${blocker.type} must suppress a false still-working heartbeat while Mission status is stale`,
+  );
+}
+
+const failedThenRetried: UiRuntimeEvent[] = [
+  ...orchestratorScoped.slice(0, 2),
+  { ...event("failed", "task.failed", { error: "worker exited" }, 3_000), taskId: "task-1" },
+  { ...event("retry", "task.running", { retryCount: 1 }, 4_000), taskId: "task-1" },
+];
+const retryHeartbeat = deriveMissionHeartbeat(failedThenRetried, "mission-1", ["task-1"], 15_000, 10_000);
+assert.equal(
+  retryHeartbeat?.text,
+  "Chef is still working. Last runtime activity was 11 seconds ago.",
+  "a durable retry after failure must resume truthful long-running feedback",
+);
+
+console.log("mission-progress-summary: ok — routing, worker activity, and recovery blockers produce truthful Simple Mode progress");
