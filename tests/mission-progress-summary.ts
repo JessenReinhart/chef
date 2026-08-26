@@ -1,5 +1,10 @@
 import { strict as assert } from "node:assert";
-import { summarizeMissionProgress, summarizeMissionProgressEvent } from "../web/src/missionProgress.ts";
+import {
+  deriveMissionHeartbeat,
+  summarizeMissionProgress,
+  summarizeMissionProgressEvent,
+  summarizeMissionProgressForMission,
+} from "../web/src/missionProgress.ts";
 import type { UiRuntimeEvent } from "../web/src/types.ts";
 
 const event = (id: string, type: string, payload: unknown, timestamp: number): UiRuntimeEvent => ({
@@ -35,4 +40,36 @@ const digest = summarizeMissionProgress([
 assert.deepEqual(digest.map((item) => item.id), ["execute", "approval", "done"]);
 assert.ok(digest.every((item) => !item.text.includes("session.data")));
 
-console.log("mission-progress-summary: ok — meaningful Mission events become a bounded human digest");
+const orchestratorScoped = [
+  event("active", "mission.status", { missionId: "mission-1", status: "active" }, 1_000),
+  event("plan", "orchestrator.plan.proposed", { planId: "plan-1", taskIds: ["task-1"] }, 2_000),
+  event("other", "mission.status", { missionId: "mission-2", status: "completed" }, 3_000),
+];
+const missionDigest = summarizeMissionProgressForMission(
+  orchestratorScoped,
+  "mission-1",
+  ["task-1"],
+  3,
+  5_000,
+);
+assert.deepEqual(
+  missionDigest.map((item) => item.id),
+  ["plan", "active"],
+  "orchestrator-emitted Mission status and plan updates must remain visible through durable payload lineage",
+);
+assert.ok(
+  !missionDigest.some((item) => item.id === "other"),
+  "payload lineage must not leak updates from another Mission",
+);
+
+const heartbeat = deriveMissionHeartbeat(
+  orchestratorScoped.slice(0, 2),
+  "mission-1",
+  ["task-1"],
+  13_000,
+  10_000,
+);
+assert.equal(heartbeat?.text, "Chef is still working. Last runtime activity was 11 seconds ago.");
+assert.equal(heartbeat?.tone, "active");
+
+console.log("mission-progress-summary: ok — durable Mission lineage keeps real orchestrator progress and heartbeat visible");
