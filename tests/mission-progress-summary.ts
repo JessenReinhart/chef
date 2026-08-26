@@ -20,19 +20,37 @@ const planned = summarizeMissionProgressEvent(event("plan", "orchestrator.plan.p
 assert.equal(planned?.text, "Chef prepared a plan with 2 steps.");
 assert.equal(planned?.tone, "active");
 
-const approval = summarizeMissionProgressEvent(event("approval", "approval.requested", { reason: "Push branch" }, 2));
+const singleWorkerPlan = summarizeMissionProgressEvent(event(
+  "single-worker-plan",
+  "orchestrator.plan.proposed",
+  { taskIds: ["a"], routingMode: "single-worker" },
+  2,
+));
+assert.equal(singleWorkerPlan?.text, "Chef chose one worker for this Mission.");
+assert.equal(singleWorkerPlan?.tone, "active");
+
+const coordinatedPlan = summarizeMissionProgressEvent(event(
+  "coordinated-plan",
+  "orchestrator.plan.proposed",
+  { taskIds: ["a", "b", "c"], routingMode: "planner" },
+  3,
+));
+assert.equal(coordinatedPlan?.text, "Chef chose a coordinated plan with 3 steps.");
+assert.equal(coordinatedPlan?.tone, "active");
+
+const approval = summarizeMissionProgressEvent(event("approval", "approval.requested", { reason: "Push branch" }, 4));
 assert.equal(approval?.text, "Approval needed: Push branch");
 assert.equal(approval?.tone, "attention");
 
-const completed = summarizeMissionProgressEvent(event("done", "mission.status", { status: "completed" }, 3));
+const completed = summarizeMissionProgressEvent(event("done", "mission.status", { status: "completed" }, 5));
 assert.equal(completed?.text, "Mission completed.");
 assert.equal(completed?.tone, "success");
 
-const timeout = summarizeMissionProgressEvent(event("timeout", "mission.timeout", { missionId: "mission-1", timeoutMs: 10_000 }, 4));
+const timeout = summarizeMissionProgressEvent(event("timeout", "mission.timeout", { missionId: "mission-1", timeoutMs: 10_000 }, 6));
 assert.equal(timeout?.text, "Mission timed out after 10 seconds.");
 assert.equal(timeout?.tone, "attention");
 
-const workerOutput = summarizeMissionProgressEvent(event("output", "session.data", { text: "raw terminal output" }, 5));
+const workerOutput = summarizeMissionProgressEvent(event("output", "session.data", { text: "raw terminal output" }, 7));
 assert.equal(workerOutput?.text, "A worker is actively producing output.");
 assert.equal(workerOutput?.tone, "active");
 assert.ok(!workerOutput?.text.includes("raw terminal output"), "Simple Mode must not echo raw terminal output");
@@ -49,7 +67,7 @@ assert.ok(digest.every((item) => !item.text.includes("raw terminal output")));
 
 const orchestratorScoped = [
   event("active", "mission.status", { missionId: "mission-1", status: "active" }, 1_000),
-  event("plan", "orchestrator.plan.proposed", { planId: "plan-1", taskIds: ["task-1"] }, 2_000),
+  event("plan", "orchestrator.plan.proposed", { planId: "plan-1", taskIds: ["task-1"], routingMode: "single-worker" }, 2_000),
   event("other", "mission.status", { missionId: "mission-2", status: "completed" }, 3_000),
 ];
 const missionDigest = summarizeMissionProgressForMission(
@@ -63,6 +81,11 @@ assert.deepEqual(
   missionDigest.map((item) => item.id),
   ["plan", "active"],
   "orchestrator-emitted Mission status and plan updates must remain visible through durable payload lineage",
+);
+assert.equal(
+  missionDigest[0]?.text,
+  "Chef chose one worker for this Mission.",
+  "the durable routing decision must become human-readable Simple Mode feedback",
 );
 assert.ok(
   !missionDigest.some((item) => item.id === "other"),
@@ -113,4 +136,4 @@ assert.equal(
   "a timed-out Mission must not emit a false still-working heartbeat while terminal status catches up",
 );
 
-console.log("mission-progress-summary: ok — real worker output becomes human-readable progress without leaking terminal text");
+console.log("mission-progress-summary: ok — durable routing and real worker activity become human-readable Simple Mode progress");
