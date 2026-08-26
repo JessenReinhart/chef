@@ -55,6 +55,10 @@ assert.equal(workerOutput?.text, "A worker is actively producing output.");
 assert.equal(workerOutput?.tone, "active");
 assert.ok(!workerOutput?.text.includes("raw terminal output"), "Simple Mode must not echo raw terminal output");
 
+const noPlan = summarizeMissionProgressEvent(event("no-plan", "orchestrator.plan.none", { missionId: "mission-no-plan" }, 8));
+assert.equal(noPlan?.text, "Chef could not build a plan for this Mission.");
+assert.equal(noPlan?.tone, "attention");
+
 const digest = summarizeMissionProgress([
   event("start", "mission.created", { goal: "Ship report" }, 1),
   event("output", "session.data", { text: "raw terminal output" }, 2),
@@ -67,7 +71,7 @@ assert.ok(digest.every((item) => !item.text.includes("raw terminal output")));
 
 const orchestratorScoped = [
   event("active", "mission.status", { missionId: "mission-1", status: "active" }, 1_000),
-  event("plan", "orchestrator.plan.proposed", { planId: "plan-1", taskIds: ["task-1"], routingMode: "single-worker" }, 2_000),
+  event("plan", "orchestrator.plan.proposed", { planId: "plan-1", missionId: "mission-1", taskIds: ["task-1"], routingMode: "single-worker" }, 2_000),
   event("other", "mission.status", { missionId: "mission-2", status: "completed" }, 3_000),
 ];
 const missionDigest = summarizeMissionProgressForMission(
@@ -116,6 +120,64 @@ const heartbeat = deriveMissionHeartbeat(
 );
 assert.equal(heartbeat?.text, "Chef is still working. Last runtime activity was 11 seconds ago.");
 assert.equal(heartbeat?.tone, "active");
+
+const completedTaskScoped: UiRuntimeEvent[] = [
+  ...orchestratorScoped.slice(0, 2),
+  { ...event("task-completed", "task.completed", { resultSummary: "Todo app created" }, 3_000), taskId: "task-1" },
+];
+assert.equal(
+  deriveMissionHeartbeat(completedTaskScoped, "mission-1", ["task-1"], 14_000, 10_000)?.text,
+  "Chef is still verifying. Last runtime activity was 11 seconds ago.",
+  "once every Mission task is durably complete, evaluation lag must be described as verification rather than worker activity",
+);
+assert.equal(
+  deriveMissionHeartbeat(completedTaskScoped, "mission-1", [], 14_000, 10_000)?.text,
+  "Chef is still verifying. Last runtime activity was 11 seconds ago.",
+  "durable Mission plan lineage must recover owned task IDs when the UI task list has not caught up yet",
+);
+const recoveredLineageDigest = summarizeMissionProgressForMission(
+  completedTaskScoped,
+  "mission-1",
+  [],
+  3,
+  5_000,
+);
+assert.equal(
+  recoveredLineageDigest[0]?.id,
+  "task-completed",
+  "the activity feed must recover the same durable task lineage instead of hiding worker completion while UI task state catches up",
+);
+
+const partiallyCompletedScoped: UiRuntimeEvent[] = [
+  event("active-multi", "mission.status", { missionId: "mission-3", status: "active" }, 1_000),
+  event("plan-multi", "orchestrator.plan.proposed", { missionId: "mission-3", taskIds: ["task-a", "task-b"] }, 2_000),
+  { ...event("task-a-completed", "task.completed", {}, 3_000), taskId: "task-a" },
+  { ...event("task-b-running", "task.running", {}, 4_000), taskId: "task-b" },
+];
+assert.equal(
+  deriveMissionHeartbeat(partiallyCompletedScoped, "mission-3", ["task-a", "task-b"], 15_000, 10_000)?.text,
+  "Chef is still working. Last runtime activity was 11 seconds ago.",
+  "a multi-step Mission must remain in working state while any owned task is still running",
+);
+
+const planningEndedWithoutPlan: UiRuntimeEvent[] = [
+  event("planning", "mission.status", { missionId: "mission-no-plan", status: "planning" }, 1_000),
+  event("no-plan", "orchestrator.plan.none", { missionId: "mission-no-plan" }, 2_000),
+];
+const noPlanDigest = summarizeMissionProgressForMission(
+  planningEndedWithoutPlan,
+  "mission-no-plan",
+  [],
+  3,
+  20_000,
+);
+assert.equal(noPlanDigest[0]?.id, "no-plan", "planning without a plan must become the latest visible Simple Mode update");
+assert.equal(noPlanDigest[0]?.tone, "attention");
+assert.equal(
+  deriveMissionHeartbeat(planningEndedWithoutPlan, "mission-no-plan", [], 20_000, 10_000),
+  null,
+  "planning that terminates without a plan must not emit a false still-planning heartbeat",
+);
 
 const timedOutScoped = [
   ...orchestratorScoped.slice(0, 2),
@@ -192,4 +254,4 @@ assert.equal(
   "a real retry after approval rejection must restore heartbeat feedback",
 );
 
-console.log("mission-progress-summary: ok — routing, worker activity, and recovery blockers produce truthful Simple Mode progress");
+console.log("mission-progress-summary: ok — routing, worker activity, recovered task lineage, verification lag, no-plan recovery, and other blockers produce truthful Simple Mode progress");
