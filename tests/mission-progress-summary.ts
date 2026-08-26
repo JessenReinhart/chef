@@ -117,6 +117,28 @@ const heartbeat = deriveMissionHeartbeat(
 assert.equal(heartbeat?.text, "Chef is still working. Last runtime activity was 11 seconds ago.");
 assert.equal(heartbeat?.tone, "active");
 
+const completedTaskScoped: UiRuntimeEvent[] = [
+  ...orchestratorScoped.slice(0, 2),
+  { ...event("task-completed", "task.completed", { resultSummary: "Todo app created" }, 3_000), taskId: "task-1" },
+];
+assert.equal(
+  deriveMissionHeartbeat(completedTaskScoped, "mission-1", ["task-1"], 14_000, 10_000)?.text,
+  "Chef is still verifying. Last runtime activity was 11 seconds ago.",
+  "once every Mission task is durably complete, evaluation lag must be described as verification rather than worker activity",
+);
+
+const partiallyCompletedScoped: UiRuntimeEvent[] = [
+  event("active-multi", "mission.status", { missionId: "mission-3", status: "active" }, 1_000),
+  event("plan-multi", "orchestrator.plan.proposed", { missionId: "mission-3", taskIds: ["task-a", "task-b"] }, 2_000),
+  { ...event("task-a-completed", "task.completed", {}, 3_000), taskId: "task-a" },
+  { ...event("task-b-running", "task.running", {}, 4_000), taskId: "task-b" },
+];
+assert.equal(
+  deriveMissionHeartbeat(partiallyCompletedScoped, "mission-3", ["task-a", "task-b"], 15_000, 10_000)?.text,
+  "Chef is still working. Last runtime activity was 11 seconds ago.",
+  "a multi-step Mission must remain in working state while any owned task is still running",
+);
+
 const timedOutScoped = [
   ...orchestratorScoped.slice(0, 2),
   event("timeout", "mission.timeout", { missionId: "mission-1", planId: "plan-1", timeoutMs: 10_000 }, 3_000),
@@ -192,4 +214,4 @@ assert.equal(
   "a real retry after approval rejection must restore heartbeat feedback",
 );
 
-console.log("mission-progress-summary: ok — routing, worker activity, and recovery blockers produce truthful Simple Mode progress");
+console.log("mission-progress-summary: ok — routing, worker activity, verification lag, and recovery blockers produce truthful Simple Mode progress");
