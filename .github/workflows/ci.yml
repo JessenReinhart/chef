@@ -24,7 +24,7 @@ jobs:
       - name: Check friendly launcher syntax
         run: node --check scripts/chef.mjs
       - name: Check live todo diagnostic syntax
-        run: node --experimental-strip-types --check scripts/live-todo-diagnostic.ts
+        run: node --experimental-strip-types --check tests/live-todo-acceptance.ts
       - name: Check Windows launcher syntax
         shell: pwsh
         run: '[void][scriptblock]::Create((Get-Content -Raw scripts/ensure-windows-launcher.ps1))'
