@@ -131,6 +131,18 @@ assert.equal(
   "Chef is still verifying. Last runtime activity was 11 seconds ago.",
   "durable Mission plan lineage must recover owned task IDs when the UI task list has not caught up yet",
 );
+const recoveredLineageDigest = summarizeMissionProgressForMission(
+  completedTaskScoped,
+  "mission-1",
+  [],
+  3,
+  5_000,
+);
+assert.equal(
+  recoveredLineageDigest[0]?.id,
+  "task-completed",
+  "the activity feed must recover the same durable task lineage instead of hiding worker completion while UI task state catches up",
+);
 
 const partiallyCompletedScoped: UiRuntimeEvent[] = [
   event("active-multi", "mission.status", { missionId: "mission-3", status: "active" }, 1_000),
