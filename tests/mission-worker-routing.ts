@@ -36,7 +36,7 @@ const planner = new LLMDecisionProvider({
 const provider = new SingleWorkerFastPathDecisionProvider(planner);
 const context = {
   workspaceId: "workspace-routing",
-  goal: "Implement the todo list",
+  goal: "Analyze the existing todo architecture",
   availableWorkers: [{ id: "codex", name: "Codex", type: "codex" }],
 };
 
