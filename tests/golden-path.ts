@@ -73,7 +73,7 @@ class TodoAcceptanceDecisionProvider implements DecisionProvider {
     this.#workerScript = workerScript;
   }
 
-  async proposePlan(input: PlanProposalContext): Promise<Plan> {
+  async proposePlan(input: PlanProposalContext): Promise<Plan & { routingMode: "single-worker" }> {
     this.#workspaceId = input.workspaceId;
     const taskId = crypto.randomUUID();
     return {
@@ -81,6 +81,7 @@ class TodoAcceptanceDecisionProvider implements DecisionProvider {
       workspaceId: input.workspaceId,
       goal: input.goal,
       status: "proposed",
+      routingMode: "single-worker",
       tasks: [{
         id: taskId,
         title: "Build the todo app",
@@ -206,6 +207,17 @@ function eventStatus(event: RuntimeEvent): unknown {
   return (event.payload as Record<string, unknown>).status;
 }
 
+function eventRoutingMode(event: RuntimeEvent): unknown {
+  if (typeof event.payload !== "object" || event.payload === null) return undefined;
+  return (event.payload as Record<string, unknown>).routingMode;
+}
+
+function assertRoutingModeIsDurable(events: readonly RuntimeEvent[]): void {
+  const planEvent = events.find((event) => event.type === "orchestrator.plan.proposed");
+  assert.ok(planEvent, "golden path must publish its routing decision");
+  assert.equal(eventRoutingMode(planEvent), "single-worker", "golden path must retain the chosen routing mode");
+}
+
 function assertObservableMissionLifecycle(events: readonly RuntimeEvent[]): void {
   const missionCreated = events.findIndex((event) =>
     event.type === "mission.created" && eventStatus(event) === "planning"
@@ -256,6 +268,7 @@ async function main(): Promise<void> {
     assert.equal(result.taskIds.length, 1, "simple todo acceptance task should execute as one worker task");
     assert.match(result.report, /todo app/i, "completion report must identify the requested result");
     assertObservableMissionLifecycle(liveEvents);
+    assertRoutingModeIsDurable(liveEvents);
 
     const snapshot = await chef.inspectState();
     assert.equal(snapshot.workspaceId, workspaceId);
@@ -267,6 +280,7 @@ async function main(): Promise<void> {
     assert.deepEqual(snapshot.plans[0].taskIds, result.taskIds, "plan must retain task lineage");
     assert.ok(snapshot.events.some((event) => event.type.startsWith("task.")), "task lifecycle events must be recorded");
     assertObservableMissionLifecycle(snapshot.events);
+    assertRoutingModeIsDurable(snapshot.events);
     assert.equal(snapshot.artifacts.length, 1, "worker must produce one durable result artifact");
     assert.equal(snapshot.artifacts[0].name, "todo-app", "artifact must make the generated result discoverable");
     assert.ok(snapshot.artifacts[0].uri.includes(TODO_APP), "artifact URI must point at the generated app");
@@ -291,6 +305,7 @@ async function main(): Promise<void> {
     assert.equal(restored.tasks.length, snapshot.tasks.length, "task history must survive reopen");
     assert.equal(restored.events.length, snapshot.events.length, "event history must survive reopen");
     assertObservableMissionLifecycle(restored.events);
+    assertRoutingModeIsDurable(restored.events);
     assert.equal(restored.artifacts.length, snapshot.artifacts.length, "result location must survive reopen");
     assert.equal(restored.sessions.length, snapshot.sessions.length, "session history must survive reopen");
     assert.equal(restored.plans.length, snapshot.plans.length, "plan history must survive reopen");
