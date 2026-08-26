@@ -11,7 +11,7 @@ const MAX_FAST_PATH_GOAL_LENGTH = 240;
 const SIMPLE_QUALIFIER = /\b(simple|small|basic|minimal|tiny)\b/i;
 const IMPLEMENTATION_ACTION = /\b(create|build|make|implement|add|fix|update|change|rename|remove)\b/i;
 const INFORMATION_ACTION = /\b(research|explain|summari[sz]e)\b/i;
-const COMPLEXITY_MARKER = /\b(compare|evaluate|analy[sz]e|audit|investigate|architecture|architect|migrate|migration|benchmark|parallel|multiple|multi[- ]agent|across)\b|\b(and then|then verify|then test|after that)\b|\b(and|then)\s+(create|build|implement|fix|update|change|remove)\b/i;
+const COMPLEXITY_MARKER = /\b(compare|evaluate|analy[sz]e|audit|investigate|architecture|architect|migrate|migration|benchmark|parallel|multiple|multi[- ]agent|across)\b|\b(and then|then verify|then test|after that)\b|\b(and|then)\s+(create|build|implement|fix|update|change|remove|write|draft|document|prepare|produce)\b/i;
 
 export type MissionRoutingMode = "single-worker" | "planner";
 export type RoutedPlan = Plan & { routingMode: MissionRoutingMode };
