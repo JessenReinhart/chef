@@ -28,7 +28,11 @@ const completed = summarizeMissionProgressEvent(event("done", "mission.status", 
 assert.equal(completed?.text, "Mission completed.");
 assert.equal(completed?.tone, "success");
 
-assert.equal(summarizeMissionProgressEvent(event("noise", "session.data", { text: "raw output" }, 4)), null);
+const timeout = summarizeMissionProgressEvent(event("timeout", "mission.timeout", { missionId: "mission-1", timeoutMs: 10_000 }, 4));
+assert.equal(timeout?.text, "Mission timed out after 10 seconds.");
+assert.equal(timeout?.tone, "attention");
+
+assert.equal(summarizeMissionProgressEvent(event("noise", "session.data", { text: "raw output" }, 5)), null);
 
 const digest = summarizeMissionProgress([
   event("start", "mission.created", { goal: "Ship report" }, 1),
@@ -72,4 +76,23 @@ const heartbeat = deriveMissionHeartbeat(
 assert.equal(heartbeat?.text, "Chef is still working. Last runtime activity was 11 seconds ago.");
 assert.equal(heartbeat?.tone, "active");
 
-console.log("mission-progress-summary: ok — durable Mission lineage keeps real orchestrator progress and heartbeat visible");
+const timedOutScoped = [
+  ...orchestratorScoped.slice(0, 2),
+  event("timeout", "mission.timeout", { missionId: "mission-1", planId: "plan-1", timeoutMs: 10_000 }, 3_000),
+];
+const timeoutDigest = summarizeMissionProgressForMission(
+  timedOutScoped,
+  "mission-1",
+  ["task-1"],
+  3,
+  20_000,
+);
+assert.equal(timeoutDigest[0]?.id, "timeout", "a Mission timeout must become the latest visible Simple Mode update");
+assert.equal(timeoutDigest[0]?.tone, "attention");
+assert.equal(
+  deriveMissionHeartbeat(timedOutScoped, "mission-1", ["task-1"], 20_000, 10_000),
+  null,
+  "a timed-out Mission must not emit a false still-working heartbeat while terminal status catches up",
+);
+
+console.log("mission-progress-summary: ok — durable Mission progress surfaces timeouts without false heartbeats");
