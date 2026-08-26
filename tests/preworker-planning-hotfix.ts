@@ -1,4 +1,8 @@
 import { strict as assert } from "node:assert";
+import { once } from "node:events";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type {
   Decision,
   DecisionProvider,
@@ -6,7 +10,10 @@ import type {
   PlanProposalContext,
   PlanTaskOutcome,
 } from "../src/core/types.ts";
+import { createChef } from "../src/main.ts";
 import { SingleWorkerFastPathDecisionProvider } from "../src/orchestrator/fast-path-decision-provider.ts";
+import { createHttpServer } from "../src/server/http-server.ts";
+import { createThreadServer } from "../src/server/thread-http.ts";
 
 class StubPlanner implements DecisionProvider {
   readonly name = "stub-planner";
@@ -107,4 +114,75 @@ const context = {
   assert.equal(planner.calls, 1);
 }
 
-console.log("preworker-planning-hotfix: ok — trivial work skips planning and hung planning is bounded");
+// Exercise the same Thread chat HTTP boundary used by Simple Mode. A hung
+// planner must return a durable failed Mission instead of keeping the request
+// and UI in Preparing forever.
+{
+  const dir = mkdtempSync(join(tmpdir(), "chef-preworker-http-hotfix-"));
+  const planner = new StubPlanner(true);
+  const provider = new SingleWorkerFastPathDecisionProvider(planner, { plannerTimeoutMs: 25 });
+  const chef = createChef({
+    dbPath: join(dir, "chef.sqlite"),
+    projectDir: dir,
+    decisionProvider: provider,
+  });
+  await chef.start();
+
+  const server = createThreadServer(chef, createHttpServer(chef));
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("pre-worker hotfix HTTP server did not bind");
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+
+  try {
+    const createThreadResponse = await fetch(`${baseUrl}/api/threads`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Hotfix regression" }),
+    });
+    assert.equal(createThreadResponse.status, 201);
+    const created = await createThreadResponse.json() as { data?: { id?: string } };
+    const threadId = created.data?.id;
+    assert.ok(threadId);
+
+    const startedAt = Date.now();
+    const chatResponse = await fetch(`${baseUrl}/api/threads/${encodeURIComponent(threadId)}/chat`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ message: "Implement the todo list" }),
+    });
+    const elapsedMs = Date.now() - startedAt;
+    assert.equal(chatResponse.status, 200);
+    assert.ok(elapsedMs < 500, `Thread chat must leave pre-worker planning promptly (elapsed ${elapsedMs}ms)`);
+
+    const chatBody = await chatResponse.json() as {
+      ok?: boolean;
+      data?: { ok?: boolean; report?: string; missionId?: string; taskIds?: string[] };
+    };
+    assert.equal(chatBody.ok, false);
+    assert.equal(chatBody.data?.ok, false);
+    assert.match(chatBody.data?.report ?? "", /Planner timed out after 25ms before any worker could start/);
+    assert.deepEqual(chatBody.data?.taskIds ?? [], []);
+
+    const snapshot = chef.repository.getWorkspaceSnapshot(chef.workspaceId);
+    const mission = snapshot.missions.find((candidate) => candidate.id === chatBody.data?.missionId)
+      ?? snapshot.missions.at(-1);
+    assert.ok(mission, "the failed planning attempt must remain a durable Mission");
+    assert.equal(mission.status, "failed");
+    assert.equal(mission.taskIds.length, 0, "no fake Task should be created when planning never completes");
+    assert.equal(snapshot.sessions.length, 0, "no fake worker Session should exist before routing succeeds");
+
+    const planningFailure = snapshot.events.find((event) =>
+      event.type === "orchestrator.plan.error"
+      && String((event.payload as { error?: unknown }).error ?? "").includes("Planner timed out after 25ms")
+    );
+    assert.ok(planningFailure, "planner timeout must be durable runtime evidence for Simple/Power Mode projections");
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await chef.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+console.log("preworker-planning-hotfix: ok — trivial work skips planning and hung planning is bounded through Thread chat");
