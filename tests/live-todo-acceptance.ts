@@ -8,14 +8,12 @@ import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
 import type { RuntimeEvent } from "../src/core/types.ts";
 import { createChef, type ChefRuntime } from "../src/main.ts";
+import { applyOrchestratorProviderEnv } from "../src/server/orchestrator-config.ts";
 import { createHttpServer } from "../src/server/http-server.ts";
+import { createThreadServer } from "../src/server/thread-http.ts";
 
 const DEFAULT_TIMEOUT_MS = 10 * 60_000;
 const MAX_PROGRESS_TRACE = 20;
-
-function hasLLMKey(): boolean {
-  return Boolean(process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY || process.env.CHEF_API_KEY);
-}
 
 function isMeaningfulProgress(event: RuntimeEvent): boolean {
   return event.type.startsWith("mission.") || event.type.startsWith("task.") || event.type.startsWith("session.");
@@ -80,11 +78,10 @@ async function waitForHttp(url: string, child: ChildProcess, timeoutMs = 20_000)
 }
 
 async function main(): Promise<void> {
-  assert.ok(process.env.CHEF_PROVIDER?.trim(), "Set CHEF_PROVIDER before running the live acceptance diagnostic");
-  assert.ok(hasLLMKey(), "Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or CHEF_API_KEY before running the live acceptance diagnostic");
-
   const timeoutMs = Number(process.env.CHEF_E2E_TIMEOUT_MS ?? DEFAULT_TIMEOUT_MS);
   assert.ok(Number.isFinite(timeoutMs) && timeoutMs > 0, "CHEF_E2E_TIMEOUT_MS must be a positive number");
+
+  await applyOrchestratorProviderEnv();
 
   const projectDir = await mkdtemp(join(tmpdir(), "chef-todo-acceptance-"));
   const dbPath = join(projectDir, "chef.sqlite");
@@ -102,10 +99,14 @@ async function main(): Promise<void> {
     await chef.start();
 
     const workers = chef.specializedHarnesses.detections().filter((worker) => worker.available && worker.taskCapable);
-    assert.equal(chef.llmStatus.configured, true, "Chef must report a configured planner");
+    assert.equal(
+      chef.llmStatus.configured,
+      true,
+      "Chef must have a real configured planner. Configure Chef normally or set CHEF_PROVIDER plus its API key.",
+    );
     assert.ok(workers.length > 0, "At least one real task-capable worker must be detected");
 
-    apiServer = createHttpServer(chef);
+    apiServer = createThreadServer(chef, createHttpServer(chef));
     await new Promise<void>((resolve, reject) => {
       apiServer!.once("error", reject);
       apiServer!.listen(0, "127.0.0.1", resolve);
@@ -118,6 +119,16 @@ async function main(): Promise<void> {
       if (!requestCompleted) inFlightProgressEvents.push(event);
     });
 
+    const createThreadResponse = await fetch(`http://127.0.0.1:${apiPort}/api/threads`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Live todo acceptance" }),
+    });
+    assert.equal(createThreadResponse.status, 201, "Live acceptance must create a Thread through the product HTTP boundary");
+    const createdThread = await createThreadResponse.json() as { data?: { id?: string } };
+    const threadId = createdThread.data?.id;
+    assert.ok(threadId, "Created Thread must expose an id");
+
     const request = [
       "Create a simple todo app in this selected project.",
       "Keep it intentionally small and reliable.",
@@ -128,7 +139,7 @@ async function main(): Promise<void> {
       "Verify the app can start before you finish, then summarize what changed and how to run it.",
     ].join(" ");
 
-    const response = await fetch(`http://127.0.0.1:${apiPort}/api/chat`, {
+    const response = await fetch(`http://127.0.0.1:${apiPort}/api/threads/${encodeURIComponent(threadId)}/chat`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ message: request }),
@@ -140,7 +151,7 @@ async function main(): Promise<void> {
       inFlightProgressEvents.length > 0,
       `Chef produced no Mission/Task/Session progress while the canonical request was in flight. Recent progress trace:\n${formatProgressTrace(progressEvents)}`,
     );
-    assert.equal(response.status, 200, `Chef HTTP request failed: ${JSON.stringify(body)}`);
+    assert.equal(response.status, 200, `Chef Thread chat request failed: ${JSON.stringify(body)}`);
     assert.equal(body.ok, true, body.error ?? body.data?.report ?? "Chef reported failure");
     assert.equal(body.data?.ok, true, body.data?.report ?? "Mission did not complete successfully");
     assert.ok((body.data?.taskIds?.length ?? 0) > 0, "Mission must create at least one task");
@@ -174,6 +185,7 @@ async function main(): Promise<void> {
 
     passed = true;
     console.log(`live-todo-acceptance: ok (${chef.llmStatus.provider}/${chef.llmStatus.model}; worker candidates: ${workers.map((worker) => worker.id).join(", ")})`);
+    console.log(`Thread: ${threadId}`);
     console.log(`Observed ${inFlightProgressEvents.length} in-flight Mission/Task/Session progress events.`);
     console.log(`Chef summary: ${body.data?.report ?? "(no report)"}`);
   } finally {
