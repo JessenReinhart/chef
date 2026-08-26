@@ -86,6 +86,7 @@ function inferredHeartbeatLabel(scoped: UiRuntimeEvent[]): string | null {
     || event.type === "task.completed"
     || event.type === "task.failed"
     || event.type === "task.blocked"
+    || event.type === "task.cancelled"
     || event.type === "session.data"
     || event.type === "session.crashed"
   );
@@ -115,6 +116,7 @@ function blocksHeartbeat(event: UiRuntimeEvent): boolean {
   }
   return event.type === "task.failed"
     || event.type === "task.blocked"
+    || event.type === "task.cancelled"
     || event.type === "session.crashed"
     || event.type === "node.failed"
     || event.type === "orchestrator.plan.none"
@@ -216,6 +218,12 @@ export function summarizeMissionProgressEvent(event: UiRuntimeEvent): MissionPro
     case "task.blocked": {
       const reason = stringValue(payload, "reason") ?? stringValue(payload, "error");
       text = reason ? `A work step is blocked: ${reason}` : "A work step is blocked and needs attention.";
+      tone = "attention";
+      break;
+    }
+    case "task.cancelled": {
+      const reason = stringValue(payload, "reason") ?? stringValue(payload, "error");
+      text = reason ? `A work step was cancelled: ${reason}` : "A work step was cancelled and is no longer running.";
       tone = "attention";
       break;
     }
