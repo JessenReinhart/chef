@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, type ProjectInfo } from "./api";
+import { projectSelectionSummary } from "./projectSelection";
 
 export function ProjectSwitcher() {
   const [project, setProject] = useState<ProjectInfo | null>(null);
@@ -38,12 +39,21 @@ export function ProjectSwitcher() {
     }
   };
 
+  const selection = projectSelectionSummary(project);
+
   return (
     <div className="relative">
-      <button className="inline-flex max-w-64 items-center gap-1.5 min-h-[30px] rounded-md border border-[#30363d] bg-[#010409] px-2 text-[11px] text-[#c9d1d9] hover:bg-[#161b22]" onClick={() => setOpen((value) => !value)} title={project?.path ?? "Open project"} aria-expanded={open}>
-        <span className="text-cyan-300">⌘</span>
-        <span className="truncate">{project?.name ?? "Open project"}</span>
-        <span className="text-[#6e7681]">⌄</span>
+      <button
+        className="inline-flex max-w-64 items-center gap-1.5 min-h-[30px] rounded-md border border-[#30363d] bg-[#010409] px-2 text-[11px] text-[#c9d1d9] hover:bg-[#161b22]"
+        onClick={() => setOpen((value) => !value)}
+        title={project?.path ?? "Open project"}
+        aria-label={selection.ariaLabel}
+        aria-expanded={open}
+      >
+        <span className={selection.selected ? "text-green-300" : "text-cyan-300"} aria-hidden="true">{selection.selected ? "✓" : "⌘"}</span>
+        <span className="truncate">{selection.label}</span>
+        {selection.status && <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wide text-green-300">{selection.status}</span>}
+        <span className="text-[#6e7681]" aria-hidden="true">⌄</span>
       </button>
       {open && (
         <div className="absolute left-0 top-[calc(100%+.45rem)] z-[60] w-[min(25rem,calc(100vw-2rem))] rounded-xl border border-[#30363d] bg-[#0d1117]/[.98] p-3 shadow-2xl backdrop-blur">
