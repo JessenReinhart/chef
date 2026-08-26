@@ -86,6 +86,7 @@ function inferredHeartbeatLabel(scoped: UiRuntimeEvent[]): string | null {
     || event.type === "task.completed"
     || event.type === "task.failed"
     || event.type === "task.blocked"
+    || event.type === "task.cancelled"
     || event.type === "session.data"
     || event.type === "session.crashed"
   );
@@ -115,10 +116,12 @@ function blocksHeartbeat(event: UiRuntimeEvent): boolean {
   }
   return event.type === "task.failed"
     || event.type === "task.blocked"
+    || event.type === "task.cancelled"
     || event.type === "session.crashed"
     || event.type === "node.failed"
     || event.type === "orchestrator.plan.none"
     || event.type === "orchestrator.plan.error"
+    || event.type === "orchestrator.plan.interrupted"
     || event.type === "approval.requested";
 }
 
@@ -218,6 +221,12 @@ export function summarizeMissionProgressEvent(event: UiRuntimeEvent): MissionPro
       tone = "attention";
       break;
     }
+    case "task.cancelled": {
+      const reason = stringValue(payload, "reason") ?? stringValue(payload, "error");
+      text = reason ? `A work step was cancelled: ${reason}` : "A work step was cancelled and is no longer running.";
+      tone = "attention";
+      break;
+    }
     case "task.completed": {
       const summary = stringValue(payload, "resultSummary");
       text = summary ? `A work step finished: ${summary}` : "A work step finished.";
@@ -258,6 +267,14 @@ export function summarizeMissionProgressEvent(event: UiRuntimeEvent): MissionPro
         ? `Chef started coordinating ${count} planned step${count === 1 ? "" : "s"}.`
         : "Chef started executing the Mission plan.";
       tone = "active";
+      break;
+    }
+    case "orchestrator.plan.interrupted": {
+      const status = stringValue(payload, "status");
+      text = status
+        ? `Mission execution was interrupted (${status}).`
+        : "Mission execution was interrupted and needs attention.";
+      tone = "attention";
       break;
     }
     case "orchestrator.task.evaluated": {

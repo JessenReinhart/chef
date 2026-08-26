@@ -59,6 +59,24 @@ const noPlan = summarizeMissionProgressEvent(event("no-plan", "orchestrator.plan
 assert.equal(noPlan?.text, "Chef could not build a plan for this Mission.");
 assert.equal(noPlan?.tone, "attention");
 
+const interrupted = summarizeMissionProgressEvent(event(
+  "interrupted",
+  "orchestrator.plan.interrupted",
+  { missionId: "mission-interrupted", status: "cancelled" },
+  9,
+));
+assert.equal(interrupted?.text, "Mission execution was interrupted (cancelled).");
+assert.equal(interrupted?.tone, "attention");
+
+const cancelled = summarizeMissionProgressEvent(event(
+  "cancelled",
+  "task.cancelled",
+  { reason: "work was superseded" },
+  10,
+));
+assert.equal(cancelled?.text, "A work step was cancelled: work was superseded");
+assert.equal(cancelled?.tone, "attention");
+
 const digest = summarizeMissionProgress([
   event("start", "mission.created", { goal: "Ship report" }, 1),
   event("output", "session.data", { text: "raw terminal output" }, 2),
@@ -179,6 +197,30 @@ assert.equal(
   "planning that terminates without a plan must not emit a false still-planning heartbeat",
 );
 
+const interruptedScoped: UiRuntimeEvent[] = [
+  event("active-interrupted", "mission.status", { missionId: "mission-interrupted", status: "active" }, 1_000),
+  event(
+    "interrupted",
+    "orchestrator.plan.interrupted",
+    { missionId: "mission-interrupted", planId: "plan-interrupted", status: "cancelled" },
+    2_000,
+  ),
+];
+const interruptedDigest = summarizeMissionProgressForMission(
+  interruptedScoped,
+  "mission-interrupted",
+  [],
+  3,
+  20_000,
+);
+assert.equal(interruptedDigest[0]?.id, "interrupted", "an interrupted execution attempt must become the latest visible Simple Mode update");
+assert.equal(interruptedDigest[0]?.tone, "attention");
+assert.equal(
+  deriveMissionHeartbeat(interruptedScoped, "mission-interrupted", [], 20_000, 10_000),
+  null,
+  "an interrupted execution attempt must suppress stale still-working feedback until real recovery begins",
+);
+
 const timedOutScoped = [
   ...orchestratorScoped.slice(0, 2),
   event("timeout", "mission.timeout", { missionId: "mission-1", planId: "plan-1", timeoutMs: 10_000 }, 3_000),
@@ -201,6 +243,7 @@ assert.equal(
 for (const blocker of [
   { id: "failed", type: "task.failed", payload: { error: "worker exited" } },
   { id: "blocked", type: "task.blocked", payload: { reason: "dependency unavailable" } },
+  { id: "cancelled", type: "task.cancelled", payload: { reason: "work was superseded" } },
   { id: "crashed", type: "session.crashed", payload: { reason: "pty closed" } },
 ]) {
   const blockerEvent: UiRuntimeEvent = {
@@ -230,6 +273,17 @@ assert.equal(
   "a durable retry after failure must resume truthful long-running feedback",
 );
 
+const cancelledThenRetried: UiRuntimeEvent[] = [
+  ...orchestratorScoped.slice(0, 2),
+  { ...event("cancelled", "task.cancelled", { reason: "work was superseded" }, 3_000), taskId: "task-1" },
+  { ...event("retry-after-cancel", "task.running", { retryCount: 1 }, 4_000), taskId: "task-1" },
+];
+assert.equal(
+  deriveMissionHeartbeat(cancelledThenRetried, "mission-1", ["task-1"], 15_000, 10_000)?.text,
+  "Chef is still working. Last runtime activity was 11 seconds ago.",
+  "a real retry after cancellation must restore heartbeat feedback",
+);
+
 const rejectedApproval: UiRuntimeEvent[] = [
   ...orchestratorScoped.slice(0, 2),
   event("approval-requested", "approval.requested", { missionId: "mission-1", reason: "Push branch" }, 3_000),
@@ -254,4 +308,4 @@ assert.equal(
   "a real retry after approval rejection must restore heartbeat feedback",
 );
 
-console.log("mission-progress-summary: ok — routing, worker activity, recovered task lineage, verification lag, no-plan recovery, and other blockers produce truthful Simple Mode progress");
+console.log("mission-progress-summary: ok — routing, worker activity, recovered task lineage, verification lag, interrupted/cancelled attempts, no-plan recovery, and other blockers produce truthful Simple Mode progress");
