@@ -32,17 +32,20 @@ const timeout = summarizeMissionProgressEvent(event("timeout", "mission.timeout"
 assert.equal(timeout?.text, "Mission timed out after 10 seconds.");
 assert.equal(timeout?.tone, "attention");
 
-assert.equal(summarizeMissionProgressEvent(event("noise", "session.data", { text: "raw output" }, 5)), null);
+const workerOutput = summarizeMissionProgressEvent(event("output", "session.data", { text: "raw terminal output" }, 5));
+assert.equal(workerOutput?.text, "A worker is actively producing output.");
+assert.equal(workerOutput?.tone, "active");
+assert.ok(!workerOutput?.text.includes("raw terminal output"), "Simple Mode must not echo raw terminal output");
 
 const digest = summarizeMissionProgress([
   event("start", "mission.created", { goal: "Ship report" }, 1),
-  event("noise", "session.data", { text: "raw output" }, 2),
+  event("output", "session.data", { text: "raw terminal output" }, 2),
   event("execute", "orchestrator.plan.executing", { taskIds: ["a", "b"] }, 3),
   event("approval", "approval.requested", {}, 4),
   event("done", "mission.status", { status: "completed" }, 5),
 ], 3);
 assert.deepEqual(digest.map((item) => item.id), ["execute", "approval", "done"]);
-assert.ok(digest.every((item) => !item.text.includes("session.data")));
+assert.ok(digest.every((item) => !item.text.includes("raw terminal output")));
 
 const orchestratorScoped = [
   event("active", "mission.status", { missionId: "mission-1", status: "active" }, 1_000),
@@ -65,6 +68,21 @@ assert.ok(
   !missionDigest.some((item) => item.id === "other"),
   "payload lineage must not leak updates from another Mission",
 );
+
+const scopedWorkerOutput: UiRuntimeEvent = {
+  ...event("worker-output", "session.data", { text: "building files..." }, 2_500),
+  taskId: "task-1",
+};
+const workerActivityDigest = summarizeMissionProgressForMission(
+  [...orchestratorScoped.slice(0, 2), scopedWorkerOutput],
+  "mission-1",
+  ["task-1"],
+  3,
+  5_000,
+);
+assert.equal(workerActivityDigest[0]?.id, "worker-output", "real worker output activity must become visible in Simple Mode");
+assert.equal(workerActivityDigest[0]?.text, "A worker is actively producing output.");
+assert.ok(!workerActivityDigest[0]?.text.includes("building files"), "Mission progress must project activity without exposing terminal text");
 
 const heartbeat = deriveMissionHeartbeat(
   orchestratorScoped.slice(0, 2),
@@ -95,4 +113,4 @@ assert.equal(
   "a timed-out Mission must not emit a false still-working heartbeat while terminal status catches up",
 );
 
-console.log("mission-progress-summary: ok — durable Mission progress surfaces timeouts without false heartbeats");
+console.log("mission-progress-summary: ok — real worker output becomes human-readable progress without leaking terminal text");
