@@ -42,9 +42,15 @@ function missionStatusText(status: string): MissionProgressItem["tone"] {
 }
 
 function belongsToMission(event: UiRuntimeEvent, missionId: string, taskIds: Set<string>): boolean {
+  const payload = objectPayload(event);
+  const payloadMissionId = stringValue(payload, "missionId");
+  const payloadTaskIds = stringArray(payload, "taskIds");
+
   return (event.source.type === "mission" && event.source.id === missionId)
     || event.correlationId === missionId
-    || (event.taskId !== undefined && taskIds.has(event.taskId));
+    || payloadMissionId === missionId
+    || (event.taskId !== undefined && taskIds.has(event.taskId))
+    || payloadTaskIds.some((taskId) => taskIds.has(taskId));
 }
 
 function activeHeartbeatLabel(status: string | undefined): string | null {
@@ -242,9 +248,7 @@ export function deriveMissionHeartbeat(
   const latest = scoped[0];
   if (!latest) return null;
 
-  const latestMissionStatus = scoped.find(
-    (event) => event.type === "mission.status" && event.source.type === "mission" && event.source.id === missionId,
-  );
+  const latestMissionStatus = scoped.find((event) => event.type === "mission.status");
   const status = latestMissionStatus ? stringValue(objectPayload(latestMissionStatus), "status") : undefined;
   const label = activeHeartbeatLabel(status) ?? (status === undefined ? inferredHeartbeatLabel(scoped) : null);
   if (!label) return null;
