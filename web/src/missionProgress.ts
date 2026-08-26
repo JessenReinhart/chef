@@ -80,6 +80,7 @@ function activeHeartbeatLabel(status: string | undefined): string | null {
 }
 
 function inferredHeartbeatLabel(scoped: UiRuntimeEvent[]): string | null {
+  const latestPlanningEvent = scoped.find((event) => event.type === "orchestrator.plan.started");
   const latestWorkerEvent = scoped.find((event) =>
     event.type === "task.assigned"
     || event.type === "task.running"
@@ -90,6 +91,9 @@ function inferredHeartbeatLabel(scoped: UiRuntimeEvent[]): string | null {
     || event.type === "session.data"
     || event.type === "session.crashed"
   );
+  if (latestPlanningEvent && (!latestWorkerEvent || latestPlanningEvent.seq > latestWorkerEvent.seq)) {
+    return "Chef is still planning";
+  }
   if (!latestWorkerEvent) return null;
   if (latestWorkerEvent.type === "task.assigned" || latestWorkerEvent.type === "task.running" || latestWorkerEvent.type === "session.data") {
     return "Chef is still working";
@@ -242,6 +246,11 @@ export function summarizeMissionProgressEvent(event: UiRuntimeEvent): MissionPro
       const reason = stringValue(payload, "reason");
       text = reason ? `A worker session stopped unexpectedly: ${reason}` : "A worker session stopped unexpectedly; Chef needs to recover it.";
       tone = "attention";
+      break;
+    }
+    case "orchestrator.plan.started": {
+      text = "Chef is deciding how to approach this Mission.";
+      tone = "active";
       break;
     }
     case "orchestrator.plan.proposed": {
