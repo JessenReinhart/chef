@@ -77,6 +77,28 @@ function inferredHeartbeatLabel(scoped: UiRuntimeEvent[]): string | null {
   return null;
 }
 
+function blocksHeartbeat(event: UiRuntimeEvent): boolean {
+  if (event.type === "approval.resolved") {
+    return stringValue(objectPayload(event), "decision") === "rejected";
+  }
+  return event.type === "task.failed"
+    || event.type === "task.blocked"
+    || event.type === "session.crashed"
+    || event.type === "node.failed"
+    || event.type === "orchestrator.plan.error"
+    || event.type === "approval.requested";
+}
+
+function resumesHeartbeat(event: UiRuntimeEvent): boolean {
+  if (event.type === "task.assigned" || event.type === "task.running") return true;
+  if (event.type === "approval.resolved") {
+    return stringValue(objectPayload(event), "decision") !== "rejected";
+  }
+  if (event.type !== "mission.status") return false;
+  const status = stringValue(objectPayload(event), "status");
+  return status === "planning" || status === "active" || status === "verifying";
+}
+
 export function deriveMissionHomeState(input: {
   submitting: boolean;
   needsAttention: boolean;
@@ -181,10 +203,19 @@ export function summarizeMissionProgressEvent(event: UiRuntimeEvent): MissionPro
       break;
     }
     case "orchestrator.plan.proposed": {
+      const routingMode = stringValue(payload, "routingMode");
       const count = stringArray(payload, "taskIds").length;
-      text = count > 0
-        ? `Chef prepared a plan with ${count} step${count === 1 ? "" : "s"}.`
-        : "Chef prepared a Mission plan.";
+      if (routingMode === "single-worker") {
+        text = "Chef chose one worker for this Mission.";
+      } else if (routingMode === "planner") {
+        text = count > 0
+          ? `Chef chose a coordinated plan with ${count} step${count === 1 ? "" : "s"}.`
+          : "Chef chose a coordinated plan for this Mission.";
+      } else {
+        text = count > 0
+          ? `Chef prepared a plan with ${count} step${count === 1 ? "" : "s"}.`
+          : "Chef prepared a Mission plan.";
+      }
       tone = "active";
       break;
     }
@@ -267,6 +298,10 @@ export function deriveMissionHeartbeat(
   const latestMissionStatus = scoped.find((event) => event.type === "mission.status");
   const latestTimeout = scoped.find((event) => event.type === "mission.timeout");
   if (latestTimeout && (!latestMissionStatus || latestTimeout.seq >= latestMissionStatus.seq)) return null;
+
+  const latestBlocker = scoped.find(blocksHeartbeat);
+  const latestRecovery = scoped.find(resumesHeartbeat);
+  if (latestBlocker && (!latestRecovery || latestBlocker.seq > latestRecovery.seq)) return null;
 
   const status = latestMissionStatus ? stringValue(objectPayload(latestMissionStatus), "status") : undefined;
   const label = activeHeartbeatLabel(status) ?? (status === undefined ? inferredHeartbeatLabel(scoped) : null);
