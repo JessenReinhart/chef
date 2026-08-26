@@ -35,6 +35,12 @@ import { ContextManager } from "../context/context.ts";
 const SCRIPTS_DIR = join(defaultSidebandRoot(), "scripts");
 const TIMED_OUT = Symbol("orchestrator-timeout");
 const ORCHESTRATOR_SOURCE = { type: "orchestrator", id: "orchestrator" } as const;
+type MissionRoutingMode = "single-worker" | "planner";
+
+function routingModeOf(plan: Plan): MissionRoutingMode | undefined {
+  const value = (plan as Plan & { routingMode?: unknown }).routingMode;
+  return value === "single-worker" || value === "planner" ? value : undefined;
+}
 
 class MissionTimeoutError extends Error {
   readonly timeoutMs: number;
@@ -244,7 +250,10 @@ export class Orchestrator {
     });
     this.#repository.updateMission(mission.id, { status: "active", planId: plan.id, taskIds: plan.taskIds });
     this.#appendEvent(workspaceId, { type: "mission.status", payload: { missionId: mission.id, status: "active", planId: plan.id } });
-    this.#appendEvent(workspaceId, { type: "orchestrator.plan.proposed", payload: { planId: plan.id, goal: plan.goal, taskIds: plan.taskIds } });
+    this.#appendEvent(workspaceId, {
+      type: "orchestrator.plan.proposed",
+      payload: { planId: plan.id, goal: plan.goal, taskIds: plan.taskIds, routingMode: routingModeOf(plan) },
+    });
     const controller = new AbortController();
     this.#missionControllers.set(mission.id, controller);
     let executionError: string | undefined;
@@ -342,7 +351,7 @@ export class Orchestrator {
     this.#appendEvent(workspaceId, { type: "mission.status", payload: { missionId: mission.id, status: "active", planId: plan.id } });
     this.#appendEvent(workspaceId, {
       type: "chat.plan.proposed",
-      payload: { planId: plan.id, goal: plan.goal, taskIds: plan.taskIds, taskCount: plan.tasks.length },
+      payload: { planId: plan.id, goal: plan.goal, taskIds: plan.taskIds, taskCount: plan.tasks.length, routingMode: routingModeOf(plan) },
     });
 
     // Validate the graph patch proposal through the node execution engine
