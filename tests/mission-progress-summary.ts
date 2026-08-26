@@ -168,4 +168,28 @@ assert.equal(
   "a durable retry after failure must resume truthful long-running feedback",
 );
 
+const rejectedApproval: UiRuntimeEvent[] = [
+  ...orchestratorScoped.slice(0, 2),
+  event("approval-requested", "approval.requested", { missionId: "mission-1", reason: "Push branch" }, 3_000),
+  event("approval-rejected", "approval.resolved", { missionId: "mission-1", decision: "rejected" }, 4_000),
+];
+const rejectedApprovalDigest = summarizeMissionProgressForMission(rejectedApproval, "mission-1", ["task-1"], 3, 20_000);
+assert.equal(rejectedApprovalDigest[0]?.id, "approval-rejected", "a rejected approval must remain the latest visible recovery state");
+assert.equal(rejectedApprovalDigest[0]?.tone, "attention");
+assert.equal(
+  deriveMissionHeartbeat(rejectedApproval, "mission-1", ["task-1"], 20_000, 10_000),
+  null,
+  "a rejected approval must not imply Chef resumed work before a real retry or active Mission status",
+);
+
+const rejectedThenRetried: UiRuntimeEvent[] = [
+  ...rejectedApproval,
+  { ...event("retry-after-rejection", "task.running", { retryCount: 1 }, 5_000), taskId: "task-1" },
+];
+assert.equal(
+  deriveMissionHeartbeat(rejectedThenRetried, "mission-1", ["task-1"], 16_000, 10_000)?.text,
+  "Chef is still working. Last runtime activity was 11 seconds ago.",
+  "a real retry after approval rejection must restore heartbeat feedback",
+);
+
 console.log("mission-progress-summary: ok — routing, worker activity, and recovery blockers produce truthful Simple Mode progress");
