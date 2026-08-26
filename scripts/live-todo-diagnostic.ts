@@ -18,16 +18,19 @@ function positiveBudget(name: string, value: number): number {
 async function waitForSession(
   chef: ReturnType<typeof createChef>,
   taskCapableWorkerIds: ReadonlySet<string>,
+  existingSessionIds: ReadonlySet<string>,
   budgetMs: number,
 ): Promise<{ id: string; agentId: string; taskId: string }> {
   const deadline = Date.now() + budgetMs;
   while (Date.now() < deadline) {
     const snapshot = await chef.inspectState();
-    const session = snapshot.sessions.find((candidate) => taskCapableWorkerIds.has(candidate.agentId));
+    const session = snapshot.sessions.find(
+      (candidate) => taskCapableWorkerIds.has(candidate.agentId) && !existingSessionIds.has(candidate.id),
+    );
     if (session) return { id: session.id, agentId: session.agentId, taskId: session.taskId };
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
-  throw new Error(`No detected task-capable CLI worker Session started within ${budgetMs}ms`);
+  throw new Error(`No new detected task-capable CLI worker Session started within ${budgetMs}ms`);
 }
 
 async function withDeadline<T>(promise: Promise<T>, budgetMs: number, label: string): Promise<T> {
@@ -81,6 +84,8 @@ async function main(): Promise<void> {
         .join(", ")}`,
     );
     const workerIds = new Set(availableWorkers.map((worker) => worker.id));
+    const beforeExecution = await chef.inspectState();
+    const existingSessionIds = new Set(beforeExecution.sessions.map((session) => session.id));
 
     console.log(`[live-todo] project: ${projectDir}`);
     console.log(`[live-todo] provider: ${chef.llmStatus.provider}/${chef.llmStatus.model}`);
@@ -88,7 +93,7 @@ async function main(): Promise<void> {
     console.log(`[live-todo] request: ${REQUEST}`);
 
     const execution = chef.sendUserMessage(REQUEST);
-    const session = await waitForSession(chef, workerIds, STARTUP_BUDGET_MS);
+    const session = await waitForSession(chef, workerIds, existingSessionIds, STARTUP_BUDGET_MS);
     console.log(`[live-todo] worker started: ${session.agentId} session=${session.id} task=${session.taskId}`);
 
     const result = await withDeadline(execution, COMPLETION_BUDGET_MS, "Live todo Mission");
