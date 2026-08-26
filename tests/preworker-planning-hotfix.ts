@@ -43,10 +43,9 @@ class StubPlanner implements DecisionProvider {
 const worker = { id: "codex", name: "Codex", type: "codex" };
 const context = { workspaceId: "workspace-preworker-hotfix", availableWorkers: [worker] };
 
-{
+for (const goal of ["Create a todo app", "Implement a todo app"]) {
   const planner = new StubPlanner();
   const provider = new SingleWorkerFastPathDecisionProvider(planner);
-  const goal = "Create a todo app";
   const plan = await provider.proposePlan({ ...context, goal });
   assert.ok(plan);
   assert.equal(plan.routingMode, "single-worker");
@@ -69,7 +68,7 @@ const context = { workspaceId: "workspace-preworker-hotfix", availableWorkers: [
   const planner = new StubPlanner(true);
   const provider = new SingleWorkerFastPathDecisionProvider(planner, { plannerTimeoutMs: 25 });
   const startedAt = Date.now();
-  await assert.rejects(() => provider.proposePlan({ ...context, goal: "Implement the todo list" }), /Planner timed out after 25ms before any worker could start/);
+  await assert.rejects(() => provider.proposePlan({ ...context, goal: "Analyze the existing app architecture" }), /Planner timed out after 25ms before any worker could start/);
   assert.ok(Date.now() - startedAt < 500);
   assert.equal(planner.calls, 1);
 }
@@ -93,7 +92,7 @@ const context = { workspaceId: "workspace-preworker-hotfix", availableWorkers: [
     const threadId = created.data?.id;
     assert.ok(threadId);
     const startedAt = Date.now();
-    const chatResponse = await fetch(`${baseUrl}/api/threads/${encodeURIComponent(threadId)}/chat`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ message: "Implement the todo list" }) });
+    const chatResponse = await fetch(`${baseUrl}/api/threads/${encodeURIComponent(threadId)}/chat`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ message: "Analyze the existing app architecture" }) });
     assert.ok(Date.now() - startedAt < 500);
     assert.equal(chatResponse.status, 200);
     const chatBody = await chatResponse.json() as { ok?: boolean; data?: { ok?: boolean; report?: string; missionId?: string; taskIds?: string[] } };
@@ -116,4 +115,4 @@ const context = { workspaceId: "workspace-preworker-hotfix", availableWorkers: [
   }
 }
 
-console.log("preworker-planning-hotfix: ok — trivial work skips planning and hung planning is bounded through Thread chat");
+console.log("preworker-planning-hotfix: ok — straightforward work skips planning and hung planning is bounded through Thread chat");
