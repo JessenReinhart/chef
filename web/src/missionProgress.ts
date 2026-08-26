@@ -53,6 +53,25 @@ function belongsToMission(event: UiRuntimeEvent, missionId: string, taskIds: Set
     || payloadTaskIds.some((taskId) => taskIds.has(taskId));
 }
 
+function scopeMissionEvents(
+  events: UiRuntimeEvent[],
+  missionId: string,
+  taskIds: Iterable<string>,
+): { ownedTaskIds: Set<string>; scoped: UiRuntimeEvent[] } {
+  const ownedTaskIds = new Set(taskIds);
+  const seedScoped = events.filter((event) => belongsToMission(event, missionId, ownedTaskIds));
+  for (const event of seedScoped) {
+    for (const taskId of stringArray(objectPayload(event), "taskIds")) ownedTaskIds.add(taskId);
+  }
+
+  return {
+    ownedTaskIds,
+    scoped: events
+      .filter((event) => belongsToMission(event, missionId, ownedTaskIds))
+      .sort((a, b) => b.seq - a.seq),
+  };
+}
+
 function activeHeartbeatLabel(status: string | undefined): string | null {
   if (status === "planning") return "Chef is still planning";
   if (status === "verifying") return "Chef is still verifying";
@@ -301,14 +320,7 @@ export function deriveMissionHeartbeat(
   now = Date.now(),
   thresholdMs = HEARTBEAT_AFTER_MS,
 ): MissionProgressItem | null {
-  const ownedTaskIds = new Set(taskIds);
-  const seedScoped = events.filter((event) => belongsToMission(event, missionId, ownedTaskIds));
-  for (const event of seedScoped) {
-    for (const taskId of stringArray(objectPayload(event), "taskIds")) ownedTaskIds.add(taskId);
-  }
-  const scoped = events
-    .filter((event) => belongsToMission(event, missionId, ownedTaskIds))
-    .sort((a, b) => b.seq - a.seq);
+  const { ownedTaskIds, scoped } = scopeMissionEvents(events, missionId, taskIds);
   const latest = scoped[0];
   if (!latest) return null;
 
@@ -346,7 +358,7 @@ export function summarizeMissionProgressForMission(
   limit = 3,
   now = Date.now(),
 ): MissionProgressItem[] {
-  const ownedTaskIds = new Set(taskIds);
+  const { ownedTaskIds, scoped } = scopeMissionEvents(events, missionId, taskIds);
   const seenText = new Set<string>();
   const recent: MissionProgressItem[] = [];
   const heartbeat = deriveMissionHeartbeat(events, missionId, ownedTaskIds, now);
@@ -356,9 +368,7 @@ export function summarizeMissionProgressForMission(
     seenText.add(heartbeat.text);
   }
 
-  for (const event of [...events].sort((a, b) => b.seq - a.seq)) {
-    if (!belongsToMission(event, missionId, ownedTaskIds)) continue;
-
+  for (const event of scoped) {
     const item = summarizeMissionProgressEvent(event);
     if (!item || seenText.has(item.text)) continue;
     seenText.add(item.text);
