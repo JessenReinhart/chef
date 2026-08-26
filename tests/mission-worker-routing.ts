@@ -44,6 +44,7 @@ try {
   const canonicalGoal = "Create a simple todo app";
   const fastPath = await provider.proposePlan({ ...context, goal: canonicalGoal });
   assert.ok(fastPath);
+  assert.equal(fastPath.routingMode, "single-worker", "the canonical request must retain its direct execution route");
   assert.equal(fastPath.tasks.length, 1, "the canonical simple request should have one owner");
   assert.equal(fastPath.tasks[0].nodeType, "agent.llm");
   assert.equal(fastPath.tasks[0].assignedTo, "codex", "the fast path uses a real available task-capable worker");
@@ -54,6 +55,7 @@ try {
   const researchRequestsBefore = plannerRequestCount;
   const researchFastPath = await provider.proposePlan({ ...context, goal: straightforwardResearchGoal });
   assert.ok(researchFastPath);
+  assert.equal(researchFastPath.routingMode, "single-worker", "straightforward research keeps its direct routing decision observable");
   assert.equal(researchFastPath.tasks.length, 1, "straightforward research should have one owner");
   assert.equal(researchFastPath.tasks[0].assignedTo, "codex", "straightforward research routes directly to an available worker");
   assert.equal(researchFastPath.tasks[0].description, straightforwardResearchGoal, "the research worker receives the full request");
@@ -72,6 +74,7 @@ try {
   };
   const routed = await provider.proposePlan(context);
   assert.ok(routed);
+  assert.equal(routed.routingMode, "planner", "non-fast-path work must retain that it went through planning");
   assert.equal(routed.tasks[0].nodeType, "agent.llm", "nodeType describes the kind of work");
   assert.equal(routed.tasks[0].assignedTo, "codex", "omitted assignee routes to an available worker identity");
 
@@ -136,10 +139,11 @@ try {
   };
   const complexPlan = await provider.proposePlan({ ...context, goal: complexGoal });
   assert.ok(complexPlan);
+  assert.equal(complexPlan.routingMode, "planner", "complex work must preserve its planner route for downstream observability");
   assert.equal(plannerRequestCount, plannerRequestsBeforeComplexGoal + 1, "complex work must still invoke the planner");
   assert.equal(complexPlan.tasks.length, 2, "the planner remains free to decompose genuinely complex work");
 
-  console.log("mission-worker-routing: ok — simple implementation and research skip planning while complex work still decomposes");
+  console.log("mission-worker-routing: ok — direct and planner routes remain behaviorally distinct and observable on the proposed plan");
 } finally {
   await new Promise<void>((resolve) => server.close(() => resolve()));
 }

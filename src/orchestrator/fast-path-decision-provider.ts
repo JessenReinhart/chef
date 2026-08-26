@@ -13,6 +13,13 @@ const IMPLEMENTATION_ACTION = /\b(create|build|make|implement|add|fix|update|cha
 const INFORMATION_ACTION = /\b(research|explain|summari[sz]e)\b/i;
 const COMPLEXITY_MARKER = /\b(compare|evaluate|analy[sz]e|audit|investigate|architecture|architect|migrate|migration|benchmark|parallel|multiple|multi[- ]agent|across)\b|\b(and then|then verify|then test|after that)\b|\b(and|then)\s+(create|build|implement|fix|update|change|remove)\b/i;
 
+export type MissionRoutingMode = "single-worker" | "planner";
+export type RoutedPlan = Plan & { routingMode: MissionRoutingMode };
+
+function routedPlan(plan: Plan, routingMode: MissionRoutingMode): RoutedPlan {
+  return { ...plan, routingMode };
+}
+
 /**
  * Keep the shortcut deliberately narrow. A false negative only costs one
  * planning round-trip; a false positive can collapse work that genuinely
@@ -40,14 +47,15 @@ export class SingleWorkerFastPathDecisionProvider implements DecisionProvider {
     this.name = `${delegate.name}-single-worker-fast-path`;
   }
 
-  async proposePlan(input: PlanProposalContext): Promise<Plan | null> {
+  async proposePlan(input: PlanProposalContext): Promise<RoutedPlan | null> {
     const workers = input.availableWorkers ?? [];
     if (!shouldUseSingleWorkerFastPath(input.goal) || workers.length === 0) {
-      return this.#delegate.proposePlan(input);
+      const plan = await this.#delegate.proposePlan(input);
+      return plan ? routedPlan(plan, "planner") : null;
     }
 
     const taskId = crypto.randomUUID();
-    return {
+    return routedPlan({
       id: crypto.randomUUID(),
       workspaceId: input.workspaceId,
       goal: input.goal,
@@ -63,7 +71,7 @@ export class SingleWorkerFastPathDecisionProvider implements DecisionProvider {
       }],
       taskIds: [taskId],
       createdAt: Date.now(),
-    };
+    }, "single-worker");
   }
 
   evaluate(taskResult: PlanTaskOutcome): Promise<Decision> {
