@@ -127,6 +127,17 @@ export function summarizeMissionProgressEvent(event: UiRuntimeEvent): MissionPro
       tone = missionStatusText(status);
       break;
     }
+    case "mission.timeout": {
+      const timeoutMs = numberValue(payload, "timeoutMs");
+      if (timeoutMs !== undefined) {
+        const seconds = Math.max(1, Math.ceil(timeoutMs / 1_000));
+        text = `Mission timed out after ${seconds} second${seconds === 1 ? "" : "s"}.`;
+      } else {
+        text = "Mission timed out before it could finish.";
+      }
+      tone = "attention";
+      break;
+    }
     case "task.assigned": {
       text = "Chef assigned a worker to a work step.";
       tone = "active";
@@ -249,6 +260,9 @@ export function deriveMissionHeartbeat(
   if (!latest) return null;
 
   const latestMissionStatus = scoped.find((event) => event.type === "mission.status");
+  const latestTimeout = scoped.find((event) => event.type === "mission.timeout");
+  if (latestTimeout && (!latestMissionStatus || latestTimeout.seq >= latestMissionStatus.seq)) return null;
+
   const status = latestMissionStatus ? stringValue(objectPayload(latestMissionStatus), "status") : undefined;
   const label = activeHeartbeatLabel(status) ?? (status === undefined ? inferredHeartbeatLabel(scoped) : null);
   if (!label) return null;
