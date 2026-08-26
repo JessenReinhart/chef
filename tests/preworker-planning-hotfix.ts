@@ -14,6 +14,8 @@ import { createChef } from "../src/main.ts";
 import { SingleWorkerFastPathDecisionProvider } from "../src/orchestrator/fast-path-decision-provider.ts";
 import { createHttpServer } from "../src/server/http-server.ts";
 import { createThreadServer } from "../src/server/thread-http.ts";
+import { deriveMissionHeartbeat, summarizeMissionProgressForMission } from "../web/src/missionProgress.ts";
+import type { UiRuntimeEvent } from "../web/src/types.ts";
 
 class StubPlanner implements DecisionProvider {
   readonly name = "stub-planner";
@@ -106,8 +108,56 @@ for (const goal of ["Create a todo app", "Implement a todo app"]) {
     assert.equal(mission.status, "failed");
     assert.equal(mission.taskIds.length, 0);
     assert.equal(snapshot.sessions.length, 0);
-    const planningFailure = snapshot.events.find((event) => event.type === "orchestrator.plan.error" && String((event.payload as { error?: unknown }).error ?? "").includes("Planner timed out after 25ms"));
-    assert.ok(planningFailure);
+
+    const planningStarted = snapshot.events.find((event) => {
+      if (event.type !== "orchestrator.plan.started") return false;
+      return (event.payload as { missionId?: unknown }).missionId === mission.id;
+    });
+    assert.ok(planningStarted, "pre-worker planning must be durable and correlated to its Mission before the provider call resolves");
+
+    const planningFailure = snapshot.events.find((event) => {
+      if (event.type !== "orchestrator.plan.error") return false;
+      const payload = event.payload as { missionId?: unknown; error?: unknown };
+      return payload.missionId === mission.id && String(payload.error ?? "").includes("Planner timed out after 25ms");
+    });
+    assert.ok(planningFailure, "planner timeout must remain durable and correlated to the same Mission");
+    assert.ok(planningStarted.seq < planningFailure.seq, "planning-start evidence must precede the terminal planner failure");
+
+    const planningEvent = planningStarted as unknown as UiRuntimeEvent;
+    const planningHeartbeat = deriveMissionHeartbeat(
+      [planningEvent],
+      mission.id,
+      [],
+      planningEvent.timestamp + 11_000,
+      10_000,
+    );
+    assert.equal(
+      planningHeartbeat?.text,
+      "Chef is still planning. Last runtime activity was 11 seconds ago.",
+      "Simple Mode must remain informative while the provider is slow before any worker exists",
+    );
+
+    const projectedFailure = summarizeMissionProgressForMission(
+      [planningEvent, planningFailure as unknown as UiRuntimeEvent],
+      mission.id,
+      [],
+      3,
+      planningFailure.timestamp + 11_000,
+    );
+    assert.equal(projectedFailure[0]?.eventType, "orchestrator.plan.error");
+    assert.equal(projectedFailure[0]?.tone, "attention");
+    assert.match(projectedFailure[0]?.text ?? "", /Planning failed: Planner timed out after 25ms/);
+    assert.equal(
+      deriveMissionHeartbeat(
+        [planningEvent, planningFailure as unknown as UiRuntimeEvent],
+        mission.id,
+        [],
+        planningFailure.timestamp + 11_000,
+        10_000,
+      ),
+      null,
+      "a durable planner failure must stop the still-planning heartbeat",
+    );
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
     await chef.close();
@@ -115,4 +165,4 @@ for (const goal of ["Create a todo app", "Implement a todo app"]) {
   }
 }
 
-console.log("preworker-planning-hotfix: ok — straightforward work skips planning and hung planning is bounded through Thread chat");
+console.log("preworker-planning-hotfix: ok — straightforward work skips planning and hung planning is bounded, Mission-correlated, and visible through Thread chat");
