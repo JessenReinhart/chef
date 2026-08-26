@@ -68,6 +68,15 @@ const interrupted = summarizeMissionProgressEvent(event(
 assert.equal(interrupted?.text, "Mission execution was interrupted (cancelled).");
 assert.equal(interrupted?.tone, "attention");
 
+const cancelled = summarizeMissionProgressEvent(event(
+  "cancelled",
+  "task.cancelled",
+  { reason: "work was superseded" },
+  10,
+));
+assert.equal(cancelled?.text, "A work step was cancelled: work was superseded");
+assert.equal(cancelled?.tone, "attention");
+
 const digest = summarizeMissionProgress([
   event("start", "mission.created", { goal: "Ship report" }, 1),
   event("output", "session.data", { text: "raw terminal output" }, 2),
@@ -234,6 +243,7 @@ assert.equal(
 for (const blocker of [
   { id: "failed", type: "task.failed", payload: { error: "worker exited" } },
   { id: "blocked", type: "task.blocked", payload: { reason: "dependency unavailable" } },
+  { id: "cancelled", type: "task.cancelled", payload: { reason: "work was superseded" } },
   { id: "crashed", type: "session.crashed", payload: { reason: "pty closed" } },
 ]) {
   const blockerEvent: UiRuntimeEvent = {
@@ -263,6 +273,17 @@ assert.equal(
   "a durable retry after failure must resume truthful long-running feedback",
 );
 
+const cancelledThenRetried: UiRuntimeEvent[] = [
+  ...orchestratorScoped.slice(0, 2),
+  { ...event("cancelled", "task.cancelled", { reason: "work was superseded" }, 3_000), taskId: "task-1" },
+  { ...event("retry-after-cancel", "task.running", { retryCount: 1 }, 4_000), taskId: "task-1" },
+];
+assert.equal(
+  deriveMissionHeartbeat(cancelledThenRetried, "mission-1", ["task-1"], 15_000, 10_000)?.text,
+  "Chef is still working. Last runtime activity was 11 seconds ago.",
+  "a real retry after cancellation must restore heartbeat feedback",
+);
+
 const rejectedApproval: UiRuntimeEvent[] = [
   ...orchestratorScoped.slice(0, 2),
   event("approval-requested", "approval.requested", { missionId: "mission-1", reason: "Push branch" }, 3_000),
@@ -287,4 +308,4 @@ assert.equal(
   "a real retry after approval rejection must restore heartbeat feedback",
 );
 
-console.log("mission-progress-summary: ok — routing, worker activity, recovered task lineage, verification lag, interrupted attempts, no-plan recovery, and other blockers produce truthful Simple Mode progress");
+console.log("mission-progress-summary: ok — routing, worker activity, recovered task lineage, verification lag, interrupted/cancelled attempts, no-plan recovery, and other blockers produce truthful Simple Mode progress");
