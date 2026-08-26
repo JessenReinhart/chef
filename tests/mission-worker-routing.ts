@@ -36,7 +36,7 @@ const planner = new LLMDecisionProvider({
 const provider = new SingleWorkerFastPathDecisionProvider(planner);
 const context = {
   workspaceId: "workspace-routing",
-  goal: "Implement the todo list",
+  goal: "Implement and verify the todo list",
   availableWorkers: [{ id: "codex", name: "Codex", type: "codex" }],
 };
 
@@ -50,6 +50,16 @@ try {
   assert.equal(fastPath.tasks[0].assignedTo, "codex", "the fast path uses a real available task-capable worker");
   assert.equal(fastPath.tasks[0].description, canonicalGoal, "the worker receives the full user goal");
   assert.equal(plannerRequestCount, 0, "the canonical simple request must not pay a planner-provider round trip");
+
+  const unqualifiedImplementationGoal = "Create a todo app";
+  const plannerRequestsBeforeUnqualified = plannerRequestCount;
+  const unqualifiedFastPath = await provider.proposePlan({ ...context, goal: unqualifiedImplementationGoal });
+  assert.ok(unqualifiedFastPath);
+  assert.equal(unqualifiedFastPath.routingMode, "single-worker", "straightforward implementation must not require magic simplicity wording");
+  assert.equal(unqualifiedFastPath.tasks.length, 1, "straightforward implementation should reach one worker directly");
+  assert.equal(unqualifiedFastPath.tasks[0].assignedTo, "codex");
+  assert.equal(unqualifiedFastPath.tasks[0].description, unqualifiedImplementationGoal);
+  assert.equal(plannerRequestCount, plannerRequestsBeforeUnqualified, "straightforward implementation must not wait for a planner round trip");
 
   const straightforwardResearchGoal = "Research the best way on how to create a system with AI";
   const researchRequestsBefore = plannerRequestCount;
@@ -95,7 +105,7 @@ try {
     tasks: [{
       id: "task-1",
       title: "Implement todo list",
-      description: "Implement the requested todo list in the current project.",
+      description: "Implement and verify the requested todo list in the current project.",
       dependencies: [],
       priority: 1,
       nodeType: "agent.llm",
@@ -103,7 +113,7 @@ try {
   };
   const routed = await provider.proposePlan(context);
   assert.ok(routed);
-  assert.equal(routed.routingMode, "planner", "non-fast-path work must retain that it went through planning");
+  assert.equal(routed.routingMode, "planner", "multi-action work must retain that it went through planning");
   assert.equal(routed.tasks[0].nodeType, "agent.llm", "nodeType describes the kind of work");
   assert.equal(routed.tasks[0].assignedTo, "codex", "omitted assignee routes to an available worker identity");
 
@@ -172,7 +182,7 @@ try {
   assert.equal(plannerRequestCount, plannerRequestsBeforeComplexGoal + 1, "complex work must still invoke the planner");
   assert.equal(complexPlan.tasks.length, 2, "the planner remains free to decompose genuinely complex work");
 
-  console.log("mission-worker-routing: ok — simple work stays fast while chained deliverables and complex work use planning");
+  console.log("mission-worker-routing: ok — straightforward work skips planning while chained and complex work still decomposes");
 } finally {
   await new Promise<void>((resolve) => server.close(() => resolve()));
 }
