@@ -219,18 +219,29 @@ export class Orchestrator {
     this.#appendEvent(workspaceId, { type: "mission.created", payload: { missionId: mission.id, goal: message, status: mission.status } });
     this.#repository.insertMessage({ workspaceId, from: "user", type: "message", payload: { text: message } });
     this.#appendEvent(workspaceId, { type: "orchestrator.user_message", payload: { text: message } });
+    this.#appendEvent(workspaceId, {
+      type: "orchestrator.plan.started",
+      payload: { missionId: mission.id, goal: message, provider: this.#decisionProvider.name },
+    });
 
     let plan: Plan | null = null;
     try {
       plan = await this.#decisionProvider.proposePlan({ workspaceId, goal: message });
     } catch (error) {
       if (this.#ownsPlanningAttempt(mission.id, missionEpoch)) this.#repository.updateMission(mission.id, { status: "failed" });
-      this.#appendEvent(workspaceId, { type: "orchestrator.plan.error", payload: { error: error instanceof Error ? error.message : String(error) } });
-      return { workspaceId, taskIds: [], report: `Plan proposal failed: ${error instanceof Error ? error.message : String(error)}`, ok: false };
+      const err = error instanceof Error ? error.message : String(error);
+      this.#appendEvent(workspaceId, {
+        type: "orchestrator.plan.error",
+        payload: { missionId: mission.id, goal: message, provider: this.#decisionProvider.name, error: err },
+      });
+      return { workspaceId, taskIds: [], report: `Plan proposal failed: ${err}`, ok: false };
     }
     if (!plan) {
       if (this.#ownsPlanningAttempt(mission.id, missionEpoch)) this.#repository.updateMission(mission.id, { status: "failed" });
-      this.#appendEvent(workspaceId, { type: "orchestrator.plan.none", payload: { goal: message } });
+      this.#appendEvent(workspaceId, {
+        type: "orchestrator.plan.none",
+        payload: { missionId: mission.id, goal: message, provider: this.#decisionProvider.name },
+      });
       return { workspaceId, taskIds: [], report: `No plan proposed for: ${message}`, ok: false };
     }
     const missionBeforeActivation = this.#repository.getMission(mission.id);
@@ -252,7 +263,7 @@ export class Orchestrator {
     this.#appendEvent(workspaceId, { type: "mission.status", payload: { missionId: mission.id, status: "active", planId: plan.id } });
     this.#appendEvent(workspaceId, {
       type: "orchestrator.plan.proposed",
-      payload: { planId: plan.id, goal: plan.goal, taskIds: plan.taskIds, routingMode: routingModeOf(plan) },
+      payload: { missionId: mission.id, planId: plan.id, goal: plan.goal, taskIds: plan.taskIds, routingMode: routingModeOf(plan) },
     });
     const controller = new AbortController();
     this.#missionControllers.set(mission.id, controller);
@@ -315,6 +326,10 @@ export class Orchestrator {
       payload: { content: message },
     });
     this.#appendEvent(workspaceId, { type: "chat.user", payload: { content: message } });
+    this.#appendEvent(workspaceId, {
+      type: "chat.plan.started",
+      payload: { missionId: mission.id, goal: message, provider: this.#decisionProvider.name },
+    });
 
     let plan: Plan | null = null;
     try {
@@ -322,12 +337,18 @@ export class Orchestrator {
     } catch (error) {
       if (this.#ownsPlanningAttempt(mission.id, missionEpoch)) this.#repository.updateMission(mission.id, { status: "failed" });
       const err = error instanceof Error ? error.message : String(error);
-      this.#appendEvent(workspaceId, { type: "chat.plan.error", payload: { error: err, goal: message } });
+      this.#appendEvent(workspaceId, {
+        type: "chat.plan.error",
+        payload: { missionId: mission.id, goal: message, provider: this.#decisionProvider.name, error: err },
+      });
       return { workspaceId, taskIds: [], report: `Plan proposal failed: ${err}`, ok: false };
     }
     if (!plan) {
       if (this.#ownsPlanningAttempt(mission.id, missionEpoch)) this.#repository.updateMission(mission.id, { status: "failed" });
-      this.#appendEvent(workspaceId, { type: "chat.plan.none", payload: { goal: message } });
+      this.#appendEvent(workspaceId, {
+        type: "chat.plan.none",
+        payload: { missionId: mission.id, goal: message, provider: this.#decisionProvider.name },
+      });
       return { workspaceId, taskIds: [], report: `No plan proposed for: ${message}`, ok: false };
     }
 
@@ -351,7 +372,7 @@ export class Orchestrator {
     this.#appendEvent(workspaceId, { type: "mission.status", payload: { missionId: mission.id, status: "active", planId: plan.id } });
     this.#appendEvent(workspaceId, {
       type: "chat.plan.proposed",
-      payload: { planId: plan.id, goal: plan.goal, taskIds: plan.taskIds, taskCount: plan.tasks.length, routingMode: routingModeOf(plan) },
+      payload: { missionId: mission.id, planId: plan.id, goal: plan.goal, taskIds: plan.taskIds, taskCount: plan.tasks.length, routingMode: routingModeOf(plan) },
     });
 
     // Validate the graph patch proposal through the node execution engine
@@ -657,6 +678,10 @@ export class Orchestrator {
   async #restartMission(workspaceId: WorkspaceId, missionId: string, missionEpoch: number): Promise<void> {
     const mission = this.#requireMission(workspaceId, missionId);
     if (!this.#ownsPlanningAttempt(missionId, missionEpoch)) return;
+    this.#appendEvent(workspaceId, {
+      type: "orchestrator.plan.started",
+      payload: { missionId, goal: mission.goal, provider: this.#decisionProvider.name, resumed: true },
+    });
     let plan: Plan | null = null;
     try {
       plan = await this.#decisionProvider.proposePlan({ workspaceId, goal: mission.goal });
@@ -669,6 +694,10 @@ export class Orchestrator {
       });
       this.#repository.updateMission(missionId, { status: "active", planId: plan.id, taskIds: plan.taskIds });
       this.#appendEvent(workspaceId, { type: "mission.status", payload: { missionId, status: "active", planId: plan.id } });
+      this.#appendEvent(workspaceId, {
+        type: "orchestrator.plan.proposed",
+        payload: { missionId, planId: plan.id, goal: plan.goal, taskIds: plan.taskIds, routingMode: routingModeOf(plan), resumed: true },
+      });
       const controller = new AbortController();
       this.#missionControllers.set(missionId, controller);
       let executionError: string | undefined;
@@ -692,8 +721,13 @@ export class Orchestrator {
         ? this.#ownsActiveAttempt(missionId, missionEpoch, plan.id)
         : this.#ownsPlanningAttempt(missionId, missionEpoch);
       if (sameAttempt) {
+        const err = error instanceof Error ? error.message : String(error);
         this.#repository.updateMission(missionId, { status: "failed" });
-        this.#appendEvent(workspaceId, { type: "mission.status", payload: { missionId, status: "failed", error: error instanceof Error ? error.message : String(error) } });
+        this.#appendEvent(workspaceId, { type: "mission.status", payload: { missionId, status: "failed", error: err } });
+        this.#appendEvent(workspaceId, {
+          type: "orchestrator.plan.error",
+          payload: { missionId, goal: mission.goal, provider: this.#decisionProvider.name, error: err, resumed: true },
+        });
       }
     }
   }
