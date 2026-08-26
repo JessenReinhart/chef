@@ -181,10 +181,19 @@ export function summarizeMissionProgressEvent(event: UiRuntimeEvent): MissionPro
       break;
     }
     case "orchestrator.plan.proposed": {
+      const routingMode = stringValue(payload, "routingMode");
       const count = stringArray(payload, "taskIds").length;
-      text = count > 0
-        ? `Chef prepared a plan with ${count} step${count === 1 ? "" : "s"}.`
-        : "Chef prepared a Mission plan.";
+      if (routingMode === "single-worker") {
+        text = "Chef chose one worker for this Mission.";
+      } else if (routingMode === "planner") {
+        text = count > 0
+          ? `Chef chose a coordinated plan with ${count} step${count === 1 ? "" : "s"}.`
+          : "Chef chose a coordinated plan for this Mission.";
+      } else {
+        text = count > 0
+          ? `Chef prepared a plan with ${count} step${count === 1 ? "" : "s"}.`
+          : "Chef prepared a Mission plan.";
+      }
       tone = "active";
       break;
     }
