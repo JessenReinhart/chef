@@ -55,6 +55,10 @@ assert.equal(workerOutput?.text, "A worker is actively producing output.");
 assert.equal(workerOutput?.tone, "active");
 assert.ok(!workerOutput?.text.includes("raw terminal output"), "Simple Mode must not echo raw terminal output");
 
+const noPlan = summarizeMissionProgressEvent(event("no-plan", "orchestrator.plan.none", { missionId: "mission-no-plan" }, 8));
+assert.equal(noPlan?.text, "Chef could not build a plan for this Mission.");
+assert.equal(noPlan?.tone, "attention");
+
 const digest = summarizeMissionProgress([
   event("start", "mission.created", { goal: "Ship report" }, 1),
   event("output", "session.data", { text: "raw terminal output" }, 2),
@@ -156,6 +160,25 @@ assert.equal(
   "a multi-step Mission must remain in working state while any owned task is still running",
 );
 
+const planningEndedWithoutPlan: UiRuntimeEvent[] = [
+  event("planning", "mission.status", { missionId: "mission-no-plan", status: "planning" }, 1_000),
+  event("no-plan", "orchestrator.plan.none", { missionId: "mission-no-plan" }, 2_000),
+];
+const noPlanDigest = summarizeMissionProgressForMission(
+  planningEndedWithoutPlan,
+  "mission-no-plan",
+  [],
+  3,
+  20_000,
+);
+assert.equal(noPlanDigest[0]?.id, "no-plan", "planning without a plan must become the latest visible Simple Mode update");
+assert.equal(noPlanDigest[0]?.tone, "attention");
+assert.equal(
+  deriveMissionHeartbeat(planningEndedWithoutPlan, "mission-no-plan", [], 20_000, 10_000),
+  null,
+  "planning that terminates without a plan must not emit a false still-planning heartbeat",
+);
+
 const timedOutScoped = [
   ...orchestratorScoped.slice(0, 2),
   event("timeout", "mission.timeout", { missionId: "mission-1", planId: "plan-1", timeoutMs: 10_000 }, 3_000),
@@ -231,4 +254,4 @@ assert.equal(
   "a real retry after approval rejection must restore heartbeat feedback",
 );
 
-console.log("mission-progress-summary: ok — routing, worker activity, recovered task lineage, verification lag, and recovery blockers produce truthful Simple Mode progress");
+console.log("mission-progress-summary: ok — routing, worker activity, recovered task lineage, verification lag, no-plan recovery, and other blockers produce truthful Simple Mode progress");
