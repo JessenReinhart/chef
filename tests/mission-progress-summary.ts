@@ -59,6 +59,15 @@ const noPlan = summarizeMissionProgressEvent(event("no-plan", "orchestrator.plan
 assert.equal(noPlan?.text, "Chef could not build a plan for this Mission.");
 assert.equal(noPlan?.tone, "attention");
 
+const interrupted = summarizeMissionProgressEvent(event(
+  "interrupted",
+  "orchestrator.plan.interrupted",
+  { missionId: "mission-interrupted", status: "cancelled" },
+  9,
+));
+assert.equal(interrupted?.text, "Mission execution was interrupted (cancelled).");
+assert.equal(interrupted?.tone, "attention");
+
 const digest = summarizeMissionProgress([
   event("start", "mission.created", { goal: "Ship report" }, 1),
   event("output", "session.data", { text: "raw terminal output" }, 2),
@@ -179,6 +188,30 @@ assert.equal(
   "planning that terminates without a plan must not emit a false still-planning heartbeat",
 );
 
+const interruptedScoped: UiRuntimeEvent[] = [
+  event("active-interrupted", "mission.status", { missionId: "mission-interrupted", status: "active" }, 1_000),
+  event(
+    "interrupted",
+    "orchestrator.plan.interrupted",
+    { missionId: "mission-interrupted", planId: "plan-interrupted", status: "cancelled" },
+    2_000,
+  ),
+];
+const interruptedDigest = summarizeMissionProgressForMission(
+  interruptedScoped,
+  "mission-interrupted",
+  [],
+  3,
+  20_000,
+);
+assert.equal(interruptedDigest[0]?.id, "interrupted", "an interrupted execution attempt must become the latest visible Simple Mode update");
+assert.equal(interruptedDigest[0]?.tone, "attention");
+assert.equal(
+  deriveMissionHeartbeat(interruptedScoped, "mission-interrupted", [], 20_000, 10_000),
+  null,
+  "an interrupted execution attempt must suppress stale still-working feedback until real recovery begins",
+);
+
 const timedOutScoped = [
   ...orchestratorScoped.slice(0, 2),
   event("timeout", "mission.timeout", { missionId: "mission-1", planId: "plan-1", timeoutMs: 10_000 }, 3_000),
@@ -254,4 +287,4 @@ assert.equal(
   "a real retry after approval rejection must restore heartbeat feedback",
 );
 
-console.log("mission-progress-summary: ok — routing, worker activity, recovered task lineage, verification lag, no-plan recovery, and other blockers produce truthful Simple Mode progress");
+console.log("mission-progress-summary: ok — routing, worker activity, recovered task lineage, verification lag, interrupted attempts, no-plan recovery, and other blockers produce truthful Simple Mode progress");
