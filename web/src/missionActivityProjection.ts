@@ -86,6 +86,10 @@ export function missionActivityState(mission: UiMission | null): string {
   return "Working";
 }
 
+function missionCanHeartbeat(mission: UiMission): boolean {
+  return mission.status === "planning" || mission.status === "active" || mission.status === "verifying";
+}
+
 export function projectMissionActivity(
   snapshot: MissionActivitySnapshot,
   harnesses: HarnessInfo[],
@@ -111,7 +115,9 @@ export function projectMissionActivity(
 
   const feed: string[] = [];
   const seen = new Set<string>();
-  const heartbeat = deriveMissionHeartbeat(snapshot.events, mission.id, scoped.ownedTaskIds, now);
+  const heartbeat = missionCanHeartbeat(mission)
+    ? deriveMissionHeartbeat(snapshot.events, mission.id, scoped.ownedTaskIds, now)
+    : null;
   if (heartbeat) {
     feed.push(heartbeat.text);
     seen.add(heartbeat.text);
