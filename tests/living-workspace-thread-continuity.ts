@@ -94,6 +94,42 @@ assert.equal(activity.mission.id, "mission-a", "Living Workspace activity must s
 assert.equal(activity.mission.goal, "Goal for thread-a");
 assert.ok(activity.feed.some((item) => item.includes("actively producing output")), "selected Thread Session activity must remain visible after runtime-event scoping");
 
+const laggingState: ThreadScopedState = {
+  ...state,
+  missions: [
+    { ...selectedMission, taskIds: [] },
+    { ...otherMission, taskIds: [] },
+  ],
+  events: [
+    runtimeEvent("mission-a-plan", 1, { type: "orchestrator", id: "orchestrator" }, "orchestrator.plan.proposed", {
+      correlationId: "mission-a",
+      payload: { missionId: "mission-a", taskIds: ["task-a"], routingMode: "single-worker" },
+    }),
+    runtimeEvent("task-a-running", 2, { type: "task", id: "task-a" }, "task.running", { taskId: "task-a" }),
+    runtimeEvent("session-a-data", 3, { type: "session", id: "session-a" }, "session.data", { sessionId: "session-a" }),
+    runtimeEvent("mission-b-plan", 4, { type: "orchestrator", id: "orchestrator" }, "orchestrator.plan.proposed", {
+      correlationId: "mission-b",
+      payload: { missionId: "mission-b", taskIds: ["task-b"], routingMode: "single-worker" },
+    }),
+    runtimeEvent("task-b-running", 5, { type: "task", id: "task-b" }, "task.running", { taskId: "task-b" }),
+    runtimeEvent("session-b-data", 6, { type: "session", id: "session-b" }, "session.data", { sessionId: "session-b" }),
+  ],
+};
+
+const laggingScoped = scopeStateToThread(laggingState, "thread-a");
+assert.deepEqual(laggingScoped.missions?.[0]?.taskIds, [], "fixture must represent a Mission snapshot that has not caught up with durable plan lineage yet");
+assert.deepEqual(laggingScoped.tasks.map((item) => item.id), ["task-a"], "durable Mission-correlated plan events must recover selected-Thread Task ownership while the Mission snapshot lags");
+assert.deepEqual(laggingScoped.sessions.map((item) => item.id), ["session-a"], "a freshly started worker Session must remain visible when Task ownership is only durable in the plan event");
+assert.deepEqual(laggingScoped.canvasNodes.map((item) => item.id), ["helper", "node-a"], "worker canvas state must stay visible through the same recovered Task lineage");
+assert.deepEqual(
+  laggingScoped.events.map((item) => item.id),
+  ["mission-a-plan", "task-a-running", "session-a-data"],
+  "recovered Task lineage must preserve later worker activity while still excluding another Thread",
+);
+const laggingActivity = projectMissionActivity({ missions: laggingScoped.missions ?? [], tasks: laggingScoped.tasks, events: laggingScoped.events }, []);
+assert.ok(laggingActivity?.feed.some((item) => item.includes("one worker")), "pre-worker routing feedback must remain visible while the Mission task list catches up");
+assert.ok(laggingActivity?.feed.some((item) => item.includes("actively producing output")), "worker activity must remain visible after durable plan-based ownership recovery");
+
 assert.equal(threadChatPath("thread-a"), "/api/threads/thread-a/chat", "Simple Mode submissions must use the selected Thread chat boundary");
 assert.equal(threadMessagesPath("thread-a"), "/api/threads/thread-a/messages", "Simple Mode assistant history must come from the selected Thread");
 assert.equal(threadChatPath("thread/a b"), "/api/threads/thread%2Fa%20b/chat", "Thread ids must be encoded before entering a URL path");
