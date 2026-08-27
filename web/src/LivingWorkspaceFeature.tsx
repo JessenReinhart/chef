@@ -543,10 +543,10 @@ export function LivingWorkspaceFeature() {
       if (loadSelectedThreadId() !== submittedThreadId) return;
       if (!result.ok) {
         setChefNote(result.report || "I couldn't start that work yet.");
-        setSending(false);
       } else if (result.report) {
         setChefNote(result.report);
       }
+      setSending(false);
       void refresh();
     } catch (reason) {
       if (loadSelectedThreadId() !== submittedThreadId) return;
