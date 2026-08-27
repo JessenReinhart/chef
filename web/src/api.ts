@@ -21,13 +21,13 @@ import type {
   UiAutomationRun,
   UiRuntimeEvent,
 } from "./types";
-import { loadSelectedThreadId } from "./threadApi";
+import { loadSelectedThreadId } from "./threadApi.ts";
 import {
   scopeStateToThread,
   threadChatPath,
   threadMessagesPath,
   type ThreadScopedState,
-} from "./threadScope";
+} from "./threadScope.ts";
 
 export interface RecentProject {
   path: string;
@@ -132,7 +132,7 @@ export class Api {
   }
 
   async capabilities(role: "engineer" | "orchestrator" | "human"): Promise<{ role: string; policy: Record<string, "allow" | "deny" | "approval"> }> {
-    const data = await this.request<{ ok: boolean; data: { role: string; policy: Record<string, "allow" | "deny" | "approval"> } }>(`/api/capabilities?role=${role}`);
+    const data = await this.request<{ ok: boolean; data: { role: string; policy: Record<string, "allow" | "deny" | "approval"> }>(`/api/capabilities?role=${role}`);
     return data.data;
   }
 
