@@ -31,6 +31,12 @@ function payloadText(payload: Record<string, unknown>): string | null {
   return typeof detail === "string" && detail.trim() ? detail.trim() : null;
 }
 
+function payloadProvider(payload: Record<string, unknown>): string | null {
+  return typeof payload.provider === "string" && payload.provider.trim()
+    ? payload.provider.trim()
+    : null;
+}
+
 export function missionDiagnosticLabel(event: UiRuntimeEvent): string {
   return FRIENDLY_EVENT_LABELS[event.type]
     ?? event.type
@@ -43,7 +49,10 @@ export function missionDiagnosticDetail(event: UiRuntimeEvent): string | null {
   const payload = event.payload as Record<string, unknown>;
 
   if (event.type === "orchestrator.plan.started") {
-    return "Decision provider call started; no worker has been selected yet.";
+    const provider = payloadProvider(payload);
+    return provider
+      ? `Decision provider ${provider} started; no worker has been selected yet.`
+      : "Decision provider call started; no worker has been selected yet.";
   }
 
   if (event.type === "orchestrator.plan.proposed") {
