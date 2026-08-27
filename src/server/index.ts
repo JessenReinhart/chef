@@ -1,4 +1,5 @@
 import { createHttpServer } from "./http-server.ts";
+import { createImmediateChatServer } from "./immediate-chat-http.ts";
 import { createContextScopeServer } from "./context-scope-http.ts";
 import { createArtifactServer } from "./artifact-http.ts";
 import { createMissionTimelineServer } from "./mission-timeline-http.ts";
@@ -61,7 +62,8 @@ if (!Number.isInteger(port) || port < 0 || port > 65_535) {
 
 await chef.start();
 const baseServer = createHttpServer(chef);
-const contextServer = createContextScopeServer(chef, baseServer);
+const immediateChatServer = createImmediateChatServer(chef, baseServer);
+const contextServer = createContextScopeServer(chef, immediateChatServer);
 const artifactServer = createArtifactServer(chef, contextServer);
 const timelineServer = createMissionTimelineServer(chef, artifactServer);
 const planServer = createMissionPlanServer(chef, timelineServer);
