@@ -69,6 +69,15 @@ function scopeMissionActivity(events: UiRuntimeEvent[], mission: UiMission): {
   };
 }
 
+function isMissionOngoing(mission: UiMission): boolean {
+  return mission.status !== "completed" && mission.status !== "cancelled" && mission.status !== "failed";
+}
+
+function selectMission(missions: UiMission[]): UiMission | null {
+  const newestFirst = [...missions].sort((a, b) => b.createdAt - a.createdAt);
+  return newestFirst.find(isMissionOngoing) ?? newestFirst[0] ?? null;
+}
+
 export function workerActivityState(task: UiTask): string {
   if (task.status === "running" || task.status === "spawning" || task.status === "assigned") return "Working";
   if (task.status === "completed") return "Done";
@@ -107,7 +116,7 @@ export function projectMissionActivity(
   harnesses: HarnessInfo[],
   now = Date.now(),
 ): MissionActivityProjection | null {
-  const mission = [...snapshot.missions].sort((a, b) => b.createdAt - a.createdAt)[0] ?? null;
+  const mission = selectMission(snapshot.missions);
   if (!mission) return null;
 
   const tasksById = new Map(snapshot.tasks.map((task) => [task.id, task]));
