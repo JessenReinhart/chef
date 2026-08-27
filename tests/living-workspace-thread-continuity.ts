@@ -82,12 +82,16 @@ Object.defineProperty(globalThis, "localStorage", {
 globalThis.fetch = async (input) => {
   const url = String(input);
   requested.push(url);
-  const body = url.endsWith("/api/state")
-    ? state
-    : url.endsWith("/api/threads/thread-a/messages")
-      ? []
-      : { ok: true, taskIds: [], report: "Work accepted" };
-  return new Response(JSON.stringify({ ok: true, data: body }), {
+  if (url.endsWith("/api/state")) {
+    return new Response(JSON.stringify(state), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  }
+  const data = url.endsWith("/api/threads/thread-a/messages")
+    ? []
+    : { ok: true, taskIds: [], report: "Work accepted" };
+  return new Response(JSON.stringify({ ok: true, data }), {
     status: 200,
     headers: { "content-type": "application/json" },
   });
