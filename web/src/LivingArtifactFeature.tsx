@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
+import { api } from "./api";
 import {
   MAX_SHELF_RESULTS,
   MAX_VISIBLE_RESULTS,
   SPATIAL_RESULT_SLOTS,
+  artifactsForMission,
   canDownload,
   metadataRows,
   previewText,
@@ -12,6 +14,7 @@ import {
   type ArtifactType,
   type LivingArtifact,
 } from "./artifactProjection";
+import { projectMissionActivity } from "./missionActivityProjection";
 import "./living-artifact.css";
 import "./artifact-preview.css";
 
@@ -37,9 +40,12 @@ function artifactLabel(type: ArtifactType): string {
   }
 }
 
+type MissionResultScope = { missionId: string; taskIds: string[] } | null;
+
 export function LivingArtifactFeature() {
   const [enabled, setEnabled] = useState(() => localStorage.getItem("chef:view-mode") !== "power");
   const [artifacts, setArtifacts] = useState<LivingArtifact[]>([]);
+  const [missionScope, setMissionScope] = useState<MissionResultScope>(null);
   const [target, setTarget] = useState<Element | null>(null);
   const [shelfOpen, setShelfOpen] = useState(false);
   const [selectedArtifactId, setSelectedArtifactId] = useState<string | null>(null);
@@ -67,10 +73,17 @@ export function LivingArtifactFeature() {
   const refresh = useCallback(async () => {
     if (!enabled) return;
     try {
-      const response = await fetch("/api/artifacts");
+      const [response, state] = await Promise.all([fetch("/api/artifacts"), api.stateRaw()]);
       if (!response.ok) return;
       const body = await response.json() as { ok?: boolean; data?: LivingArtifact[] };
       if (body.ok && Array.isArray(body.data)) setArtifacts(body.data);
+
+      const activity = projectMissionActivity({
+        missions: state.missions ?? [],
+        tasks: state.tasks,
+        events: state.events,
+      }, []);
+      setMissionScope(activity ? { missionId: activity.mission.id, taskIds: activity.taskIds } : null);
     } catch {
       // Artifact cards are an optional projection. Keep the workspace usable.
     }
@@ -90,9 +103,15 @@ export function LivingArtifactFeature() {
     return () => stream.close();
   }, [enabled, refresh]);
 
+  const currentMissionArtifacts = useMemo(
+    () => missionScope
+      ? artifactsForMission(artifacts, missionScope.missionId, missionScope.taskIds)
+      : artifacts,
+    [artifacts, missionScope],
+  );
   const visibleArtifacts = useMemo(
-    () => recentArtifacts(artifacts, MAX_VISIBLE_RESULTS),
-    [artifacts],
+    () => recentArtifacts(currentMissionArtifacts, MAX_VISIBLE_RESULTS),
+    [currentMissionArtifacts],
   );
   const shelfArtifacts = useMemo(
     () => recentArtifacts(artifacts, MAX_SHELF_RESULTS),
@@ -114,7 +133,7 @@ export function LivingArtifactFeature() {
     <section className="chef-result-cluster" aria-label="Workspace results">
       <div className="chef-result-cluster__label">
         <span>Results</span>
-        <small>{artifacts.length}</small>
+        <small>{currentMissionArtifacts.length}</small>
       </div>
       {visibleArtifacts.map((artifact, index) => (
         <article
