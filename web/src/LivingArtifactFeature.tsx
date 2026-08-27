@@ -6,7 +6,7 @@ import {
   MAX_VISIBLE_RESULTS,
   SPATIAL_RESULT_SLOTS,
   artifactHandoff,
-  artifactsForMission,
+  artifactsForCurrentMission,
   canDownload,
   copyRunCommand,
   metadataRows,
@@ -116,11 +116,7 @@ export function LivingArtifactFeature() {
   }, [enabled, refresh]);
 
   const currentMissionArtifacts = useMemo(
-    () => missionScope === undefined
-      ? []
-      : missionScope
-        ? artifactsForMission(artifacts, missionScope.missionId, missionScope.taskIds)
-        : artifacts,
+    () => artifactsForCurrentMission(artifacts, missionScope),
     [artifacts, missionScope],
   );
   const visibleArtifacts = useMemo(
