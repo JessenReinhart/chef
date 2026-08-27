@@ -45,6 +45,25 @@ function payloadStrings(payload: EventPayload, key: string): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 }
 
+function eventNamesMission(event: UiRuntimeEvent, missionIds: Set<string>): boolean {
+  if (event.source.type === "mission" && missionIds.has(event.source.id)) return true;
+  if (event.correlationId && missionIds.has(event.correlationId)) return true;
+  const missionId = payloadString(eventPayload(event), "missionId");
+  return Boolean(missionId && missionIds.has(missionId));
+}
+
+function recoverMissionTaskIds(
+  events: UiRuntimeEvent[],
+  missionIds: Set<string>,
+  taskIds: Set<string>,
+): void {
+  for (const event of events) {
+    if (!eventNamesMission(event, missionIds)) continue;
+    if (event.taskId) taskIds.add(event.taskId);
+    for (const taskId of payloadStrings(eventPayload(event), "taskIds")) taskIds.add(taskId);
+  }
+}
+
 function eventBelongsToThread(
   event: UiRuntimeEvent,
   missionIds: Set<string>,
@@ -52,15 +71,11 @@ function eventBelongsToThread(
   sessionIds: Set<string>,
 ): boolean {
   const payload = eventPayload(event);
-  if (event.source.type === "mission" && missionIds.has(event.source.id)) return true;
+  if (eventNamesMission(event, missionIds)) return true;
   if (event.source.type === "task" && taskIds.has(event.source.id)) return true;
   if (event.source.type === "session" && sessionIds.has(event.source.id)) return true;
-  if (event.correlationId && missionIds.has(event.correlationId)) return true;
   if (event.taskId && taskIds.has(event.taskId)) return true;
   if (event.sessionId && sessionIds.has(event.sessionId)) return true;
-
-  const missionId = payloadString(payload, "missionId");
-  if (missionId && missionIds.has(missionId)) return true;
   return payloadStrings(payload, "taskIds").some((taskId) => taskIds.has(taskId));
 }
 
@@ -86,6 +101,12 @@ export function scopeStateToThread(state: ThreadScopedState, threadId: string | 
   const missions = (state.missions ?? []).filter((mission) => missionThreadId(mission) === threadId);
   const missionIds = new Set(missions.map((mission) => mission.id));
   const taskIds = new Set(missions.flatMap((mission) => mission.taskIds));
+
+  // Plan/runtime events can durably name a Mission's Tasks before the Mission
+  // snapshot catches up. Keep that lineage so Simple Mode does not briefly
+  // lose workers and activity during the pre-worker/startup boundary.
+  recoverMissionTaskIds(state.events, missionIds, taskIds);
+
   const sessions = state.sessions.filter((session) => taskIds.has(session.taskId));
   const sessionTaskIds = new Map(
     sessions.flatMap((session) => typeof session.id === "string" ? [[session.id, session.taskId] as const] : []),
