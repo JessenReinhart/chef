@@ -7,9 +7,14 @@ import type {
   UiTask,
 } from "./types";
 
+export interface ThreadScopedSession {
+  taskId: string;
+  [key: string]: unknown;
+}
+
 export interface ThreadScopedState {
   tasks: UiTask[];
-  sessions: unknown[];
+  sessions: ThreadScopedSession[];
   approvals: Array<{ id: string; reason: string; taskId: string; status: string }>;
   canvasNodes: UiCanvasNode[];
   canvasEdges: UiCanvasEdge[];
@@ -33,6 +38,7 @@ export function scopeStateToThread(state: ThreadScopedState, threadId: string | 
     ...state,
     missions,
     tasks: state.tasks.filter((task) => taskIds.has(task.id)),
+    sessions: state.sessions.filter((session) => taskIds.has(session.taskId)),
     approvals: state.approvals.filter((approval) => taskIds.has(approval.taskId)),
     canvasNodes: state.canvasNodes.filter((node) => !node.taskId || taskIds.has(node.taskId)),
   };
