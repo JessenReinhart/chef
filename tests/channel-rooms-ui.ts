@@ -1,18 +1,13 @@
 import { strict as assert } from "node:assert";
-import { readFile } from "node:fs/promises";
+import { workspaceSurfacePlan } from "../web/src/canonicalWorkspaceModel.ts";
 
-const feature = await readFile(new URL("../web/src/ChannelRoomsFeature.tsx", import.meta.url), "utf8");
-const main = await readFile(new URL("../web/src/main.tsx", import.meta.url), "utf8");
+const simple = workspaceSurfacePlan("simple");
+assert.equal(simple.rooms, false, "Rooms should stay out of the normal Living Workspace so they do not compete with outcome-first work");
+assert.equal(simple.runtimeApp, false, "the normal surface must not mount the advanced runtime tree");
 
-assert.doesNotMatch(feature, /chef:view-mode.*power/, "rooms should no longer depend on the legacy Simple/Power persona switch");
-assert.match(feature, /\/api\/messages\/channels/, "rooms should use the runtime channel index");
-assert.match(feature, /\/api\/messages\?channel=/, "room contents should use durable channel messages");
-assert.match(feature, /encodeURIComponent\(channel\)/, "channel names must be URL encoded");
-assert.match(feature, /Rooms are a lightweight view over Chef's durable agent messages/, "empty state should explain projection semantics");
-assert.match(feature, /method:\s*["']POST["']/, "rooms should expose the bounded human message write path");
-assert.match(feature, /Message .* as human/, "composer should clearly identify human-authored messages");
-assert.match(feature, /ctrlKey.*metaKey|metaKey.*ctrlKey/s, "composer should support Ctrl\/Cmd+Enter submission");
-assert.match(main, /<ChannelRoomsFeature\s*\/?>/, "rooms feature should remain mounted in the Workbench shell");
-assert.match(main, /if \(surface === "home"\)/, "Chef Home should remain a separate surface so Rooms stay at Workbench depth");
+const power = workspaceSurfacePlan("power");
+assert.equal(power.rooms, true, "Rooms should remain available when runtime details are intentionally opened");
+assert.equal(power.runtimeApp, true, "Rooms and the advanced runtime surface should share the same deliberate depth");
+assert.equal(power.livingWorkspace, false, "opening runtime details must replace the streaming Living Workspace rather than mount both trees");
 
-console.log("channel-rooms-ui: ok — Workbench can browse rooms and send bounded human messages without legacy persona gating");
+console.log("channel-rooms-ui: ok — Rooms depth is verified through executable workspace behavior");

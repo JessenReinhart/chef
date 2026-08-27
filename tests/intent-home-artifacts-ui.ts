@@ -1,23 +1,137 @@
 import { strict as assert } from "node:assert";
-import { readFile } from "node:fs/promises";
+import {
+  MAX_VISIBLE_RESULTS,
+  artifactHandoff,
+  artifactsForCurrentMission,
+  artifactsForMission,
+  canDownload,
+  copyRunCommand,
+  missingResultHandoffNotice,
+  provenanceLabel,
+  recentArtifacts,
+  type LivingArtifact,
+} from "../web/src/artifactProjection.ts";
+import { workspaceSurfacePlan } from "../web/src/canonicalWorkspaceModel.ts";
 
-const main = await readFile(new URL("../web/src/main.tsx", import.meta.url), "utf8");
-const artifacts = await readFile(new URL("../web/src/HomeMissionArtifacts.tsx", import.meta.url), "utf8");
-const threadApi = await readFile(new URL("../web/src/threadApi.ts", import.meta.url), "utf8");
+const artifact = (
+  id: string,
+  version: number,
+  taskId = `task-${version}`,
+  uri = `chef:${id}`,
+  metadata: Record<string, unknown> = {},
+): LivingArtifact => ({
+  id,
+  workspaceId: "workspace-1",
+  type: "document",
+  name: `Result ${version}`,
+  uri,
+  version,
+  createdBy: "claude-code",
+  taskId,
+  metadata,
+});
 
-assert.match(main, /<HomeMissionArtifacts \/>/, "Simple Mode must mount the current-Mission artifact projection");
-assert.match(artifacts, /fetch\("\/api\/artifacts"\)/, "Home artifacts must reuse the canonical durable artifact API");
-assert.match(artifacts, /candidate\.metadata\?\.threadId === selectedThreadId/, "artifact Mission selection must stay inside the selected Thread");
-assert.match(artifacts, /sort\(\(a, b\) => b\.createdAt - a\.createdAt\)\[0\]/, "artifact projection must use Mission creation chronology for current work");
-assert.match(artifacts, /const taskIds = new Set\(mission\.taskIds\)/, "artifact projection must derive the current Mission task boundary");
-assert.match(artifacts, /artifact\.taskId && taskIds\.has\(artifact\.taskId\)/, "sibling and prior-Mission artifacts must not leak onto Home");
-assert.match(artifacts, /\.slice\(-MAX_HOME_ARTIFACTS\)\s+\.reverse\(\)/, "Home artifact output must remain bounded and newest-first");
-assert.match(artifacts, /artifact\.uri\.startsWith\("file:"\)/, "only file-backed artifacts should expose download actions");
-assert.match(artifacts, /\/api\/artifacts\/\$\{encodeURIComponent\(artifact\.id\)\}\/download/, "Home downloads must reuse the canonical artifact endpoint");
-assert.match(artifacts, /Mission outputs are temporarily unavailable/, "artifact failure must degrade locally instead of breaking Home");
-assert.match(threadApi, /SELECTED_THREAD_EVENT = "chef:selected-thread-changed"/, "Thread selection changes must have an immediate projection signal");
-assert.match(threadApi, /previous !== threadId/, "selection events must not fire for unchanged selection");
-assert.match(threadApi, /window\.dispatchEvent\(new CustomEvent\(SELECTED_THREAD_EVENT/, "saving a new Thread selection must notify sibling Home projections");
-assert.match(artifacts, /window\.addEventListener\(SELECTED_THREAD_EVENT, onThreadChanged\)/, "artifact projection must refresh immediately when the selected Thread changes");
+const timeline = Array.from({ length: 6 }, (_, index) => artifact(`artifact-${index + 1}`, index + 1));
+const visible = recentArtifacts(timeline, MAX_VISIBLE_RESULTS);
+assert.deepEqual(visible.map((item) => item.id), ["artifact-6", "artifact-5", "artifact-4", "artifact-3"], "workspace history should keep newest durable results first");
 
-console.log("intent-home-artifacts-ui: ok");
+const mixedMissionResults = [
+  artifact("older-unrelated", 7, "task-old"),
+  artifact("current-task", 8, "task-current"),
+  artifact("current-mission-metadata", 9, "task-other", "chef:metadata", { missionId: "mission-current" }),
+  artifact("newer-unrelated", 10, "task-newer"),
+];
+const currentMissionResults = artifactsForMission(mixedMissionResults, "mission-current", ["task-current"]);
+assert.deepEqual(
+  currentMissionResults.map((item) => item.id),
+  ["current-task", "current-mission-metadata"],
+  "the visible result handoff must not let unrelated workspace history impersonate the current Mission result",
+);
+assert.deepEqual(
+  artifactsForCurrentMission(mixedMissionResults, { missionId: "mission-current", taskIds: ["task-current"] }).map((item) => item.id),
+  ["current-task", "current-mission-metadata"],
+  "the primary result projection should follow the authoritative current Mission scope",
+);
+assert.deepEqual(
+  artifactsForCurrentMission(mixedMissionResults, null),
+  [],
+  "without an authoritative current Mission, workspace history must not masquerade as current-task results",
+);
+assert.deepEqual(
+  artifactsForCurrentMission(mixedMissionResults, undefined),
+  [],
+  "while Mission scope is loading, Chef should show no current-result claim rather than stale workspace history",
+);
+assert.deepEqual(
+  recentArtifacts(currentMissionResults, MAX_VISIBLE_RESULTS).map((item) => item.id),
+  ["current-mission-metadata", "current-task"],
+  "current Mission results should still be newest-first after lineage scoping",
+);
+
+assert.equal(
+  missingResultHandoffNotice("completed", 0),
+  "Work is marked complete, but Chef did not publish a durable result for this Mission.",
+  "a completed Mission without an artifact must expose the missing result handoff instead of silently rendering no Results surface",
+);
+assert.equal(
+  missingResultHandoffNotice("active", 0),
+  null,
+  "active work should not be mislabeled as a missing result before completion",
+);
+assert.equal(
+  missingResultHandoffNotice("completed", 1),
+  null,
+  "a completed Mission with a durable result should not show a false handoff warning",
+);
+assert.equal(
+  missingResultHandoffNotice("failed", 0),
+  "No durable result is available because this Mission needs attention.",
+  "failed work should explain why no result is available without pretending completion succeeded",
+);
+
+const goldenTodoResult = artifact("golden-todo", 11, "task-todo", "file:///tmp/todo-app.mjs", {
+  content: "Created runnable todo app at /tmp/todo-app.mjs",
+  run: "node /tmp/todo-app.mjs",
+  verifiedBy: "golden-path",
+});
+assert.deepEqual(
+  artifactHandoff(goldenTodoResult),
+  {
+    summary: "Created runnable todo app at /tmp/todo-app.mjs",
+    runCommand: "node /tmp/todo-app.mjs",
+    verifiedBy: "golden-path",
+  },
+  "the Living Workspace must preserve the canonical artifact contract for what changed, how to run it, and what verified it",
+);
+
+let copiedCommand = "";
+assert.equal(
+  await copyRunCommand("node /tmp/todo-app.mjs", async (command) => { copiedCommand = command; }),
+  "copied",
+  "a durable run command should be directly actionable from the result handoff",
+);
+assert.equal(copiedCommand, "node /tmp/todo-app.mjs", "copy action must preserve the exact worker-provided run command");
+assert.equal(
+  await copyRunCommand("npm start"),
+  "unavailable",
+  "the result handoff must report when clipboard support is unavailable instead of pretending the action succeeded",
+);
+assert.equal(
+  await copyRunCommand("npm start", async () => { throw new Error("clipboard denied"); }),
+  "failed",
+  "clipboard rejection must remain a visible failure state rather than a false success",
+);
+
+assert.deepEqual(
+  artifactHandoff(artifact("legacy-result", 12, "task-legacy", "chef:legacy", { description: "Generated report", runCommand: "npm start", verification: "runtime smoke" })),
+  { summary: "Generated report", runCommand: "npm start", verifiedBy: "runtime smoke" },
+  "result handoff should remain useful for older/custom artifact metadata aliases",
+);
+
+assert.equal(workspaceSurfacePlan("simple").livingArtifacts, true, "normal work should keep result projection in the same Living Workspace");
+assert.equal(workspaceSurfacePlan("power").livingArtifacts, false, "opening runtime detail should not duplicate the normal result projection");
+assert.equal(canDownload(artifact("file-result", 13, "task-file", "file:///tmp/result.txt")), true, "file-backed results should expose a real download action");
+assert.equal(canDownload(artifact("runtime-result", 14)), false, "runtime-only artifacts must not invent a download action");
+assert.equal(provenanceLabel(artifact("artifact-15", 15)), "v15 · by claude-code · task task-15", "result handoff should preserve concise provenance");
+
+console.log("intent-home-artifacts-ui: ok — current Mission result handoff is lineage-scoped, actionable, and cannot silently disappear after completion");

@@ -1,132 +1,231 @@
 import { strict as assert } from "node:assert";
-import { readFile } from "node:fs/promises";
+import {
+  nextWorkspaceDepth,
+  readWorkspaceDepth,
+  workspaceSurfacePlan,
+} from "../web/src/canonicalWorkspaceModel.ts";
+import { projectMissionActivity } from "../web/src/missionActivityProjection.ts";
+import type { HarnessInfo, UiMission, UiRuntimeEvent, UiTask } from "../web/src/types.ts";
 
-const main = await readFile(new URL("../web/src/main.tsx", import.meta.url), "utf8");
-const home = await readFile(new URL("../web/src/IntentHome.tsx", import.meta.url), "utf8");
-const threadApi = await readFile(new URL("../web/src/threadApi.ts", import.meta.url), "utf8");
-const onboarding = await readFile(new URL("../web/src/IntentOnboarding.tsx", import.meta.url), "utf8");
-const rooms = await readFile(new URL("../web/src/ChannelRoomsFeature.tsx", import.meta.url), "utf8");
+assert.equal(readWorkspaceDepth(null), "simple", "a fresh session should open the canonical Living Workspace");
+assert.equal(readWorkspaceDepth("simple"), "simple");
+assert.equal(readWorkspaceDepth("power"), "power");
+assert.equal(nextWorkspaceDepth("simple"), "power");
+assert.equal(nextWorkspaceDepth("power"), "simple");
 
-assert.match(main, /localStorage\.getItem\("chef:surface"\) === "workbench" \? "workbench" : "home"/, "fresh Chef sessions should default to the intent home");
-assert.match(main, /if \(surface === "home"\)/, "home and Workbench must be explicit product surfaces");
-assert.match(main, /<IntentHome onOpenWorkbench=\{openWorkbench\} \/>/, "the default surface should mount the intent-first home");
-assert.match(main, /<IntentOnboarding \/>/, "the default Home should mount the first-run happy-path onboarding");
-assert.match(main, /<App key=\{viewMode\} \/>/, "the existing graph UI should remain available as the Workbench");
-assert.match(main, /<ChannelRoomsFeature \/>/, "Rooms should remain available from the Workbench depth");
-assert.match(home, /What are we doing\?/, "the home should lead with user intent rather than graph controls");
-assert.match(home, /listThreads\(\)/, "Simple Mode must load durable workspace Threads");
-assert.match(home, /threadMessages\(selected\.id\)/, "Simple Mode history must come from the selected Thread");
-assert.match(home, /sendThreadMessage\(threadId, message\)/, "the primary composer must continue work through the selected Thread");
-assert.match(home, /\+ New thread/, "Thread creation must be available directly from Simple Mode");
-assert.match(home, /createThread\("New thread"\)/, "Simple Mode must be able to create an explicit new Thread");
-assert.match(home, /renameSelectedThread\(\)/, "Thread rename must be available directly from Home");
-assert.match(home, /archiveSelectedThread\(\)/, "Thread archive must be available directly from Home");
-assert.match(home, /nextThreads\.find\(\(thread\) => thread\.status === "active"\)/, "archiving the selected Thread must move selection to another active Thread when possible");
-assert.match(home, /saveSelectedThreadId\(nextActive\?\.id \?\? null\)/, "archiving must not leave an archived Thread persisted as the active selection");
-assert.match(home, /const threadMissionSummaries = useMemo/, "Thread navigation must derive status metadata from durable Mission state");
-assert.match(home, /mission\.metadata\?\.threadId === thread\.id/, "Thread navigation metadata must stay scoped to each Thread's Mission lineage");
-assert.match(home, /sort\(\(a, b\) => b\.createdAt - a\.createdAt\)/, "Thread status must use Mission creation chronology rather than mutation order");
-assert.match(home, /active: threadMissionList\[0\] \? isMissionActive\(threadMissionList\[0\]\.status\) : false/, "Thread active-work status must follow the newest Mission only");
-assert.match(home, /summary\.count === 1 \? "Mission" : "Missions"/, "Thread chips must show a compact human-readable Mission count");
-assert.match(home, /summary\.active \? " · active" : ""/, "Thread chips must mark non-terminal latest Missions as active work");
-assert.match(home, /status !== "completed" && status !== "failed" && status !== "blocked" && status !== "cancelled"/, "terminal Missions must not leave a Thread marked active");
-assert.match(home, /mission\.metadata\?\.threadId === selectedThreadId/, "Mission status on Home must be scoped to the selected Thread");
-assert.match(home, /const missionChronology = useMemo/, "Home must derive one stable Mission chronology for current work and history");
-assert.match(home, /sort\(\(a, b\) => b\.createdAt - a\.createdAt\)/, "Mission chronology must follow creation time instead of mutation time");
-assert.doesNotMatch(home, /sort\(\(a, b\) => b\.updatedAt - a\.updatedAt\)/, "updating an older Mission must not make it current again");
-assert.match(home, /const latestMission = missionChronology\[0\] \?\? null;/, "current work must use the newest created Mission in the selected Thread");
-assert.match(home, /const recentPriorMissions = useMemo/, "Home must derive bounded prior Mission history from the selected Thread projection");
-assert.match(home, /missionChronology\s+\.filter\(\(mission\) => mission\.id !== latestMission\?\.id\)/, "prior Mission history must share the same creation chronology as current work");
-assert.match(home, /mission\.id !== latestMission\?\.id/, "prior Mission history must not duplicate the current Mission");
-assert.match(home, /\.slice\(0, 3\)/, "prior Mission history must stay bounded on the default Home surface");
-assert.match(home, /Recent Mission outcomes/, "selected Thread prior outcomes must be inspectable without opening Workbench");
-assert.match(home, /missionOutcomePresentation\(mission\.status\)/, "prior Mission history must use human-readable outcome labels");
-assert.match(home, /Recent conversation/, "selected Thread history must be visible without opening Workbench");
-assert.match(home, /messages\.slice\(-4\)/, "default Thread conversation history must stay bounded to the four most recent turns");
-assert.match(home, /messages\.length > 4/, "older conversation disclosure should appear only when older turns exist");
-assert.match(home, /Earlier conversation · \{messages\.length - 4\} messages/, "Simple Mode must expose a plain-language older-history control");
-assert.match(home, /messages\.slice\(0, -4\)/, "expanded history must use the already-loaded selected-Thread message projection");
-assert.match(home, /<details key=\{selectedThreadId \?\? "no-thread"\}/, "switching Threads must remount and collapse expanded history instead of leaking disclosure state");
-assert.match(home, /saveSelectedThreadId/, "selected Thread should survive reload when possible");
-assert.match(threadApi, /method: "PATCH"/, "Thread rename must use the existing PATCH lifecycle route");
-assert.match(threadApi, /\/api\/threads\/\$\{encodeURIComponent\(threadId\)\}\/archive/, "Thread archive must use the canonical archive route");
-assert.match(threadApi, /\/api\/threads\/\$\{encodeURIComponent\(threadId\)\}\/chat/, "Thread sends must use the canonical Thread-scoped endpoint");
-assert.match(threadApi, /\/api\/threads\/\$\{encodeURIComponent\(threadId\)\}\/messages/, "Thread history must use the canonical Thread-scoped endpoint");
-assert.doesNotMatch(home, /api\.chat\(|api\.chatMessages\(/, "Simple Mode must not silently fall back to workspace-global chat continuity");
-assert.match(home, /Open Workbench/, "advanced inspection should stay deliberately reachable");
-assert.match(home, /Needs your attention/, "approval and failure states should be surfaced in plain language");
-assert.match(home, /const threadTaskIds = useMemo/, "Home must derive the selected Thread's task lineage before projecting approvals");
-assert.match(home, /threadMissions\.flatMap\(\(mission\) => mission\.taskIds\)/, "approval lineage must include every Mission in the selected Thread, not only the latest Mission");
-assert.match(home, /const missionByTaskId = useMemo/, "Home must resolve approval ownership through selected-Thread Mission task lineage");
-assert.match(home, /owners\.set\(taskId, mission\)/, "each selected-Thread task must map back to its owning Mission for approval context");
-assert.match(home, /missionByTaskId\.get\(approval\.taskId\)\?\.goal/, "pending approvals must carry the owning Mission goal instead of exposing raw IDs");
-assert.match(home, /For this Mission/, "approval cards must identify which Mission the decision belongs to");
-assert.match(home, /\{approval\.missionGoal\}/, "approval cards must render the resolved human-readable Mission goal");
-assert.match(home, /approvals\s+\.filter\(\(approval\) => threadTaskIds\.has\(approval\.taskId\)\)/, "pending approvals from sibling Threads must stay excluded while earlier selected-Thread approvals remain visible");
-assert.match(home, /missionApprovals\.length > 0/, "any selected-Thread pending approval must put Home into the attention state");
-assert.match(home, /latestMission\?\.status === "failed"/, "Mission-level failure must put Home into the attention state even without a failed Task projection");
-assert.match(home, /latestMission\?\.status === "blocked"/, "Mission-level blocked state must remain visible even without a blocked Task projection");
-assert.match(home, /latestMission\?\.status === "cancelled"/, "Mission-level cancellation must not fall back to Ready when Task rows are missing or stale");
-assert.match(home, /latestMission\?\.status === "waiting_for_approval"/, "Mission-level approval wait must remain visible even when the approval row has not projected yet");
-assert.match(home, /latestMission\?\.status === "paused"/, "Mission-level pause must remain an attention state without depending on Task rows");
-assert.match(home, /latestMission\?\.status === "planning"/, "Mission planning must keep Home in a working state before Task rows exist");
-assert.match(home, /latestMission\?\.status === "active"/, "an active Mission must keep Home in a working state even between Task projections");
-assert.match(home, /latestMission\?\.status === "verifying"/, "Mission verification must remain working until the Mission reaches a terminal state");
-assert.match(home, /const tasksById = new Map\(tasks\.map\(\(task\) => \[task\.id, task\]\)\)/, "current-work task lookup must not inherit workspace task-array order");
-assert.match(home, /latestMission\.taskIds\s+\.map\(\(taskId\) => tasksById\.get\(taskId\)\)/, "current-work tasks must follow the Mission's authoritative taskId plan order");
-assert.match(home, /\.filter\(\(task\): task is UiTask => task !== undefined\)/, "missing task projections must be ignored without disturbing Mission task order");
-assert.match(home, /currentMissionTasks\.slice\(-6\)/, "the default current-work list must show the latest planned tasks while preserving plan sequence");
-assert.doesNotMatch(home, /currentMissionTasks\.slice\(-6\)\.reverse\(\)/, "Home must not reverse storage order to approximate current Mission plan order");
-assert.match(home, /const currentMissionTaskIds = useMemo/, "failure activity must have an explicit current-Mission task boundary");
-assert.match(home, /new Set\(latestMission\?\.taskIds \?\? \[\]\)/, "failure activity must derive only from the current Mission task lineage");
-assert.match(home, /setEvents\(snapshot\.events\)/, "Home must project existing durable runtime activity instead of creating a second failure store");
-assert.match(home, /event\.type !== "session\.data"/, "last useful activity must use worker output rather than raw runtime lifecycle events");
-assert.match(home, /currentMissionTaskIds\.has\(event\.taskId\)/, "last useful activity must exclude prior Missions and sibling Threads");
-assert.match(home, /candidate\.error\?\.trim\(\)/, "failed or blocked Task error text must be available as a human-readable reason");
-assert.match(home, /Current Mission failure context/, "Simple Mode must expose actionable failure context without opening Workbench");
-assert.match(home, /What happened/, "failure context should use product language rather than runtime terminology");
-assert.match(home, /Last useful activity/, "failure context should include bounded recent worker output when available");
-assert.match(home, /normalized\.length <= 320/, "last useful activity must remain bounded on the default Home surface");
-assert.match(home, /task\.status === "failed" \|\| task\.status === "blocked" \|\| task\.status === "cancelled"/, "cancelled work must keep the aggregate Home status in the attention state");
-assert.match(home, /message\.metadata\?\.missionId === latestMission\.id/, "current-work output must be scoped to the latest Mission instead of any prior Thread reply");
-assert.match(home, /if \(!latestMission \|\| submitting\) return null;/, "a new follow-up must hide the previous Mission output while the new request is starting");
-assert.match(home, /\[latestMission, messages, submitting\]/, "current output must react immediately when a follow-up starts or finishes");
-assert.match(home, /setSubmitting\(true\);\s+setLastReport\(null\);/, "starting a new Mission must clear the previous transient report immediately");
-assert.doesNotMatch(home, /find\(\(message\) => message\.role === "assistant"\)\?\.content/, "Home must not use an unscoped assistant reply as current Mission output");
-assert.match(home, /api\.retryNode\(taskId\)/, "failed work must be retryable directly from Simple Mode");
-assert.match(home, /"Retry"/, "Simple Mode must present a plain-language retry action");
-assert.match(home, /task\.status === "blocked" && !approvalTaskIds\.has\(task\.id\)/, "retry must not bypass a pending approval gate for that task");
-assert.match(home, /function failureFollowupPrompt\(goal: string, context\?: string \| null\)/, "failed Mission follow-up must use a dedicated bounded prompt helper");
-assert.match(home, /normalized\.length <= 320 \? normalized : `\$\{normalized\.slice\(0, 317\)\}…`/, "failed Mission context copied into the composer must stay bounded");
-assert.match(home, /function prepareFailedMissionFollowup\(\)/, "failed and blocked Missions must have a safe same-Thread follow-up path");
-assert.match(home, /latestMission\.status !== "failed" && latestMission\.status !== "blocked"/, "guided failure recovery must stay limited to failed or blocked current Missions");
-assert.match(home, /!selectedThreadId\) return;/, "guided failure recovery must require the selected Thread boundary");
-assert.match(home, /failureReason \?\? lastMissionActivity/, "guided failure recovery should reuse current human-readable Mission failure context");
-assert.match(home, /setGoal\(failureFollowupPrompt/, "guided failure recovery must prepare editable composer text instead of starting work immediately");
-assert.match(home, /Failed Mission recovery/, "Simple Mode must expose the guided recovery surface without opening Workbench");
-assert.match(home, /Ask Chef to fix it/, "Simple Mode must offer a plain-language failed-Mission follow-up action");
-assert.match(home, /You can edit it before sending/, "guided failure recovery must remain explicitly user-editable before execution");
-assert.match(home, /function prepareCancelledMissionFollowup\(\)/, "cancelled Missions must have a dedicated safe recovery path");
-assert.match(home, /latestMission\.status !== "cancelled" \|\| !selectedThreadId/, "cancelled-Mission recovery must stay scoped to a selected Thread");
-assert.match(home, /setGoal\(`Continue this work: \$\{latestMission\.goal\}`\)/, "cancelled recovery must prepare a fresh follow-up from the cancelled Mission goal");
-assert.match(home, /latestMission\?\.status === "cancelled" && selectedThreadId/, "cancelled recovery must only appear for the selected Thread's latest cancelled Mission");
-assert.match(home, /Continue this work/, "Simple Mode must offer a plain-language cancelled-Mission recovery action");
-assert.match(home, /Chef is working/, "active work should collapse to a human-readable status");
-assert.match(home, /Work complete/, "completed work should collapse to a human-readable status");
-assert.doesNotMatch(home, /NodePalette|ChannelRooms|AgentContextInspector|Power Mode|PTY|sessionId/, "default home must not expose Workbench/runtime machinery");
+const simple = workspaceSurfacePlan("simple");
+assert.deepEqual(simple, {
+  projectContext: true,
+  livingWorkspace: true,
+  missionActivity: true,
+  livingArtifacts: true,
+  runtimeApp: false,
+  contextScopes: false,
+  canvasDeletion: false,
+  decisions: false,
+  missionArtifacts: false,
+  rooms: false,
+  agentContext: false,
+}, "normal use should mount one project-grounded Living Workspace without hidden runtime surfaces");
 
-assert.match(onboarding, /Tell Chef the outcome/, "onboarding should teach intent as the first action");
-assert.match(onboarding, /Work starts automatically/, "onboarding must make the no-Run happy path explicit");
-assert.match(onboarding, /Step in only when needed/, "onboarding should teach exception-driven intervention");
-assert.match(onboarding, /type → send → watch → respond only if asked → result/, "onboarding should summarize the happy path in plain language");
-assert.match(onboarding, /chef:intent-onboarding-complete/, "onboarding should be first-run and dismissible instead of permanently occupying Home");
-assert.doesNotMatch(onboarding, /NodePalette|ChannelRooms|AgentContextInspector|Power Mode|PTY|sessionId/, "onboarding must teach the product without exposing runtime jargon");
+const power = workspaceSurfacePlan("power");
+assert.equal(power.livingWorkspace, false, "runtime detail must replace rather than duplicate the streaming Living Workspace");
+assert.equal(power.runtimeApp, true, "runtime detail should remain reachable");
+assert.equal(power.rooms, true, "Rooms remain available at advanced depth");
+assert.equal(power.agentContext, true, "agent context remains available at advanced depth");
 
-assert.doesNotMatch(rooms, /chef:view-mode|mode === "power"|setEnabled/, "Rooms should be a Workbench capability instead of a legacy Power-mode capability");
-assert.match(rooms, /if \(!open\) return;/, "closed Rooms should not poll their channel endpoint");
-assert.match(rooms, /if \(!open \|\| !selectedChannel\)/, "closed Rooms should not poll message history");
+const mission: UiMission = {
+  id: "mission-1",
+  goal: "Create a todo app",
+  status: "active",
+  taskIds: ["task-1"],
+  metadata: {},
+  createdAt: 100,
+  updatedAt: 120,
+};
+const task: UiTask = {
+  id: "task-1",
+  title: "Build the app",
+  description: "Implement the requested todo app",
+  status: "running",
+  assignedTo: "claude-code",
+};
+const events: UiRuntimeEvent[] = [
+  {
+    id: "event-1",
+    seq: 1,
+    timestamp: 105,
+    source: { type: "orchestrator", id: "orchestrator" },
+    type: "orchestrator.plan.started",
+    payload: { missionId: "mission-1" },
+    correlationId: "mission-1",
+  },
+  {
+    id: "event-2",
+    seq: 2,
+    timestamp: 108,
+    source: { type: "orchestrator", id: "orchestrator" },
+    type: "orchestrator.plan.proposed",
+    payload: { missionId: "mission-1", routingMode: "single-worker", taskIds: ["task-1"] },
+    correlationId: "mission-1",
+  },
+  {
+    id: "event-3",
+    seq: 3,
+    timestamp: 110,
+    source: { type: "task", id: "task-1" },
+    type: "task.running",
+    payload: {},
+    taskId: "task-1",
+  },
+  {
+    id: "event-4",
+    seq: 4,
+    timestamp: 120,
+    source: { type: "session", id: "session-1" },
+    type: "session.data",
+    payload: { data: "raw terminal output that should not be rendered directly" },
+    taskId: "task-1",
+  },
+];
+const harnesses: HarnessInfo[] = [
+  { id: "claude-code", name: "Claude Code", type: "specialized", available: true },
+];
 
-const threadSendCalls = home.match(/sendThreadMessage\(/g) ?? [];
-assert.equal(threadSendCalls.length, 1, "the default home should have one authoritative Thread-scoped Chef intent submission path");
+const activity = projectMissionActivity({ missions: [mission], tasks: [task], events }, harnesses, 120);
+assert.ok(activity, "an active Mission should have a visible activity projection");
+assert.equal(activity.mission.goal, "Create a todo app");
+assert.equal(activity.missionState, "Working");
+assert.deepEqual(activity.workers.map((worker) => [worker.name, worker.title, worker.state]), [
+  ["Claude Code", "Build the app", "Working"],
+]);
+assert.deepEqual(activity.feed, [
+  "A worker is actively producing output.",
+  "Claude Code started Build the app.",
+  "Chef chose one worker for this Mission.",
+], "activity should preserve meaningful routing and worker progress in recent-first order");
+assert.equal(activity.feed.some((line) => line.includes("raw terminal output")), false, "normal activity must not expose raw CLI output");
 
-console.log("intent-home-ui: ok — Chef keeps Thread-scoped intent, history, approvals, recovery, navigation status, Mission task order, and Workbench progressive depth coherent");
+const planningMission: UiMission = {
+  ...mission,
+  id: "mission-planning",
+  status: "planning",
+  taskIds: [],
+  createdAt: 200,
+  updatedAt: 200,
+};
+const planningEvents: UiRuntimeEvent[] = [{
+  id: "event-planning",
+  seq: 5,
+  timestamp: 200,
+  source: { type: "orchestrator", id: "orchestrator" },
+  type: "orchestrator.plan.started",
+  payload: { missionId: "mission-planning" },
+  correlationId: "mission-planning",
+}];
+const planningActivity = projectMissionActivity({
+  missions: [planningMission],
+  tasks: [],
+  events: planningEvents,
+}, harnesses, 200);
+assert.ok(planningActivity, "pre-worker planning should still have visible Mission activity");
+assert.deepEqual(planningActivity.feed, [
+  "Chef is deciding how to approach this Mission.",
+], "Mission-correlated planning must be visible before any Task or Session exists");
+
+const slowPlanningActivity = projectMissionActivity({
+  missions: [planningMission],
+  tasks: [],
+  events: planningEvents,
+}, harnesses, 10_500);
+assert.ok(slowPlanningActivity, "slow planning should keep the Living Workspace visibly alive");
+assert.equal(
+  slowPlanningActivity.feed[0],
+  "Chef is still planning. Last runtime activity was 10 seconds ago.",
+  "the canonical workspace should surface the durable Mission heartbeat after ten seconds of silence",
+);
+assert.equal(
+  slowPlanningActivity.feed[1],
+  "Chef is deciding how to approach this Mission.",
+  "heartbeat feedback should supplement rather than replace the last meaningful runtime event",
+);
+
+const completedPlanningActivity = projectMissionActivity({
+  missions: [{ ...planningMission, status: "completed", updatedAt: 10_500 }],
+  tasks: [],
+  events: planningEvents,
+}, harnesses, 10_500);
+assert.ok(completedPlanningActivity, "completed Missions should remain projectable from durable history");
+assert.equal(
+  completedPlanningActivity.feed.some((line) => line.startsWith("Chef is still")),
+  false,
+  "stale planning history must not produce a heartbeat after the authoritative Mission has terminated",
+);
+
+const completedWithoutFeed = projectMissionActivity({
+  missions: [{ ...mission, id: "mission-complete", status: "completed", taskIds: [], createdAt: 250, updatedAt: 260 }],
+  tasks: [],
+  events: [],
+}, harnesses, 260);
+assert.ok(completedWithoutFeed, "a completed Mission should remain understandable even when no recent feed event is retained");
+assert.equal(completedWithoutFeed.missionState, "Done");
+assert.equal(
+  completedWithoutFeed.fallback,
+  "Work is complete. Results are available in this workspace.",
+  "completion fallback must not contradict the authoritative Done state",
+);
+
+const failedWithoutFeed = projectMissionActivity({
+  missions: [{ ...mission, id: "mission-failed", status: "failed", taskIds: [], createdAt: 260, updatedAt: 270 }],
+  tasks: [],
+  events: [],
+}, harnesses, 270);
+assert.ok(failedWithoutFeed, "a failed Mission should remain actionable when no recent feed event is retained");
+assert.equal(failedWithoutFeed.missionState, "Needs attention");
+assert.equal(
+  failedWithoutFeed.fallback,
+  "Work needs attention. Review the latest Mission update before continuing.",
+  "failure fallback must not claim work is still active",
+);
+
+const startupMission: UiMission = {
+  ...mission,
+  id: "mission-startup",
+  taskIds: [],
+  createdAt: 300,
+  updatedAt: 305,
+};
+const startupActivity = projectMissionActivity({
+  missions: [startupMission],
+  tasks: [task],
+  events: [
+    {
+      id: "event-startup-plan",
+      seq: 6,
+      timestamp: 300,
+      source: { type: "orchestrator", id: "orchestrator" },
+      type: "orchestrator.plan.proposed",
+      payload: { missionId: "mission-startup", routingMode: "single-worker", taskIds: ["task-1"] },
+      correlationId: "mission-startup",
+    },
+    {
+      id: "event-startup-worker",
+      seq: 7,
+      timestamp: 305,
+      source: { type: "task", id: "task-1" },
+      type: "task.running",
+      payload: {},
+      taskId: "task-1",
+    },
+  ],
+}, harnesses, 305);
+assert.ok(startupActivity, "startup activity should recover durable Task ownership from the Mission plan");
+assert.deepEqual(startupActivity.workers.map((worker) => [worker.name, worker.title, worker.state]), [
+  ["Claude Code", "Build the app", "Working"],
+], "the worker list should not disappear while the Mission snapshot catches up to its durable plan");
+assert.deepEqual(startupActivity.feed, [
+  "Claude Code started Build the app.",
+  "Chef chose one worker for this Mission.",
+]);
+
+console.log("intent-home-ui: ok — canonical workspace and Mission activity are verified by executable behavior, not source shape");

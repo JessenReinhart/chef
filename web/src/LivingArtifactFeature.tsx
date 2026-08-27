@@ -1,17 +1,24 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
+import { api } from "./api";
 import {
   MAX_SHELF_RESULTS,
   MAX_VISIBLE_RESULTS,
   SPATIAL_RESULT_SLOTS,
+  artifactHandoff,
+  artifactsForCurrentMission,
   canDownload,
+  copyRunCommand,
   metadataRows,
+  missingResultHandoffNotice,
   previewText,
   provenanceLabel,
   recentArtifacts,
   type ArtifactType,
   type LivingArtifact,
+  type RunCommandCopyResult,
 } from "./artifactProjection";
+import { projectMissionActivity } from "./missionActivityProjection";
 import "./living-artifact.css";
 import "./artifact-preview.css";
 
@@ -37,12 +44,16 @@ function artifactLabel(type: ArtifactType): string {
   }
 }
 
+type MissionResultScope = { missionId: string; taskIds: string[]; status: string } | null;
+
 export function LivingArtifactFeature() {
   const [enabled, setEnabled] = useState(() => localStorage.getItem("chef:view-mode") !== "power");
   const [artifacts, setArtifacts] = useState<LivingArtifact[]>([]);
+  const [missionScope, setMissionScope] = useState<MissionResultScope | undefined>(undefined);
   const [target, setTarget] = useState<Element | null>(null);
   const [shelfOpen, setShelfOpen] = useState(false);
   const [selectedArtifactId, setSelectedArtifactId] = useState<string | null>(null);
+  const [runCopyState, setRunCopyState] = useState<Record<string, RunCommandCopyResult>>({});
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -56,6 +67,7 @@ export function LivingArtifactFeature() {
       setTarget(null);
       setShelfOpen(false);
       setSelectedArtifactId(null);
+      setRunCopyState({});
       return;
     }
     const findTarget = () => setTarget(document.querySelector(".chef-living-stage"));
@@ -66,13 +78,31 @@ export function LivingArtifactFeature() {
 
   const refresh = useCallback(async () => {
     if (!enabled) return;
+
     try {
       const response = await fetch("/api/artifacts");
-      if (!response.ok) return;
-      const body = await response.json() as { ok?: boolean; data?: LivingArtifact[] };
-      if (body.ok && Array.isArray(body.data)) setArtifacts(body.data);
+      if (response.ok) {
+        const body = await response.json() as { ok?: boolean; data?: LivingArtifact[] };
+        if (body.ok && Array.isArray(body.data)) setArtifacts(body.data);
+      }
     } catch {
-      // Artifact cards are an optional projection. Keep the workspace usable.
+      // Artifact history can recover independently on the next poll/event.
+    }
+
+    try {
+      const state = await api.stateRaw();
+      const activity = projectMissionActivity({
+        missions: state.missions ?? [],
+        tasks: state.tasks,
+        events: state.events,
+      }, []);
+      setMissionScope(activity ? {
+        missionId: activity.mission.id,
+        taskIds: activity.taskIds,
+        status: activity.mission.status,
+      } : null);
+    } catch {
+      // Keep the previous authoritative scope rather than guessing from artifact chronology.
     }
   }, [enabled]);
 
@@ -90,10 +120,15 @@ export function LivingArtifactFeature() {
     return () => stream.close();
   }, [enabled, refresh]);
 
-  const visibleArtifacts = useMemo(
-    () => recentArtifacts(artifacts, MAX_VISIBLE_RESULTS),
-    [artifacts],
+  const currentMissionArtifacts = useMemo(
+    () => artifactsForCurrentMission(artifacts, missionScope),
+    [artifacts, missionScope],
   );
+  const visibleArtifacts = useMemo(
+    () => recentArtifacts(currentMissionArtifacts, MAX_VISIBLE_RESULTS),
+    [currentMissionArtifacts],
+  );
+  const resultNotice = missingResultHandoffNotice(missionScope?.status, currentMissionArtifacts.length);
   const shelfArtifacts = useMemo(
     () => recentArtifacts(artifacts, MAX_SHELF_RESULTS),
     [artifacts],
@@ -103,48 +138,79 @@ export function LivingArtifactFeature() {
     [artifacts, selectedArtifactId],
   );
 
-  if (!enabled || !target || visibleArtifacts.length === 0) return null;
+  if (!enabled || !target || (visibleArtifacts.length === 0 && !resultNotice)) return null;
 
   const inspectArtifact = (artifact: LivingArtifact) => {
     setShelfOpen(true);
     setSelectedArtifactId(artifact.id);
   };
 
+  const copyArtifactRunCommand = async (artifactId: string, runCommand: string) => {
+    const writer = navigator.clipboard?.writeText
+      ? navigator.clipboard.writeText.bind(navigator.clipboard)
+      : undefined;
+    const result = await copyRunCommand(runCommand, writer);
+    setRunCopyState((current) => ({ ...current, [artifactId]: result }));
+  };
+
   return createPortal(
     <section className="chef-result-cluster" aria-label="Workspace results">
       <div className="chef-result-cluster__label">
         <span>Results</span>
-        <small>{artifacts.length}</small>
+        <small>{currentMissionArtifacts.length}</small>
       </div>
-      {visibleArtifacts.map((artifact, index) => (
-        <article
-          key={`${artifact.id}:${artifact.version}`}
-          className="chef-result-card"
-          data-result-slot={SPATIAL_RESULT_SLOTS[index]}
-          style={{ "--chef-result-index": index } as CSSProperties}
-        >
-          <button className="chef-result-card__inspect" type="button" onClick={() => inspectArtifact(artifact)} aria-label={`Inspect ${artifact.name}`}>
-            <div className="chef-result-card__icon" aria-hidden="true">{artifactIcon(artifact.type)}</div>
-            <div className="chef-result-card__body">
-              <span className="chef-result-card__eyebrow">{artifactLabel(artifact.type)}</span>
-              <strong title={artifact.name}>{artifact.name}</strong>
-              <small title={provenanceLabel(artifact)}>{provenanceLabel(artifact)}</small>
+      {resultNotice && (
+        <p className="chef-result-cluster__notice" role="status">{resultNotice}</p>
+      )}
+      {visibleArtifacts.map((artifact, index) => {
+        const handoff = artifactHandoff(artifact);
+        const copyState = runCopyState[artifact.id];
+        return (
+          <article
+            key={`${artifact.id}:${artifact.version}`}
+            className="chef-result-card"
+            data-result-slot={SPATIAL_RESULT_SLOTS[index]}
+            style={{ "--chef-result-index": index } as CSSProperties}
+          >
+            <button className="chef-result-card__inspect" type="button" onClick={() => inspectArtifact(artifact)} aria-label={`Inspect ${artifact.name}`}>
+              <div className="chef-result-card__icon" aria-hidden="true">{artifactIcon(artifact.type)}</div>
+              <div className="chef-result-card__body">
+                <span className="chef-result-card__eyebrow">{artifactLabel(artifact.type)}</span>
+                <strong title={artifact.name}>{artifact.name}</strong>
+                {handoff.summary && <small title={handoff.summary}>{handoff.summary}</small>}
+                <small title={provenanceLabel(artifact)}>{provenanceLabel(artifact)}</small>
+                {handoff.runCommand && <small title={handoff.runCommand}>Run: <code>{handoff.runCommand}</code></small>}
+                {handoff.verifiedBy && <small title={handoff.verifiedBy}>Verified: {handoff.verifiedBy}</small>}
+              </div>
+            </button>
+            <div className="chef-result-card__actions">
+              {handoff.runCommand && (
+                <button
+                  className="chef-result-card__action chef-result-card__copy"
+                  type="button"
+                  onClick={() => void copyArtifactRunCommand(artifact.id, handoff.runCommand!)}
+                  title={copyState === "copied" ? "Run command copied" : copyState === "failed" ? "Clipboard write failed" : copyState === "unavailable" ? "Clipboard unavailable" : "Copy run command"}
+                  aria-label={copyState === "copied" ? `Copied run command for ${artifact.name}` : `Copy run command for ${artifact.name}`}
+                >
+                  {copyState === "copied" ? "✓" : copyState === "failed" || copyState === "unavailable" ? "!" : "⧉"}
+                </button>
+              )}
+              {canDownload(artifact) ? (
+                <a
+                  className="chef-result-card__action"
+                  href={`/api/artifacts/${encodeURIComponent(artifact.id)}/download`}
+                  download
+                  title={`Download ${artifact.name}`}
+                >
+                  ↓
+                </a>
+              ) : !handoff.runCommand ? (
+                <span className="chef-result-card__ready" title="Stored in Chef">✓</span>
+              ) : null}
             </div>
-          </button>
-          {canDownload(artifact) ? (
-            <a
-              className="chef-result-card__action"
-              href={`/api/artifacts/${encodeURIComponent(artifact.id)}/download`}
-              download
-              title={`Download ${artifact.name}`}
-            >
-              ↓
-            </a>
-          ) : (
-            <span className="chef-result-card__ready" title="Stored in Chef">✓</span>
-          )}
-        </article>
-      ))}
+          </article>
+        );
+      })}
 
       {artifacts.length > MAX_VISIBLE_RESULTS && (
         <button

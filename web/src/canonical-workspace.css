@@ -1,0 +1,278 @@
+.chef-project-context {
+  position: fixed;
+  z-index: 42;
+  top: 76px;
+  left: 22px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  max-width: min(620px, calc(100vw - 380px));
+  padding: 10px 12px 10px 14px;
+  border: 1px solid rgba(113, 82, 70, 0.14);
+  border-radius: 16px;
+  background: rgba(255, 252, 249, 0.92);
+  box-shadow: 0 14px 34px rgba(80, 53, 44, 0.08);
+  backdrop-filter: blur(18px);
+  color: #3f312c;
+}
+
+.chef-project-context__copy {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.chef-project-context__eyebrow,
+.chef-live-activity__eyebrow {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #a08a82;
+}
+
+.chef-project-context__copy strong {
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chef-project-context__path {
+  overflow: hidden;
+  max-width: 380px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 10px;
+  color: #8f7770;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chef-project-context button {
+  flex: none;
+  border: 1px solid rgba(113, 82, 70, 0.14);
+  border-radius: 10px;
+  background: #fff;
+  padding: 7px 9px;
+  color: #6f554c;
+  font-size: 10px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.chef-project-context button:hover:not(:disabled) {
+  border-color: rgba(210, 75, 54, 0.32);
+  color: #b64231;
+}
+
+.chef-project-context button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.chef-project-context__error {
+  position: absolute;
+  top: calc(100% + 7px);
+  left: 12px;
+  max-width: 380px;
+  border-radius: 9px;
+  background: #fff2ed;
+  padding: 7px 9px;
+  color: #a33f31;
+  font-size: 10px;
+}
+
+.chef-live-activity {
+  position: fixed;
+  z-index: 41;
+  top: 132px;
+  right: 22px;
+  width: min(310px, calc(100vw - 44px));
+  max-height: calc(100vh - 250px);
+  overflow: auto;
+  border: 1px solid rgba(113, 82, 70, 0.13);
+  border-radius: 20px;
+  background: rgba(255, 252, 249, 0.94);
+  box-shadow: 0 18px 50px rgba(80, 53, 44, 0.09);
+  padding: 16px;
+  color: #46352f;
+  backdrop-filter: blur(18px);
+}
+
+.chef-live-activity header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.chef-live-activity header > div {
+  display: grid;
+  gap: 2px;
+}
+
+.chef-live-activity header strong {
+  font-size: 13px;
+}
+
+.chef-live-activity header > i {
+  width: 9px;
+  height: 9px;
+  flex: none;
+  border-radius: 999px;
+  background: #e1533d;
+  box-shadow: 0 0 0 5px rgba(225, 83, 61, 0.09);
+}
+
+.chef-live-activity header > i[data-status="completed"] {
+  background: #3f9b73;
+  box-shadow: 0 0 0 5px rgba(63, 155, 115, 0.09);
+}
+
+.chef-live-activity header > i[data-status="failed"],
+.chef-live-activity header > i[data-status="blocked"] {
+  background: #c54639;
+  box-shadow: 0 0 0 5px rgba(197, 70, 57, 0.1);
+}
+
+.chef-live-activity__goal {
+  margin: 11px 0 0;
+  color: #766059;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.chef-live-activity__workers {
+  display: grid;
+  gap: 7px;
+  margin-top: 14px;
+}
+
+.chef-live-worker {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid rgba(113, 82, 70, 0.09);
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.68);
+  padding: 8px 9px;
+}
+
+.chef-live-worker__mark {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border-radius: 9px;
+  background: #fff1ec;
+  color: #d84f39;
+  font-size: 12px;
+}
+
+.chef-live-worker__copy {
+  display: grid;
+  min-width: 0;
+}
+
+.chef-live-worker__copy strong,
+.chef-live-worker__copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chef-live-worker__copy strong {
+  color: #4c3932;
+  font-size: 10px;
+}
+
+.chef-live-worker__copy small {
+  margin-top: 1px;
+  color: #9a827a;
+  font-size: 9px;
+}
+
+.chef-live-worker__status {
+  color: #9a8178;
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.chef-live-worker[data-status="running"] .chef-live-worker__status,
+.chef-live-worker[data-status="spawning"] .chef-live-worker__status,
+.chef-live-worker[data-status="assigned"] .chef-live-worker__status {
+  color: #d24c37;
+}
+
+.chef-live-worker[data-status="completed"] .chef-live-worker__status {
+  color: #398364;
+}
+
+.chef-live-worker[data-status="failed"] .chef-live-worker__status,
+.chef-live-worker[data-status="blocked"] .chef-live-worker__status {
+  color: #b53d31;
+}
+
+.chef-live-activity__feed {
+  display: grid;
+  gap: 6px;
+  margin-top: 14px;
+  border-top: 1px solid rgba(113, 82, 70, 0.09);
+  padding-top: 12px;
+}
+
+.chef-live-activity__feed > span {
+  color: #a08a82;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.chef-live-activity__feed p {
+  margin: 0;
+  color: #79625b;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.workbench-depth-controls.chef-canonical-depth {
+  left: auto;
+  right: 20px;
+  width: auto;
+}
+
+.workbench-depth-controls.chef-canonical-depth .workbench-depth-controls__runtime {
+  min-width: 132px;
+}
+
+@media (max-width: 980px) {
+  .chef-project-context {
+    max-width: calc(100vw - 44px);
+  }
+
+  .chef-live-activity {
+    top: auto;
+    bottom: 98px;
+    max-height: 230px;
+  }
+}
+
+@media (max-width: 680px) {
+  .chef-project-context {
+    right: 14px;
+    left: 14px;
+    max-width: none;
+  }
+
+  .chef-project-context__path {
+    max-width: 48vw;
+  }
+
+  .chef-live-activity {
+    right: 14px;
+    left: 14px;
+    width: auto;
+  }
+}

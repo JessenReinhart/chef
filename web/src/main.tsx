@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { ContextScopeFeature } from "./ContextScopeFeature";
@@ -6,65 +6,52 @@ import { CanvasNodeDeleteFeature } from "./CanvasNodeDeleteFeature";
 import { LivingWorkspaceFeature } from "./LivingWorkspaceFeature";
 import { LivingArtifactFeature } from "./LivingArtifactFeature";
 import { MissionArtifactsFeature } from "./MissionArtifactsFeature";
-import { HomeMissionArtifacts } from "./HomeMissionArtifacts";
-import { HomePriorMissionResults } from "./HomePriorMissionResults";
 import { SetupChrome } from "./SetupChrome";
 import { DecisionLibraryFeature } from "./DecisionLibraryFeature";
 import { ChannelRoomsFeature } from "./ChannelRoomsFeature";
 import { AgentContextInspector } from "./AgentContextInspector";
-import { IntentHome } from "./IntentHome";
-import { IntentOnboarding } from "./IntentOnboarding";
+import { WorkspaceContextBar } from "./WorkspaceContextBar";
+import { MissionActivityRail } from "./MissionActivityRail";
+import {
+  nextWorkspaceDepth,
+  readWorkspaceDepth,
+  workspaceSurfacePlan,
+  type WorkspaceDepth,
+} from "./canonicalWorkspaceModel";
 import "./index.css";
 import "./visual-audit.css";
 import "./advanced-workspace.css";
 import "./workbench-depth.css";
+import "./canonical-workspace.css";
 
-type ProductSurface = "home" | "workbench";
-
-type WorkbenchDepth = "simple" | "power";
+function persistedDepth(): WorkspaceDepth {
+  return readWorkspaceDepth(localStorage.getItem("chef:view-mode"));
+}
 
 function ChefRoot() {
-  const [surface, setSurface] = useState<ProductSurface>(() => localStorage.getItem("chef:surface") === "workbench" ? "workbench" : "home");
-  const [viewMode, setViewMode] = useState<WorkbenchDepth>(() => localStorage.getItem("chef:view-mode") === "power" ? "power" : "simple");
+  const [viewMode, setViewMode] = useState<WorkspaceDepth>(persistedDepth);
 
-  const openWorkbench = () => {
-    localStorage.setItem("chef:surface", "workbench");
-    setSurface("workbench");
-  };
-
-  const openHome = () => {
-    localStorage.setItem("chef:surface", "home");
-    setSurface("home");
-  };
+  // The Living Workspace still exposes its own Advanced action. Keep both
+  // controls on the same persisted depth without mounting both streaming trees.
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const persisted = persistedDepth();
+      setViewMode((current) => current === persisted ? current : persisted);
+    }, 200);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const toggleRuntimeDetails = () => {
-    const next: WorkbenchDepth = viewMode === "power" ? "simple" : "power";
+    const next = nextWorkspaceDepth(viewMode);
     localStorage.setItem("chef:view-mode", next);
     setViewMode(next);
   };
 
-  if (surface === "home") {
-    return <>
-      <IntentHome onOpenWorkbench={openWorkbench} />
-      <HomeMissionArtifacts />
-      <HomePriorMissionResults />
-      <SetupChrome surface="home" />
-      <IntentOnboarding />
-    </>;
-  }
-
+  const plan = workspaceSurfacePlan(viewMode);
   const runtimeDetailsVisible = viewMode === "power";
 
   return <>
-    <div className="workbench-depth-controls" aria-label="Workbench navigation and depth">
-      <button
-        type="button"
-        onClick={openHome}
-        className="workbench-depth-controls__home"
-        aria-label="Return to Chef home"
-      >
-        ← Home
-      </button>
+    <div className="workbench-depth-controls chef-canonical-depth" aria-label="Workspace depth">
       <button
         type="button"
         onClick={toggleRuntimeDetails}
@@ -79,21 +66,18 @@ function ChefRoot() {
       </button>
     </div>
 
-    {/* Mount only the active depth. Hidden power-mode trees retain EventSource
-        connections even when CSS hides them, which can exhaust the browser's
-        HTTP/1.1 per-origin connection pool and queue simple-mode POSTs forever. */}
-    {runtimeDetailsVisible ? <>
-      <App key={viewMode} />
-      <ContextScopeFeature />
-      <CanvasNodeDeleteFeature />
-      <DecisionLibraryFeature />
-      <MissionArtifactsFeature />
-      <ChannelRoomsFeature />
-      <AgentContextInspector />
-    </> : <>
-      <LivingWorkspaceFeature />
-      <LivingArtifactFeature />
-    </>}
+    {plan.runtimeApp && <App key={viewMode} />}
+    {plan.contextScopes && <ContextScopeFeature />}
+    {plan.canvasDeletion && <CanvasNodeDeleteFeature />}
+    {plan.decisions && <DecisionLibraryFeature />}
+    {plan.missionArtifacts && <MissionArtifactsFeature />}
+    {plan.rooms && <ChannelRoomsFeature />}
+    {plan.agentContext && <AgentContextInspector />}
+
+    {plan.projectContext && <WorkspaceContextBar />}
+    {plan.livingWorkspace && <LivingWorkspaceFeature />}
+    {plan.missionActivity && <MissionActivityRail />}
+    {plan.livingArtifacts && <LivingArtifactFeature />}
 
     <SetupChrome surface="workbench" />
   </>;
