@@ -83,7 +83,7 @@ function ChefRoot() {
         connections even when CSS hides them, which can exhaust the browser's
         HTTP/1.1 per-origin connection pool and queue simple-mode POSTs forever. */}
     {runtimeDetailsVisible ? <>
-      <App key="power" />
+      <App key={viewMode} />
       <ContextScopeFeature />
       <CanvasNodeDeleteFeature />
       <DecisionLibraryFeature />
