@@ -1,4 +1,4 @@
-import { summarizeMissionProgressEvent } from "./missionProgress.ts";
+import { deriveMissionHeartbeat, summarizeMissionProgressEvent } from "./missionProgress.ts";
 import type { HarnessInfo, UiMission, UiRuntimeEvent, UiTask } from "./types.ts";
 
 export interface MissionActivitySnapshot {
@@ -89,6 +89,7 @@ export function missionActivityState(mission: UiMission | null): string {
 export function projectMissionActivity(
   snapshot: MissionActivitySnapshot,
   harnesses: HarnessInfo[],
+  now = Date.now(),
 ): MissionActivityProjection | null {
   const mission = [...snapshot.missions].sort((a, b) => b.createdAt - a.createdAt)[0] ?? null;
   if (!mission) return null;
@@ -110,6 +111,12 @@ export function projectMissionActivity(
 
   const feed: string[] = [];
   const seen = new Set<string>();
+  const heartbeat = deriveMissionHeartbeat(snapshot.events, mission.id, scoped.ownedTaskIds, now);
+  if (heartbeat) {
+    feed.push(heartbeat.text);
+    seen.add(heartbeat.text);
+  }
+
   for (const event of scoped.events) {
     const task = event.taskId ? tasksById.get(event.taskId) : undefined;
     const worker = task?.assignedTo ? (harnessNames.get(task.assignedTo) ?? task.assignedTo) : "Chef";
