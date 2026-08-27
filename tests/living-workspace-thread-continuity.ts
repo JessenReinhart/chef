@@ -1,4 +1,5 @@
 import { strict as assert } from "node:assert";
+import { Api } from "../web/src/api.ts";
 import { projectMissionActivity } from "../web/src/missionActivityProjection.ts";
 import {
   scopeStateToThread,
@@ -20,14 +21,9 @@ const mission = (id: string, threadId: string, taskId: string, status: UiMission
 
 const task = (id: string, status: UiTask["status"]): UiTask => ({
   id,
-  workspaceId: "workspace-1",
   title: `Task ${id}`,
   description: "thread continuity fixture",
   status,
-  priority: 1,
-  dependencies: [],
-  createdAt: 1,
-  updatedAt: 1,
 });
 
 const selectedMission = mission("mission-a", "thread-a", "task-a", "active", 100);
@@ -41,9 +37,9 @@ const state: ThreadScopedState = {
     { id: "approval-b", reason: "other thread", taskId: "task-b", status: "pending" },
   ],
   canvasNodes: [
-    { id: "helper", label: "Browser", nodeType: "runtime", kind: "tool", config: {}, position: { x: 0, y: 0 }, createdAt: 1, updatedAt: 1 },
-    { id: "node-a", taskId: "task-a", label: "Selected worker", nodeType: "runtime", kind: "agent", config: {}, position: { x: 0, y: 0 }, createdAt: 1, updatedAt: 1 },
-    { id: "node-b", taskId: "task-b", label: "Other worker", nodeType: "runtime", kind: "agent", config: {}, position: { x: 0, y: 0 }, createdAt: 1, updatedAt: 1 },
+    { id: "helper", workspaceId: "workspace-1", taskId: null, label: "Browser", nodeType: "proxy", kind: "tool", harnessId: null, position: { x: 0, y: 0 }, updatedAt: 1 },
+    { id: "node-a", workspaceId: "workspace-1", taskId: "task-a", label: "Selected worker", nodeType: "proxy", kind: "agent", harnessId: "claude-code", position: { x: 0, y: 0 }, updatedAt: 1 },
+    { id: "node-b", workspaceId: "workspace-1", taskId: "task-b", label: "Other worker", nodeType: "proxy", kind: "agent", harnessId: "claude-code", position: { x: 0, y: 0 }, updatedAt: 1 },
   ],
   canvasEdges: [],
   events: [],
@@ -66,4 +62,56 @@ assert.equal(threadChatPath("thread/a b"), "/api/threads/thread%2Fa%20b/chat", "
 assert.equal(threadChatPath(null), "/api/chat", "legacy project chat remains available when no Thread has been selected");
 assert.equal(scopeStateToThread(state, null), state, "Power/legacy project-level views must keep the full runtime state when no Thread scope is requested");
 
-console.log("living-workspace-thread-continuity: ok — Simple Mode submission, Mission activity, workers, approvals, and results stay in the selected Thread lineage");
+const originalFetch = globalThis.fetch;
+const originalLocalStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+const storage = new Map<string, string>([
+  ["chef:view-mode", "simple"],
+  ["chef:selected-thread", "thread-a"],
+]);
+const requested: string[] = [];
+
+Object.defineProperty(globalThis, "localStorage", {
+  configurable: true,
+  value: {
+    getItem: (key: string) => storage.get(key) ?? null,
+    setItem: (key: string, value: string) => storage.set(key, value),
+    removeItem: (key: string) => storage.delete(key),
+  },
+});
+
+globalThis.fetch = async (input) => {
+  const url = String(input);
+  requested.push(url);
+  const body = url.endsWith("/api/state")
+    ? state
+    : url.endsWith("/api/threads/thread-a/messages")
+      ? []
+      : { ok: true, taskIds: [], report: "Work accepted" };
+  return new Response(JSON.stringify({ ok: true, data: body }), {
+    status: 200,
+    headers: { "content-type": "application/json" },
+  });
+};
+
+try {
+  const client = new Api("http://chef.test");
+  const chat = await client.chat("Create a todo app");
+  assert.equal(chat.ok, true);
+  assert.ok(requested.includes("http://chef.test/api/threads/thread-a/chat"), "the actual Simple Mode API client must submit to the selected Thread, not project-level /api/chat");
+
+  await client.chatMessages();
+  assert.ok(requested.includes("http://chef.test/api/threads/thread-a/messages"), "the actual Simple Mode API client must read assistant history from the selected Thread");
+
+  const scopedState = await client.stateRaw();
+  assert.deepEqual(scopedState.missions?.map((item) => item.id), ["mission-a"], "the API state consumed by Living Workspace must exclude another Thread's newer Mission");
+
+  storage.set("chef:view-mode", "power");
+  const powerState = await client.stateRaw();
+  assert.deepEqual(powerState.missions?.map((item) => item.id), ["mission-a", "mission-b"], "Power Mode must retain project-wide runtime visibility");
+} finally {
+  globalThis.fetch = originalFetch;
+  if (originalLocalStorage) Object.defineProperty(globalThis, "localStorage", originalLocalStorage);
+  else delete (globalThis as { localStorage?: unknown }).localStorage;
+}
+
+console.log("living-workspace-thread-continuity: ok — Simple Mode submission, history, Mission activity, workers, approvals, and results stay in the selected Thread lineage");
