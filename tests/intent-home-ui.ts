@@ -92,7 +92,7 @@ const harnesses: HarnessInfo[] = [
   { id: "claude-code", name: "Claude Code", type: "specialized", available: true },
 ];
 
-const activity = projectMissionActivity({ missions: [mission], tasks: [task], events }, harnesses);
+const activity = projectMissionActivity({ missions: [mission], tasks: [task], events }, harnesses, 120);
 assert.ok(activity, "an active Mission should have a visible activity projection");
 assert.equal(activity.mission.goal, "Create a todo app");
 assert.equal(activity.missionState, "Working");
@@ -114,23 +114,41 @@ const planningMission: UiMission = {
   createdAt: 200,
   updatedAt: 200,
 };
+const planningEvents: UiRuntimeEvent[] = [{
+  id: "event-planning",
+  seq: 5,
+  timestamp: 200,
+  source: { type: "orchestrator", id: "orchestrator" },
+  type: "orchestrator.plan.started",
+  payload: { missionId: "mission-planning" },
+  correlationId: "mission-planning",
+}];
 const planningActivity = projectMissionActivity({
   missions: [planningMission],
   tasks: [],
-  events: [{
-    id: "event-planning",
-    seq: 5,
-    timestamp: 200,
-    source: { type: "orchestrator", id: "orchestrator" },
-    type: "orchestrator.plan.started",
-    payload: { missionId: "mission-planning" },
-    correlationId: "mission-planning",
-  }],
-}, harnesses);
+  events: planningEvents,
+}, harnesses, 200);
 assert.ok(planningActivity, "pre-worker planning should still have visible Mission activity");
 assert.deepEqual(planningActivity.feed, [
   "Chef is deciding how to approach this Mission.",
 ], "Mission-correlated planning must be visible before any Task or Session exists");
+
+const slowPlanningActivity = projectMissionActivity({
+  missions: [planningMission],
+  tasks: [],
+  events: planningEvents,
+}, harnesses, 10_500);
+assert.ok(slowPlanningActivity, "slow planning should keep the Living Workspace visibly alive");
+assert.equal(
+  slowPlanningActivity.feed[0],
+  "Chef is still planning. Last runtime activity was 10 seconds ago.",
+  "the canonical workspace should surface the durable Mission heartbeat after ten seconds of silence",
+);
+assert.equal(
+  slowPlanningActivity.feed[1],
+  "Chef is deciding how to approach this Mission.",
+  "heartbeat feedback should supplement rather than replace the last meaningful runtime event",
+);
 
 const startupMission: UiMission = {
   ...mission,
@@ -162,7 +180,7 @@ const startupActivity = projectMissionActivity({
       taskId: "task-1",
     },
   ],
-}, harnesses);
+}, harnesses, 305);
 assert.ok(startupActivity, "startup activity should recover durable Task ownership from the Mission plan");
 assert.deepEqual(startupActivity.workers.map((worker) => [worker.name, worker.title, worker.state]), [
   ["Claude Code", "Build the app", "Working"],
