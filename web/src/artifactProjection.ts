@@ -57,6 +57,20 @@ export function artifactsForCurrentMission(
   return artifactsForMission(artifacts, scope.missionId, scope.taskIds);
 }
 
+export function missingResultHandoffNotice(missionStatus: string | undefined, resultCount: number): string | null {
+  if (resultCount > 0 || !missionStatus) return null;
+  if (missionStatus === "completed") {
+    return "Work is marked complete, but Chef did not publish a durable result for this Mission.";
+  }
+  if (missionStatus === "failed" || missionStatus === "blocked" || missionStatus === "waiting_for_approval") {
+    return "No durable result is available because this Mission needs attention.";
+  }
+  if (missionStatus === "cancelled") {
+    return "No durable result is available because this Mission was stopped.";
+  }
+  return null;
+}
+
 export function canDownload(artifact: LivingArtifact): boolean {
   return artifact.uri.startsWith("file:");
 }
