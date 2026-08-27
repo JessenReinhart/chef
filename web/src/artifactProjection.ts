@@ -19,6 +19,8 @@ export type ArtifactHandoff = {
   verifiedBy: string | null;
 };
 
+export type RunCommandCopyResult = "copied" | "unavailable" | "failed";
+
 export const MAX_VISIBLE_RESULTS = 4;
 export const MAX_SHELF_RESULTS = 24;
 export const SPATIAL_RESULT_SLOTS = ["near", "upper", "outer", "lower"] as const;
@@ -70,6 +72,19 @@ export function artifactHandoff(artifact: LivingArtifact): ArtifactHandoff {
     runCommand: metadataText(artifact.metadata, ["run", "runCommand"]),
     verifiedBy: metadataText(artifact.metadata, ["verifiedBy", "verification"]),
   };
+}
+
+export async function copyRunCommand(
+  runCommand: string,
+  writeText?: (text: string) => Promise<void>,
+): Promise<RunCommandCopyResult> {
+  if (!writeText) return "unavailable";
+  try {
+    await writeText(runCommand);
+    return "copied";
+  } catch {
+    return "failed";
+  }
 }
 
 export function previewText(artifact: LivingArtifact): string | null {
