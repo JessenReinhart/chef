@@ -8,12 +8,14 @@ import {
   artifactHandoff,
   artifactsForMission,
   canDownload,
+  copyRunCommand,
   metadataRows,
   previewText,
   provenanceLabel,
   recentArtifacts,
   type ArtifactType,
   type LivingArtifact,
+  type RunCommandCopyResult,
 } from "./artifactProjection";
 import { projectMissionActivity } from "./missionActivityProjection";
 import "./living-artifact.css";
@@ -50,6 +52,7 @@ export function LivingArtifactFeature() {
   const [target, setTarget] = useState<Element | null>(null);
   const [shelfOpen, setShelfOpen] = useState(false);
   const [selectedArtifactId, setSelectedArtifactId] = useState<string | null>(null);
+  const [runCopyState, setRunCopyState] = useState<Record<string, RunCommandCopyResult>>({});
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -63,6 +66,7 @@ export function LivingArtifactFeature() {
       setTarget(null);
       setShelfOpen(false);
       setSelectedArtifactId(null);
+      setRunCopyState({});
       return;
     }
     const findTarget = () => setTarget(document.querySelector(".chef-living-stage"));
@@ -139,6 +143,14 @@ export function LivingArtifactFeature() {
     setSelectedArtifactId(artifact.id);
   };
 
+  const copyArtifactRunCommand = async (artifactId: string, runCommand: string) => {
+    const writer = navigator.clipboard?.writeText
+      ? navigator.clipboard.writeText.bind(navigator.clipboard)
+      : undefined;
+    const result = await copyRunCommand(runCommand, writer);
+    setRunCopyState((current) => ({ ...current, [artifactId]: result }));
+  };
+
   return createPortal(
     <section className="chef-result-cluster" aria-label="Workspace results">
       <div className="chef-result-cluster__label">
@@ -147,6 +159,7 @@ export function LivingArtifactFeature() {
       </div>
       {visibleArtifacts.map((artifact, index) => {
         const handoff = artifactHandoff(artifact);
+        const copyState = runCopyState[artifact.id];
         return (
           <article
             key={`${artifact.id}:${artifact.version}`}
@@ -165,18 +178,31 @@ export function LivingArtifactFeature() {
                 {handoff.verifiedBy && <small title={handoff.verifiedBy}>Verified: {handoff.verifiedBy}</small>}
               </div>
             </button>
-            {canDownload(artifact) ? (
-              <a
-                className="chef-result-card__action"
-                href={`/api/artifacts/${encodeURIComponent(artifact.id)}/download`}
-                download
-                title={`Download ${artifact.name}`}
-              >
-                ↓
-              </a>
-            ) : (
-              <span className="chef-result-card__ready" title="Stored in Chef">✓</span>
-            )}
+            <div className="chef-result-card__actions">
+              {handoff.runCommand && (
+                <button
+                  className="chef-result-card__action chef-result-card__copy"
+                  type="button"
+                  onClick={() => void copyArtifactRunCommand(artifact.id, handoff.runCommand!)}
+                  title={copyState === "copied" ? "Run command copied" : copyState === "failed" ? "Clipboard write failed" : copyState === "unavailable" ? "Clipboard unavailable" : "Copy run command"}
+                  aria-label={copyState === "copied" ? `Copied run command for ${artifact.name}` : `Copy run command for ${artifact.name}`}
+                >
+                  {copyState === "copied" ? "✓" : copyState === "failed" || copyState === "unavailable" ? "!" : "⧉"}
+                </button>
+              )}
+              {canDownload(artifact) ? (
+                <a
+                  className="chef-result-card__action"
+                  href={`/api/artifacts/${encodeURIComponent(artifact.id)}/download`}
+                  download
+                  title={`Download ${artifact.name}`}
+                >
+                  ↓
+                </a>
+              ) : !handoff.runCommand ? (
+                <span className="chef-result-card__ready" title="Stored in Chef">✓</span>
+              ) : null}
+            </div>
           </article>
         );
       })}
