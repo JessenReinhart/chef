@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { ContextScopeFeature } from "./ContextScopeFeature";
@@ -6,36 +6,37 @@ import { CanvasNodeDeleteFeature } from "./CanvasNodeDeleteFeature";
 import { LivingWorkspaceFeature } from "./LivingWorkspaceFeature";
 import { LivingArtifactFeature } from "./LivingArtifactFeature";
 import { MissionArtifactsFeature } from "./MissionArtifactsFeature";
-import { HomeMissionArtifacts } from "./HomeMissionArtifacts";
-import { HomePriorMissionResults } from "./HomePriorMissionResults";
 import { SetupChrome } from "./SetupChrome";
 import { DecisionLibraryFeature } from "./DecisionLibraryFeature";
 import { ChannelRoomsFeature } from "./ChannelRoomsFeature";
 import { AgentContextInspector } from "./AgentContextInspector";
-import { IntentHome } from "./IntentHome";
-import { IntentOnboarding } from "./IntentOnboarding";
+import { WorkspaceContextBar } from "./WorkspaceContextBar";
+import { MissionActivityRail } from "./MissionActivityRail";
 import "./index.css";
 import "./visual-audit.css";
 import "./advanced-workspace.css";
 import "./workbench-depth.css";
-
-type ProductSurface = "home" | "workbench";
+import "./canonical-workspace.css";
 
 type WorkbenchDepth = "simple" | "power";
 
+function readWorkbenchDepth(): WorkbenchDepth {
+  return localStorage.getItem("chef:view-mode") === "power" ? "power" : "simple";
+}
+
 function ChefRoot() {
-  const [surface, setSurface] = useState<ProductSurface>(() => localStorage.getItem("chef:surface") === "workbench" ? "workbench" : "home");
-  const [viewMode, setViewMode] = useState<WorkbenchDepth>(() => localStorage.getItem("chef:view-mode") === "power" ? "power" : "simple");
+  const [viewMode, setViewMode] = useState<WorkbenchDepth>(readWorkbenchDepth);
 
-  const openWorkbench = () => {
-    localStorage.setItem("chef:surface", "workbench");
-    setSurface("workbench");
-  };
-
-  const openHome = () => {
-    localStorage.setItem("chef:surface", "home");
-    setSurface("home");
-  };
+  // LivingWorkspaceFeature still exposes its own Advanced action for backwards
+  // compatibility. Keep the root synchronized with that persisted depth so the
+  // same-window action actually opens runtime detail instead of hiding itself.
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const persisted = readWorkbenchDepth();
+      setViewMode((current) => current === persisted ? current : persisted);
+    }, 200);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const toggleRuntimeDetails = () => {
     const next: WorkbenchDepth = viewMode === "power" ? "simple" : "power";
@@ -43,28 +44,10 @@ function ChefRoot() {
     setViewMode(next);
   };
 
-  if (surface === "home") {
-    return <>
-      <IntentHome onOpenWorkbench={openWorkbench} />
-      <HomeMissionArtifacts />
-      <HomePriorMissionResults />
-      <SetupChrome surface="home" />
-      <IntentOnboarding />
-    </>;
-  }
-
   const runtimeDetailsVisible = viewMode === "power";
 
   return <>
-    <div className="workbench-depth-controls" aria-label="Workbench navigation and depth">
-      <button
-        type="button"
-        onClick={openHome}
-        className="workbench-depth-controls__home"
-        aria-label="Return to Chef home"
-      >
-        ← Home
-      </button>
+    <div className="workbench-depth-controls chef-canonical-depth" aria-label="Workspace depth">
       <button
         type="button"
         onClick={toggleRuntimeDetails}
@@ -79,9 +62,9 @@ function ChefRoot() {
       </button>
     </div>
 
-    {/* Mount only the active depth. Hidden power-mode trees retain EventSource
-        connections even when CSS hides them, which can exhaust the browser's
-        HTTP/1.1 per-origin connection pool and queue simple-mode POSTs forever. */}
+    {/* Chef has one canonical product surface: the Living Workspace. Runtime
+        detail is progressive disclosure, not a second homepage. Mount only the
+        active depth so hidden EventSource trees cannot starve browser requests. */}
     {runtimeDetailsVisible ? <>
       <App key={viewMode} />
       <ContextScopeFeature />
@@ -91,7 +74,9 @@ function ChefRoot() {
       <ChannelRoomsFeature />
       <AgentContextInspector />
     </> : <>
+      <WorkspaceContextBar />
       <LivingWorkspaceFeature />
+      <MissionActivityRail />
       <LivingArtifactFeature />
     </>}
 
