@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-08-28
+
+- **Chef now keeps the normal workflow inside one Living Workspace (#237):** The selected project, task progress, worker activity, results, run instructions, and verification details now stay together in the main workspace instead of competing across separate home/workbench surfaces. Results are tied to the current Mission so old artifacts are not presented as the latest task output, and advanced runtime details remain available when needed.
+
 ## 2026-08-26
 
 - **Power Mode now explains what Chef is doing before a worker starts (#230):** Planning diagnostics now show when the decision provider starts, whether Chef chose a single worker or a coordinated plan, and why planning ended or was interrupted. This makes the pre-worker “Preparing” phase much easier to inspect without guessing.
