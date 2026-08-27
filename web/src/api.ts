@@ -321,7 +321,7 @@ export class Api {
   }
 
   async interruptSession(sessionId: string): Promise<void> {
-    await this.request("/api/sessions/interrupt", { method: "POST", body: JSON.stringify({ sessionId, data: "" }) });
+    await this.request("/api/sessions/interrupt", { method: "POST", body: JSON.stringify({ sessionId }) });
   }
 
   async sendPeerMessage(sessionId: string, from: string, text: string): Promise<void> {
