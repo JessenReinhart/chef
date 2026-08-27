@@ -10,6 +10,7 @@ import {
   canDownload,
   copyRunCommand,
   metadataRows,
+  missingResultHandoffNotice,
   previewText,
   provenanceLabel,
   recentArtifacts,
@@ -43,7 +44,7 @@ function artifactLabel(type: ArtifactType): string {
   }
 }
 
-type MissionResultScope = { missionId: string; taskIds: string[] } | null;
+type MissionResultScope = { missionId: string; taskIds: string[]; status: string } | null;
 
 export function LivingArtifactFeature() {
   const [enabled, setEnabled] = useState(() => localStorage.getItem("chef:view-mode") !== "power");
@@ -95,7 +96,11 @@ export function LivingArtifactFeature() {
         tasks: state.tasks,
         events: state.events,
       }, []);
-      setMissionScope(activity ? { missionId: activity.mission.id, taskIds: activity.taskIds } : null);
+      setMissionScope(activity ? {
+        missionId: activity.mission.id,
+        taskIds: activity.taskIds,
+        status: activity.mission.status,
+      } : null);
     } catch {
       // Keep the previous authoritative scope rather than guessing from artifact chronology.
     }
@@ -123,6 +128,7 @@ export function LivingArtifactFeature() {
     () => recentArtifacts(currentMissionArtifacts, MAX_VISIBLE_RESULTS),
     [currentMissionArtifacts],
   );
+  const resultNotice = missingResultHandoffNotice(missionScope?.status, currentMissionArtifacts.length);
   const shelfArtifacts = useMemo(
     () => recentArtifacts(artifacts, MAX_SHELF_RESULTS),
     [artifacts],
@@ -132,7 +138,7 @@ export function LivingArtifactFeature() {
     [artifacts, selectedArtifactId],
   );
 
-  if (!enabled || !target || visibleArtifacts.length === 0) return null;
+  if (!enabled || !target || (visibleArtifacts.length === 0 && !resultNotice)) return null;
 
   const inspectArtifact = (artifact: LivingArtifact) => {
     setShelfOpen(true);
@@ -153,6 +159,9 @@ export function LivingArtifactFeature() {
         <span>Results</span>
         <small>{currentMissionArtifacts.length}</small>
       </div>
+      {resultNotice && (
+        <p className="chef-result-cluster__notice" role="status">{resultNotice}</p>
+      )}
       {visibleArtifacts.map((artifact, index) => {
         const handoff = artifactHandoff(artifact);
         const copyState = runCopyState[artifact.id];
