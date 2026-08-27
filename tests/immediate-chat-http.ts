@@ -11,6 +11,7 @@ import { createImmediateChatServer } from "../src/server/immediate-chat-http.ts"
 
 const ACK_BUDGET_MS = 1_000;
 const WORKER_STARTUP_BUDGET_MS = 1_500;
+const MISSION_COMPLETION_BUDGET_MS = 5_000;
 const POLL_MS = 20;
 
 async function waitForWorkerStartup(
@@ -155,13 +156,20 @@ async function runCanonicalWorkerStartupAcceptance(): Promise<void> {
     const snapshot = await chef.inspectState();
     const route = snapshot.events.find((event) =>
       event.type === "chat.plan.proposed"
-      && (event.payload as { missionId?: unknown; routingMode?: unknown }).missionId === missionId
+      && (event.payload as { missionId?: unknown }).missionId === missionId
     );
-    assert.ok(route, "canonical Living Workspace request must retain durable routing evidence");
+    assert.ok(route, "canonical Living Workspace request must retain durable routing evidence before worker startup");
+
+    const completionDeadline = Date.now() + MISSION_COMPLETION_BUDGET_MS;
+    while (Date.now() < completionDeadline) {
+      const status = chef.repository.getMission(missionId)?.status;
+      if (status === "completed" || status === "failed" || status === "cancelled") break;
+      await new Promise((resolve) => setTimeout(resolve, POLL_MS));
+    }
     assert.equal(
-      (route.payload as { routingMode?: unknown }).routingMode,
-      "single-worker",
-      "boring todo request should use the bounded single-worker route before worker startup",
+      chef.repository.getMission(missionId)?.status,
+      "completed",
+      "canonical background work should finish before the runtime is closed",
     );
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
