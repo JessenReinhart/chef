@@ -150,6 +150,18 @@ assert.equal(
   "heartbeat feedback should supplement rather than replace the last meaningful runtime event",
 );
 
+const completedPlanningActivity = projectMissionActivity({
+  missions: [{ ...planningMission, status: "completed", updatedAt: 10_500 }],
+  tasks: [],
+  events: planningEvents,
+}, harnesses, 10_500);
+assert.ok(completedPlanningActivity, "completed Missions should remain projectable from durable history");
+assert.equal(
+  completedPlanningActivity.feed.some((line) => line.startsWith("Chef is still")),
+  false,
+  "stale planning history must not produce a heartbeat after the authoritative Mission has terminated",
+);
+
 const startupMission: UiMission = {
   ...mission,
   id: "mission-startup",
