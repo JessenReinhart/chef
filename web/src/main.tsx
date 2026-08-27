@@ -78,16 +78,21 @@ function ChefRoot() {
         </span>
       </button>
     </div>
-    <App key={viewMode} />
-    <ContextScopeFeature />
-    <CanvasNodeDeleteFeature />
+
+    {runtimeDetailsVisible ? <>
+      <App key="power" />
+      <ContextScopeFeature />
+      <CanvasNodeDeleteFeature />
+      <DecisionLibraryFeature />
+      <MissionArtifactsFeature />
+      <ChannelRoomsFeature />
+      <AgentContextInspector />
+    </> : <>
+      <LivingWorkspaceFeature />
+      <LivingArtifactFeature />
+    </>}
+
     <SetupChrome surface="workbench" />
-    <DecisionLibraryFeature />
-    <LivingWorkspaceFeature />
-    <LivingArtifactFeature />
-    <MissionArtifactsFeature />
-    <ChannelRoomsFeature />
-    <AgentContextInspector />
   </>;
 }
 
