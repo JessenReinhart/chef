@@ -162,6 +162,32 @@ assert.equal(
   "stale planning history must not produce a heartbeat after the authoritative Mission has terminated",
 );
 
+const completedWithoutFeed = projectMissionActivity({
+  missions: [{ ...mission, id: "mission-complete", status: "completed", taskIds: [], createdAt: 250, updatedAt: 260 }],
+  tasks: [],
+  events: [],
+}, harnesses, 260);
+assert.ok(completedWithoutFeed, "a completed Mission should remain understandable even when no recent feed event is retained");
+assert.equal(completedWithoutFeed.missionState, "Done");
+assert.equal(
+  completedWithoutFeed.fallback,
+  "Work is complete. Results are available in this workspace.",
+  "completion fallback must not contradict the authoritative Done state",
+);
+
+const failedWithoutFeed = projectMissionActivity({
+  missions: [{ ...mission, id: "mission-failed", status: "failed", taskIds: [], createdAt: 260, updatedAt: 270 }],
+  tasks: [],
+  events: [],
+}, harnesses, 270);
+assert.ok(failedWithoutFeed, "a failed Mission should remain actionable when no recent feed event is retained");
+assert.equal(failedWithoutFeed.missionState, "Needs attention");
+assert.equal(
+  failedWithoutFeed.fallback,
+  "Work needs attention. Review the latest Mission update before continuing.",
+  "failure fallback must not claim work is still active",
+);
+
 const startupMission: UiMission = {
   ...mission,
   id: "mission-startup",
