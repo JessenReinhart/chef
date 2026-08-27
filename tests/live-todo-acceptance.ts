@@ -154,15 +154,7 @@ async function main(): Promise<void> {
     const threadId = createdThread.data?.id;
     assert.ok(threadId, "Created Thread must expose an id");
 
-    const request = [
-      "Create a todo app in this selected project.",
-      "Keep it focused and reliable.",
-      "Use only Node.js built-ins plus browser HTML/CSS/JavaScript so installation is not required.",
-      "Create package.json with an npm start script.",
-      "The server must listen on process.env.PORT and serve the todo UI from /.",
-      "The UI must let a user add a todo, mark it complete, and remove it.",
-      "Verify the app can start before you finish, then summarize what changed and how to run it.",
-    ].join(" ");
+    const request = "Create a todo app in this selected project using only Node.js built-ins and browser HTML/CSS/JavaScript, with package.json npm start, PORT support, and add/complete/remove controls. Verify it starts and summarize how to run it.";
 
     chatAbort = new AbortController();
     const responsePromise = fetch(`http://127.0.0.1:${apiPort}/api/threads/${encodeURIComponent(threadId)}/chat`, {
@@ -199,7 +191,12 @@ async function main(): Promise<void> {
     const taskIds = new Set(body.data!.taskIds!);
     const missionTasks = snapshot.tasks.filter((task) => taskIds.has(task.id));
     const missionSessions = snapshot.sessions.filter((session) => taskIds.has(session.taskId));
+    const singleWorkerRoutingEvent = snapshot.events.find((event) => {
+      if (event.type !== "orchestrator.plan.proposed" || !event.payload || typeof event.payload !== "object") return false;
+      return (event.payload as { routingMode?: unknown }).routingMode === "single-worker";
+    });
 
+    assert.ok(singleWorkerRoutingEvent, "Canonical todo request must durably record the single-worker route instead of paying a planner round-trip");
     assert.equal(missionTasks.length, taskIds.size, "Every returned task must exist in durable state");
     assert.ok(missionTasks.every((task) => task.status === "completed"), "Every Mission task must complete");
     assert.ok(missionSessions.some((session) => session.id === startedSession.id), "The bounded startup Session must remain in durable Mission state");
@@ -226,6 +223,7 @@ async function main(): Promise<void> {
     console.log(`live-todo-acceptance: ok (${chef.llmStatus.provider}/${chef.llmStatus.model}; worker: ${startedSession.agentId}; candidates: ${workers.map((worker) => worker.id).join(", ")})`);
     console.log(`Thread: ${threadId}`);
     console.log(`Worker startup: session=${startedSession.id} task=${startedSession.taskId} within ${startupBudgetMs}ms budget.`);
+    console.log("Routing: single-worker (durable orchestrator.plan.proposed evidence).");
     console.log(`Observed ${inFlightProgressEvents.length} in-flight Mission/Task/Session progress events.`);
     console.log(`Chef summary: ${body.data?.report ?? "(no report)"}`);
   } finally {
