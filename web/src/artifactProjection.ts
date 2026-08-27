@@ -19,6 +19,11 @@ export type ArtifactHandoff = {
   verifiedBy: string | null;
 };
 
+export type MissionArtifactScope = {
+  missionId: string;
+  taskIds: Iterable<string>;
+};
+
 export type RunCommandCopyResult = "copied" | "unavailable" | "failed";
 
 export const MAX_VISIBLE_RESULTS = 4;
@@ -42,6 +47,14 @@ export function artifactsForMission(
     if (artifact.taskId && ownedTaskIds.has(artifact.taskId)) return true;
     return artifact.metadata.missionId === missionId;
   });
+}
+
+export function artifactsForCurrentMission(
+  artifacts: LivingArtifact[],
+  scope: MissionArtifactScope | null | undefined,
+): LivingArtifact[] {
+  if (!scope) return [];
+  return artifactsForMission(artifacts, scope.missionId, scope.taskIds);
 }
 
 export function canDownload(artifact: LivingArtifact): boolean {
