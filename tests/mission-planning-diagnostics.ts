@@ -13,12 +13,22 @@ function event(type: string, payload: unknown): UiRuntimeEvent {
   };
 }
 
-const started = event("orchestrator.plan.started", { missionId: "mission-1" });
+const started = event("orchestrator.plan.started", {
+  missionId: "mission-1",
+  provider: "anthropic-single-worker-fast-path",
+});
 assert.equal(missionDiagnosticLabel(started), "Planning started");
 assert.equal(
   missionDiagnosticDetail(started),
+  "Decision provider anthropic-single-worker-fast-path started; no worker has been selected yet.",
+  "Power diagnostics must identify the active provider at the pre-worker planning boundary",
+);
+
+const startedWithoutProvider = event("orchestrator.plan.started", { missionId: "mission-legacy" });
+assert.equal(
+  missionDiagnosticDetail(startedWithoutProvider),
   "Decision provider call started; no worker has been selected yet.",
-  "Power diagnostics must explain the pre-worker planning boundary before a Task exists",
+  "Older durable planning events without provider metadata must remain readable",
 );
 
 const singleWorker = event("orchestrator.plan.proposed", {
