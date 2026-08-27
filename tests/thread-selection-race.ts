@@ -35,6 +35,22 @@ pending.get("thread-c")?.reject(new Error("stale Thread request failed"));
 assert.deepEqual(await latestSuccess, { current: true, messages: dMessages }, "the newest Thread history should remain authoritative");
 assert.deepEqual(await staleFailure, { current: false }, "a stale Thread failure must not surface over the latest selection");
 
+// Simple Mode uses the same loader for the conversational Chef note. A slow
+// response from the previously selected Thread must never overwrite the note
+// for the Thread the user switched to.
+const notePending = new Map<string, PendingLoad>();
+const noteHistory = createThreadHistoryLoader((threadId) => new Promise<ChatMessage[]>((resolve, reject) => {
+  notePending.set(threadId, { resolve, reject });
+}));
+const oldThreadNote = noteHistory.load("thread-old");
+const selectedThreadNote = noteHistory.load("thread-selected");
+const oldAssistant = [{ role: "assistant", content: "Old Thread result", timestamp: 5 }] as ChatMessage[];
+const selectedAssistant = [{ role: "assistant", content: "Selected Thread result", timestamp: 6 }] as ChatMessage[];
+notePending.get("thread-selected")?.resolve(selectedAssistant);
+notePending.get("thread-old")?.resolve(oldAssistant);
+assert.deepEqual(await selectedThreadNote, { current: true, messages: selectedAssistant }, "the selected Thread assistant note should stay authoritative");
+assert.deepEqual(await oldThreadNote, { current: false }, "a late assistant note from the previous Thread must be ignored");
+
 const snapshot = history.snapshot();
 history.invalidate();
 assert.equal(history.isCurrent(snapshot), false, "selection changes outside history loading should invalidate older requests");
