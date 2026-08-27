@@ -78,16 +78,24 @@ function ChefRoot() {
         </span>
       </button>
     </div>
-    <App key={viewMode} />
-    <ContextScopeFeature />
-    <CanvasNodeDeleteFeature />
+
+    {/* Mount only the active depth. Hidden power-mode trees retain EventSource
+        connections even when CSS hides them, which can exhaust the browser's
+        HTTP/1.1 per-origin connection pool and queue simple-mode POSTs forever. */}
+    {runtimeDetailsVisible ? <>
+      <App key={viewMode} />
+      <ContextScopeFeature />
+      <CanvasNodeDeleteFeature />
+      <DecisionLibraryFeature />
+      <MissionArtifactsFeature />
+      <ChannelRoomsFeature />
+      <AgentContextInspector />
+    </> : <>
+      <LivingWorkspaceFeature />
+      <LivingArtifactFeature />
+    </>}
+
     <SetupChrome surface="workbench" />
-    <DecisionLibraryFeature />
-    <LivingWorkspaceFeature />
-    <LivingArtifactFeature />
-    <MissionArtifactsFeature />
-    <ChannelRoomsFeature />
-    <AgentContextInspector />
   </>;
 }
 

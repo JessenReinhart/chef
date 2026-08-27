@@ -1,9 +1,8 @@
 /**
  * Chef P0 — Claude Code harness adapter (Phase 8)
  *
- * Binary detection (`claude`) + spawn config (flags, env, cwd). Execution
- * flows through the generic PTY harness; this adapter owns the launch
- * contract only.
+ * Binary detection (`claude`) + spawn config (env, cwd). Execution flows
+ * through the generic PTY harness; this adapter owns the launch contract only.
  */
 
 import { SpecializedCliHarness } from "./specialized.ts";
@@ -18,9 +17,10 @@ export class ClaudeCodeHarness extends SpecializedCliHarness {
       type: "claude-code",
       name: "Claude Code",
       binary,
-      flags: ["--no-telemetry"],
-      taskArgs: (prompt) => ["--no-telemetry", "-p", prompt],
-      env: { CLAUDE_CODE_DISABLE_TELEMETRY: "1" },
+      taskArgs: (prompt) => ["-p", prompt],
+      // Current Claude Code builds reject the old `--no-telemetry` flag.
+      // Keep the privacy intent through Claude Code's documented opt-out env.
+      env: { DISABLE_TELEMETRY: "1" },
       ...runtime,
     });
   }
