@@ -4,6 +4,7 @@ import {
   artifactHandoff,
   artifactsForMission,
   canDownload,
+  copyRunCommand,
   provenanceLabel,
   recentArtifacts,
   type LivingArtifact,
@@ -64,6 +65,25 @@ assert.deepEqual(
   },
   "the Living Workspace must preserve the canonical artifact contract for what changed, how to run it, and what verified it",
 );
+
+let copiedCommand = "";
+assert.equal(
+  await copyRunCommand("node /tmp/todo-app.mjs", async (command) => { copiedCommand = command; }),
+  "copied",
+  "a durable run command should be directly actionable from the result handoff",
+);
+assert.equal(copiedCommand, "node /tmp/todo-app.mjs", "copy action must preserve the exact worker-provided run command");
+assert.equal(
+  await copyRunCommand("npm start"),
+  "unavailable",
+  "the result handoff must report when clipboard support is unavailable instead of pretending the action succeeded",
+);
+assert.equal(
+  await copyRunCommand("npm start", async () => { throw new Error("clipboard denied"); }),
+  "failed",
+  "clipboard rejection must remain a visible failure state rather than a false success",
+);
+
 assert.deepEqual(
   artifactHandoff(artifact("legacy-result", 12, "task-legacy", "chef:legacy", { description: "Generated report", runCommand: "npm start", verification: "runtime smoke" })),
   { summary: "Generated report", runCommand: "npm start", verifiedBy: "runtime smoke" },
