@@ -12,38 +12,42 @@ import { ChannelRoomsFeature } from "./ChannelRoomsFeature";
 import { AgentContextInspector } from "./AgentContextInspector";
 import { WorkspaceContextBar } from "./WorkspaceContextBar";
 import { MissionActivityRail } from "./MissionActivityRail";
+import {
+  nextWorkspaceDepth,
+  readWorkspaceDepth,
+  workspaceSurfacePlan,
+  type WorkspaceDepth,
+} from "./canonicalWorkspaceModel";
 import "./index.css";
 import "./visual-audit.css";
 import "./advanced-workspace.css";
 import "./workbench-depth.css";
 import "./canonical-workspace.css";
 
-type WorkbenchDepth = "simple" | "power";
-
-function readWorkbenchDepth(): WorkbenchDepth {
-  return localStorage.getItem("chef:view-mode") === "power" ? "power" : "simple";
+function persistedDepth(): WorkspaceDepth {
+  return readWorkspaceDepth(localStorage.getItem("chef:view-mode"));
 }
 
 function ChefRoot() {
-  const [viewMode, setViewMode] = useState<WorkbenchDepth>(readWorkbenchDepth);
+  const [viewMode, setViewMode] = useState<WorkspaceDepth>(persistedDepth);
 
-  // LivingWorkspaceFeature still exposes its own Advanced action for backwards
-  // compatibility. Keep the root synchronized with that persisted depth so the
-  // same-window action actually opens runtime detail instead of hiding itself.
+  // The Living Workspace still exposes its own Advanced action. Keep both
+  // controls on the same persisted depth without mounting both streaming trees.
   useEffect(() => {
     const timer = window.setInterval(() => {
-      const persisted = readWorkbenchDepth();
+      const persisted = persistedDepth();
       setViewMode((current) => current === persisted ? current : persisted);
     }, 200);
     return () => window.clearInterval(timer);
   }, []);
 
   const toggleRuntimeDetails = () => {
-    const next: WorkbenchDepth = viewMode === "power" ? "simple" : "power";
+    const next = nextWorkspaceDepth(viewMode);
     localStorage.setItem("chef:view-mode", next);
     setViewMode(next);
   };
 
+  const plan = workspaceSurfacePlan(viewMode);
   const runtimeDetailsVisible = viewMode === "power";
 
   return <>
@@ -62,23 +66,18 @@ function ChefRoot() {
       </button>
     </div>
 
-    {/* Chef has one canonical product surface: the Living Workspace. Runtime
-        detail is progressive disclosure, not a second homepage. Mount only the
-        active depth so hidden EventSource trees cannot starve browser requests. */}
-    {runtimeDetailsVisible ? <>
-      <App key={viewMode} />
-      <ContextScopeFeature />
-      <CanvasNodeDeleteFeature />
-      <DecisionLibraryFeature />
-      <MissionArtifactsFeature />
-      <ChannelRoomsFeature />
-      <AgentContextInspector />
-    </> : <>
-      <WorkspaceContextBar />
-      <LivingWorkspaceFeature />
-      <MissionActivityRail />
-      <LivingArtifactFeature />
-    </>}
+    {plan.runtimeApp && <App key={viewMode} />}
+    {plan.contextScopes && <ContextScopeFeature />}
+    {plan.canvasDeletion && <CanvasNodeDeleteFeature />}
+    {plan.decisions && <DecisionLibraryFeature />}
+    {plan.missionArtifacts && <MissionArtifactsFeature />}
+    {plan.rooms && <ChannelRoomsFeature />}
+    {plan.agentContext && <AgentContextInspector />}
+
+    {plan.projectContext && <WorkspaceContextBar />}
+    {plan.livingWorkspace && <LivingWorkspaceFeature />}
+    {plan.missionActivity && <MissionActivityRail />}
+    {plan.livingArtifacts && <LivingArtifactFeature />}
 
     <SetupChrome surface="workbench" />
   </>;
