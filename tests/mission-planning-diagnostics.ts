@@ -40,8 +40,34 @@ const planner = event("orchestrator.plan.proposed", {
 });
 assert.equal(missionDiagnosticDetail(planner), "Route: coordinated planner (3 steps).");
 
+const noPlan = event("orchestrator.plan.none", { missionId: "mission-3" });
+assert.equal(missionDiagnosticLabel(noPlan), "Planning ended without a plan");
+assert.equal(
+  missionDiagnosticDetail(noPlan),
+  "Planning finished without selecting work, so no worker was started.",
+  "Power diagnostics must explain an empty planner result even when the runtime has no extra reason text",
+);
+
+const interrupted = event("orchestrator.plan.interrupted", { missionId: "mission-4" });
+assert.equal(missionDiagnosticLabel(interrupted), "Execution interrupted");
+assert.equal(
+  missionDiagnosticDetail(interrupted),
+  "Execution stopped before the planned work could continue.",
+  "Power diagnostics must not leave an interruption with an empty detail",
+);
+
+const interruptedWithReason = event("orchestrator.plan.interrupted", {
+  missionId: "mission-4",
+  reason: "User changed direction before worker startup",
+});
+assert.equal(
+  missionDiagnosticDetail(interruptedWithReason),
+  "User changed direction before worker startup",
+  "Concrete runtime reasons must outrank generic fallback copy",
+);
+
 const failed = event("orchestrator.plan.error", {
-  missionId: "mission-3",
+  missionId: "mission-5",
   error: "Planner timed out after 20000ms before any worker could start",
 });
 assert.equal(missionDiagnosticLabel(failed), "Planning failed");
