@@ -54,6 +54,24 @@ const events: UiRuntimeEvent[] = [
   {
     id: "event-1",
     seq: 1,
+    timestamp: 105,
+    source: { type: "orchestrator", id: "orchestrator" },
+    type: "orchestrator.plan.started",
+    payload: { missionId: "mission-1" },
+    correlationId: "mission-1",
+  },
+  {
+    id: "event-2",
+    seq: 2,
+    timestamp: 108,
+    source: { type: "orchestrator", id: "orchestrator" },
+    type: "orchestrator.plan.proposed",
+    payload: { missionId: "mission-1", routingMode: "single-worker", taskIds: ["task-1"] },
+    correlationId: "mission-1",
+  },
+  {
+    id: "event-3",
+    seq: 3,
     timestamp: 110,
     source: { type: "task", id: "task-1" },
     type: "task.running",
@@ -61,8 +79,8 @@ const events: UiRuntimeEvent[] = [
     taskId: "task-1",
   },
   {
-    id: "event-2",
-    seq: 2,
+    id: "event-4",
+    seq: 4,
     timestamp: 120,
     source: { type: "session", id: "session-1" },
     type: "session.data",
@@ -84,7 +102,34 @@ assert.deepEqual(activity.workers.map((worker) => [worker.name, worker.title, wo
 assert.deepEqual(activity.feed, [
   "A worker is actively producing output.",
   "Claude Code started Build the app.",
-], "activity should be human-readable and ordered by recent durable runtime events");
+  "Chef chose one worker for this Mission.",
+], "activity should preserve meaningful routing and worker progress in recent-first order");
 assert.equal(activity.feed.some((line) => line.includes("raw terminal output")), false, "normal activity must not expose raw CLI output");
+
+const planningMission: UiMission = {
+  ...mission,
+  id: "mission-planning",
+  status: "planning",
+  taskIds: [],
+  createdAt: 200,
+  updatedAt: 200,
+};
+const planningActivity = projectMissionActivity({
+  missions: [planningMission],
+  tasks: [],
+  events: [{
+    id: "event-planning",
+    seq: 5,
+    timestamp: 200,
+    source: { type: "orchestrator", id: "orchestrator" },
+    type: "orchestrator.plan.started",
+    payload: { missionId: "mission-planning" },
+    correlationId: "mission-planning",
+  }],
+}, harnesses);
+assert.ok(planningActivity, "pre-worker planning should still have visible Mission activity");
+assert.deepEqual(planningActivity.feed, [
+  "Chef is deciding how to approach this Mission.",
+], "Mission-correlated planning must be visible before any Task or Session exists");
 
 console.log("intent-home-ui: ok — canonical workspace and Mission activity are verified by executable behavior, not source shape");
