@@ -17,6 +17,7 @@ export interface MissionActivityWorker {
 
 export interface MissionActivityProjection {
   mission: UiMission;
+  taskIds: string[];
   missionState: string;
   workers: MissionActivityWorker[];
   feed: string[];
@@ -169,6 +170,7 @@ export function projectMissionActivity(
 
   return {
     mission,
+    taskIds: [...scoped.ownedTaskIds],
     missionState: missionActivityState(mission),
     workers,
     feed,
