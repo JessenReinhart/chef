@@ -21,6 +21,16 @@ const FRIENDLY_EVENT_LABELS: Record<string, string> = {
   "artifact.created": "New result produced",
 };
 
+function payloadText(payload: Record<string, unknown>): string | null {
+  const detail = payload.error
+    ?? payload.reason
+    ?? payload.message
+    ?? payload.status
+    ?? payload.title
+    ?? payload.result;
+  return typeof detail === "string" && detail.trim() ? detail.trim() : null;
+}
+
 export function missionDiagnosticLabel(event: UiRuntimeEvent): string {
   return FRIENDLY_EVENT_LABELS[event.type]
     ?? event.type
@@ -43,11 +53,13 @@ export function missionDiagnosticDetail(event: UiRuntimeEvent): string | null {
     if (routingMode === "planner") return `Route: coordinated planner${taskIds.length > 0 ? ` (${taskIds.length} steps)` : ""}.`;
   }
 
-  const detail = payload.error
-    ?? payload.reason
-    ?? payload.message
-    ?? payload.status
-    ?? payload.title
-    ?? payload.result;
-  return typeof detail === "string" && detail.trim() ? detail.trim() : null;
+  if (event.type === "orchestrator.plan.none") {
+    return payloadText(payload) ?? "Planning finished without selecting work, so no worker was started.";
+  }
+
+  if (event.type === "orchestrator.plan.interrupted") {
+    return payloadText(payload) ?? "Execution stopped before the planned work could continue.";
+  }
+
+  return payloadText(payload);
 }
