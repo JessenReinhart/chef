@@ -1,6 +1,7 @@
 import { strict as assert } from "node:assert";
 import {
   MAX_VISIBLE_RESULTS,
+  artifactHandoff,
   artifactsForMission,
   canDownload,
   provenanceLabel,
@@ -49,10 +50,30 @@ assert.deepEqual(
   "current Mission results should still be newest-first after lineage scoping",
 );
 
+const goldenTodoResult = artifact("golden-todo", 11, "task-todo", "file:///tmp/todo-app.mjs", {
+  content: "Created runnable todo app at /tmp/todo-app.mjs",
+  run: "node /tmp/todo-app.mjs",
+  verifiedBy: "golden-path",
+});
+assert.deepEqual(
+  artifactHandoff(goldenTodoResult),
+  {
+    summary: "Created runnable todo app at /tmp/todo-app.mjs",
+    runCommand: "node /tmp/todo-app.mjs",
+    verifiedBy: "golden-path",
+  },
+  "the Living Workspace must preserve the canonical artifact contract for what changed, how to run it, and what verified it",
+);
+assert.deepEqual(
+  artifactHandoff(artifact("legacy-result", 12, "task-legacy", "chef:legacy", { description: "Generated report", runCommand: "npm start", verification: "runtime smoke" })),
+  { summary: "Generated report", runCommand: "npm start", verifiedBy: "runtime smoke" },
+  "result handoff should remain useful for older/custom artifact metadata aliases",
+);
+
 assert.equal(workspaceSurfacePlan("simple").livingArtifacts, true, "normal work should keep result projection in the same Living Workspace");
 assert.equal(workspaceSurfacePlan("power").livingArtifacts, false, "opening runtime detail should not duplicate the normal result projection");
-assert.equal(canDownload(artifact("file-result", 11, "task-file", "file:///tmp/result.txt")), true, "file-backed results should expose a real download action");
-assert.equal(canDownload(artifact("runtime-result", 12)), false, "runtime-only artifacts must not invent a download action");
-assert.equal(provenanceLabel(artifact("artifact-13", 13)), "v13 · by claude-code · task task-13", "result handoff should preserve concise provenance");
+assert.equal(canDownload(artifact("file-result", 13, "task-file", "file:///tmp/result.txt")), true, "file-backed results should expose a real download action");
+assert.equal(canDownload(artifact("runtime-result", 14)), false, "runtime-only artifacts must not invent a download action");
+assert.equal(provenanceLabel(artifact("artifact-15", 15)), "v15 · by claude-code · task task-15", "result handoff should preserve concise provenance");
 
-console.log("intent-home-artifacts-ui: ok — current Mission result handoff is lineage-scoped");
+console.log("intent-home-artifacts-ui: ok — current Mission result handoff is lineage-scoped and actionable");
