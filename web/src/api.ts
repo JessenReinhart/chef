@@ -132,7 +132,7 @@ export class Api {
   }
 
   async capabilities(role: "engineer" | "orchestrator" | "human"): Promise<{ role: string; policy: Record<string, "allow" | "deny" | "approval"> }> {
-    const data = await this.request<{ ok: boolean; data: { role: string; policy: Record<string, "allow" | "deny" | "approval"> }>(`/api/capabilities?role=${role}`);
+    const data = await this.request<{ ok: boolean; data: { role: string; policy: Record<string, "allow" | "deny" | "approval"> } }>(`/api/capabilities?role=${role}`);
     return data.data;
   }
 
@@ -302,7 +302,7 @@ export class Api {
     return data.data;
   }
 
-  // ── Templates ───────────────────────────────────────────────────
+  // ── Templates ────────────────────────────────────────────────────
   async templates(): Promise<Template[]> {
     const data = await this.request<{ ok: boolean; data: Template[] }>("/api/templates");
     return data.data;
