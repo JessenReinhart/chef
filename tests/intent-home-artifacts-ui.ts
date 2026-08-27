@@ -6,6 +6,7 @@ import {
   artifactsForMission,
   canDownload,
   copyRunCommand,
+  missingResultHandoffNotice,
   provenanceLabel,
   recentArtifacts,
   type LivingArtifact,
@@ -67,6 +68,27 @@ assert.deepEqual(
   "current Mission results should still be newest-first after lineage scoping",
 );
 
+assert.equal(
+  missingResultHandoffNotice("completed", 0),
+  "Work is marked complete, but Chef did not publish a durable result for this Mission.",
+  "a completed Mission without an artifact must expose the missing result handoff instead of silently rendering no Results surface",
+);
+assert.equal(
+  missingResultHandoffNotice("active", 0),
+  null,
+  "active work should not be mislabeled as a missing result before completion",
+);
+assert.equal(
+  missingResultHandoffNotice("completed", 1),
+  null,
+  "a completed Mission with a durable result should not show a false handoff warning",
+);
+assert.equal(
+  missingResultHandoffNotice("failed", 0),
+  "No durable result is available because this Mission needs attention.",
+  "failed work should explain why no result is available without pretending completion succeeded",
+);
+
 const goldenTodoResult = artifact("golden-todo", 11, "task-todo", "file:///tmp/todo-app.mjs", {
   content: "Created runnable todo app at /tmp/todo-app.mjs",
   run: "node /tmp/todo-app.mjs",
@@ -112,4 +134,4 @@ assert.equal(canDownload(artifact("file-result", 13, "task-file", "file:///tmp/r
 assert.equal(canDownload(artifact("runtime-result", 14)), false, "runtime-only artifacts must not invent a download action");
 assert.equal(provenanceLabel(artifact("artifact-15", 15)), "v15 · by claude-code · task task-15", "result handoff should preserve concise provenance");
 
-console.log("intent-home-artifacts-ui: ok — current Mission result handoff is lineage-scoped and actionable");
+console.log("intent-home-artifacts-ui: ok — current Mission result handoff is lineage-scoped, actionable, and cannot silently disappear after completion");
