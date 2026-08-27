@@ -45,7 +45,7 @@ type MissionResultScope = { missionId: string; taskIds: string[] } | null;
 export function LivingArtifactFeature() {
   const [enabled, setEnabled] = useState(() => localStorage.getItem("chef:view-mode") !== "power");
   const [artifacts, setArtifacts] = useState<LivingArtifact[]>([]);
-  const [missionScope, setMissionScope] = useState<MissionResultScope>(null);
+  const [missionScope, setMissionScope] = useState<MissionResultScope | undefined>(undefined);
   const [target, setTarget] = useState<Element | null>(null);
   const [shelfOpen, setShelfOpen] = useState(false);
   const [selectedArtifactId, setSelectedArtifactId] = useState<string | null>(null);
@@ -72,12 +72,19 @@ export function LivingArtifactFeature() {
 
   const refresh = useCallback(async () => {
     if (!enabled) return;
-    try {
-      const [response, state] = await Promise.all([fetch("/api/artifacts"), api.stateRaw()]);
-      if (!response.ok) return;
-      const body = await response.json() as { ok?: boolean; data?: LivingArtifact[] };
-      if (body.ok && Array.isArray(body.data)) setArtifacts(body.data);
 
+    try {
+      const response = await fetch("/api/artifacts");
+      if (response.ok) {
+        const body = await response.json() as { ok?: boolean; data?: LivingArtifact[] };
+        if (body.ok && Array.isArray(body.data)) setArtifacts(body.data);
+      }
+    } catch {
+      // Artifact history can recover independently on the next poll/event.
+    }
+
+    try {
+      const state = await api.stateRaw();
       const activity = projectMissionActivity({
         missions: state.missions ?? [],
         tasks: state.tasks,
@@ -85,7 +92,7 @@ export function LivingArtifactFeature() {
       }, []);
       setMissionScope(activity ? { missionId: activity.mission.id, taskIds: activity.taskIds } : null);
     } catch {
-      // Artifact cards are an optional projection. Keep the workspace usable.
+      // Keep the previous authoritative scope rather than guessing from artifact chronology.
     }
   }, [enabled]);
 
@@ -104,9 +111,11 @@ export function LivingArtifactFeature() {
   }, [enabled, refresh]);
 
   const currentMissionArtifacts = useMemo(
-    () => missionScope
-      ? artifactsForMission(artifacts, missionScope.missionId, missionScope.taskIds)
-      : artifacts,
+    () => missionScope === undefined
+      ? []
+      : missionScope
+        ? artifactsForMission(artifacts, missionScope.missionId, missionScope.taskIds)
+        : artifacts,
     [artifacts, missionScope],
   );
   const visibleArtifacts = useMemo(
