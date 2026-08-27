@@ -11,6 +11,8 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { api } from "./api";
+import { loadSelectedThreadId, SELECTED_THREAD_EVENT, threadMessages } from "./threadApi";
+import { createThreadHistoryLoader } from "./threadSelection";
 import type {
   HarnessInfo,
   MissionStatus,
@@ -47,17 +49,6 @@ type MissionNodeData = {
   total: number;
 };
 
-type ChatStreamEvent = {
-  type: string;
-  payload?: {
-    content?: string;
-    taskIds?: string[];
-    taskCount?: number;
-    error?: string;
-    ok?: boolean;
-  };
-};
-
 type Side = "left" | "right" | "top" | "bottom";
 
 type RoutedHandles = {
@@ -72,6 +63,8 @@ const EMPTY_SNAPSHOT: WorkspaceSnapshot = {
   missions: [],
   approvals: [],
 };
+
+const DEFAULT_CHEF_NOTE = "Tell me what you want done. I'll shape the workspace around it.";
 
 const QUICK_PROMPTS = [
   "Prepare this month's report and flag anything unusual",
@@ -271,13 +264,14 @@ export function LivingWorkspaceFeature() {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [optimisticGoal, setOptimisticGoal] = useState("");
-  const [chefNote, setChefNote] = useState("Tell me what you want done. I'll shape the workspace around it.");
+  const [chefNote, setChefNote] = useState(DEFAULT_CHEF_NOTE);
   const [sending, setSending] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
   const [directMessage, setDirectMessage] = useState("");
   const [directSending, setDirectSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const threadHistoryLoader = useMemo(() => createThreadHistoryLoader(threadMessages), []);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -313,44 +307,46 @@ export function LivingWorkspaceFeature() {
     if (!enabled) return;
     void api.harnesses().then(setHarnesses).catch(() => setHarnesses([]));
     void api.project().then((project) => setProjectName(project.name || "Workspace")).catch(() => undefined);
-    void api.chatMessages().then((messages) => {
-      const latest = [...messages].reverse().find((message) => message.role === "assistant" && message.content.trim());
-      if (latest) setChefNote(latest.content);
-    }).catch(() => undefined);
   }, [enabled]);
+
+  useEffect(() => {
+    if (!enabled) {
+      threadHistoryLoader.invalidate();
+      return;
+    }
+
+    const loadThreadNote = (threadId: string | null) => {
+      if (!threadId) {
+        threadHistoryLoader.invalidate();
+        setChefNote(DEFAULT_CHEF_NOTE);
+        return;
+      }
+      void threadHistoryLoader.load(threadId).then((result) => {
+        if (!result.current) return;
+        const latest = [...result.messages].reverse().find((message) => message.role === "assistant" && message.content.trim());
+        setChefNote(latest?.content ?? DEFAULT_CHEF_NOTE);
+      }).catch(() => undefined);
+    };
+
+    loadThreadNote(loadSelectedThreadId());
+    const onThreadChanged = (event: Event) => {
+      const detail = (event as CustomEvent<{ threadId?: string | null }>).detail;
+      setSending(false);
+      setOptimisticGoal("");
+      loadThreadNote(detail?.threadId ?? loadSelectedThreadId());
+      void refresh();
+    };
+    window.addEventListener(SELECTED_THREAD_EVENT, onThreadChanged);
+    return () => {
+      threadHistoryLoader.invalidate();
+      window.removeEventListener(SELECTED_THREAD_EVENT, onThreadChanged);
+    };
+  }, [enabled, refresh, threadHistoryLoader]);
 
   useEffect(() => {
     if (!enabled) return;
     const es = new EventSource("/api/events?types=canvas.*,mission.*,approval.*,node.*");
     es.onmessage = () => void refresh();
-    return () => es.close();
-  }, [enabled, refresh]);
-
-  useEffect(() => {
-    if (!enabled) return;
-    const es = new EventSource("/api/chat/stream");
-    es.onmessage = (event) => {
-      try {
-        const frame = JSON.parse(event.data) as ChatStreamEvent;
-        if (frame.type === "chat.assistant" && frame.payload?.content) {
-          setChefNote(frame.payload.content);
-          setSending(false);
-        }
-        if (frame.type === "chat.plan.proposed") {
-          const count = frame.payload?.taskCount ?? frame.payload?.taskIds?.length ?? 0;
-          setChefNote(count > 0 ? `Got it. I brought ${count} teammate${count === 1 ? "" : "s"} into the work.` : "Got it. I'm shaping the plan now.");
-          setOptimisticGoal("");
-          setSending(false);
-          void refresh();
-        }
-        if (frame.type === "chat.plan.error" || frame.type === "chat.plan.none") {
-          setChefNote(frame.payload?.error ? `I hit a snag: ${frame.payload.error}` : "I couldn't turn that into work yet. Try telling me the outcome you want.");
-          setSending(false);
-        }
-      } catch {
-        // Ignore malformed stream frames; EventSource reconnects automatically.
-      }
-    };
     return () => es.close();
   }, [enabled, refresh]);
 
@@ -536,6 +532,7 @@ export function LivingWorkspaceFeature() {
   const sendGoal = useCallback(async (preset?: string) => {
     const text = (preset ?? input).trim();
     if (!text || sending) return;
+    const submittedThreadId = loadSelectedThreadId();
     setInput("");
     setOptimisticGoal(text);
     setChefNote("Okay. Give me a sec to put the right little team together…");
@@ -543,6 +540,7 @@ export function LivingWorkspaceFeature() {
     setToolsOpen(false);
     try {
       const result = await api.chat(text);
+      if (loadSelectedThreadId() !== submittedThreadId) return;
       if (!result.ok) {
         setChefNote(result.report || "I couldn't start that work yet.");
         setSending(false);
@@ -551,6 +549,7 @@ export function LivingWorkspaceFeature() {
       }
       void refresh();
     } catch (reason) {
+      if (loadSelectedThreadId() !== submittedThreadId) return;
       setChefNote(reason instanceof Error ? reason.message : "Chef could not start the work.");
       setSending(false);
     }
