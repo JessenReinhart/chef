@@ -31,7 +31,10 @@ const otherMission = mission("mission-b", "thread-b", "task-b", "active", 200);
 const state: ThreadScopedState = {
   missions: [selectedMission, otherMission],
   tasks: [task("task-a", "running"), task("task-b", "running")],
-  sessions: [],
+  sessions: [
+    { id: "session-a", taskId: "task-a", status: "running", pid: 101 },
+    { id: "session-b", taskId: "task-b", status: "running", pid: 202 },
+  ],
   approvals: [
     { id: "approval-a", reason: "selected thread", taskId: "task-a", status: "pending" },
     { id: "approval-b", reason: "other thread", taskId: "task-b", status: "pending" },
@@ -47,7 +50,8 @@ const state: ThreadScopedState = {
 
 const scoped = scopeStateToThread(state, "thread-a");
 assert.deepEqual(scoped.missions?.map((item) => item.id), ["mission-a"], "selected Thread must own the visible Mission history");
-assert.deepEqual(scoped.tasks.map((item) => item.id), ["task-a"], "another Thread's worker must not appear in the selected conversation");
+assert.deepEqual(scoped.tasks.map((item) => item.id), ["task-a"], "another Thread's task must not appear in the selected conversation");
+assert.deepEqual(scoped.sessions.map((item) => item.id), ["session-a"], "another Thread's worker Session must not appear in the selected conversation");
 assert.deepEqual(scoped.approvals.map((item) => item.id), ["approval-a"], "another Thread's approval must not interrupt the selected conversation");
 assert.deepEqual(scoped.canvasNodes.map((item) => item.id), ["helper", "node-a"], "project helpers may remain visible but task-backed nodes must follow selected Thread lineage");
 
@@ -108,14 +112,16 @@ try {
 
   const scopedState = await client.stateRaw();
   assert.deepEqual(scopedState.missions?.map((item) => item.id), ["mission-a"], "the API state consumed by Living Workspace must exclude another Thread's newer Mission");
+  assert.deepEqual(scopedState.sessions.map((item) => item.id), ["session-a"], "the API state consumed by Living Workspace must exclude another Thread's worker Session");
 
   storage.set("chef:view-mode", "power");
   const powerState = await client.stateRaw();
   assert.deepEqual(powerState.missions?.map((item) => item.id), ["mission-a", "mission-b"], "Power Mode must retain project-wide runtime visibility");
+  assert.deepEqual(powerState.sessions.map((item) => item.id), ["session-a", "session-b"], "Power Mode must retain project-wide worker Session visibility");
 } finally {
   globalThis.fetch = originalFetch;
   if (originalLocalStorage) Object.defineProperty(globalThis, "localStorage", originalLocalStorage);
   else delete (globalThis as { localStorage?: unknown }).localStorage;
 }
 
-console.log("living-workspace-thread-continuity: ok — Simple Mode submission, history, Mission activity, workers, approvals, and results stay in the selected Thread lineage");
+console.log("living-workspace-thread-continuity: ok — Simple Mode submission, history, Mission activity, worker Sessions, approvals, and results stay in the selected Thread lineage");
