@@ -46,7 +46,10 @@ function directlyBelongsToMission(event: UiRuntimeEvent, missionId: string): boo
     || payloadString(payload, "missionId") === missionId;
 }
 
-function scopedMissionEvents(events: UiRuntimeEvent[], mission: UiMission): UiRuntimeEvent[] {
+function scopeMissionActivity(events: UiRuntimeEvent[], mission: UiMission): {
+  ownedTaskIds: Set<string>;
+  events: UiRuntimeEvent[];
+} {
   const ownedTaskIds = new Set(mission.taskIds);
 
   for (const event of events) {
@@ -54,13 +57,16 @@ function scopedMissionEvents(events: UiRuntimeEvent[], mission: UiMission): UiRu
     for (const taskId of payloadStrings(eventPayload(event), "taskIds")) ownedTaskIds.add(taskId);
   }
 
-  return events
-    .filter((event) => {
-      if (directlyBelongsToMission(event, mission.id)) return true;
-      if (event.taskId && ownedTaskIds.has(event.taskId)) return true;
-      return payloadStrings(eventPayload(event), "taskIds").some((taskId) => ownedTaskIds.has(taskId));
-    })
-    .sort((a, b) => b.seq - a.seq);
+  return {
+    ownedTaskIds,
+    events: events
+      .filter((event) => {
+        if (directlyBelongsToMission(event, mission.id)) return true;
+        if (event.taskId && ownedTaskIds.has(event.taskId)) return true;
+        return payloadStrings(eventPayload(event), "taskIds").some((taskId) => ownedTaskIds.has(taskId));
+      })
+      .sort((a, b) => b.seq - a.seq),
+  };
 }
 
 export function workerActivityState(task: UiTask): string {
@@ -89,7 +95,8 @@ export function projectMissionActivity(
 
   const tasksById = new Map(snapshot.tasks.map((task) => [task.id, task]));
   const harnessNames = new Map(harnesses.map((harness) => [harness.id, harness.name]));
-  const workers = mission.taskIds
+  const scoped = scopeMissionActivity(snapshot.events, mission);
+  const workers = [...scoped.ownedTaskIds]
     .map((id) => tasksById.get(id))
     .filter((task): task is UiTask => Boolean(task))
     .slice(0, 4)
@@ -103,7 +110,7 @@ export function projectMissionActivity(
 
   const feed: string[] = [];
   const seen = new Set<string>();
-  for (const event of scopedMissionEvents(snapshot.events, mission)) {
+  for (const event of scoped.events) {
     const task = event.taskId ? tasksById.get(event.taskId) : undefined;
     const worker = task?.assignedTo ? (harnessNames.get(task.assignedTo) ?? task.assignedTo) : "Chef";
     let text: string | null = null;
