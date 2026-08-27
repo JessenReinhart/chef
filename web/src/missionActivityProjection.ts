@@ -90,6 +90,18 @@ function missionCanHeartbeat(mission: UiMission): boolean {
   return mission.status === "planning" || mission.status === "active" || mission.status === "verifying";
 }
 
+function missionActivityFallback(mission: UiMission): string {
+  if (mission.status === "planning") return "Chef is deciding who and what this work needs.";
+  if (mission.status === "completed") return "Work is complete. Results are available in this workspace.";
+  if (mission.status === "failed" || mission.status === "blocked" || mission.status === "waiting_for_approval") {
+    return "Work needs attention. Review the latest Mission update before continuing.";
+  }
+  if (mission.status === "cancelled") return "Work was stopped. Start a new request when you are ready.";
+  if (mission.status === "paused") return "Work is paused. Resume it when you are ready.";
+  if (mission.status === "verifying") return "Chef is verifying the completed work.";
+  return "Work is active. Waiting for the next useful update.";
+}
+
 export function projectMissionActivity(
   snapshot: MissionActivitySnapshot,
   harnesses: HarnessInfo[],
@@ -151,8 +163,6 @@ export function projectMissionActivity(
     missionState: missionActivityState(mission),
     workers,
     feed,
-    fallback: mission.status === "planning"
-      ? "Chef is deciding who and what this work needs."
-      : "Work is active. Waiting for the next useful update.",
+    fallback: missionActivityFallback(mission),
   };
 }
