@@ -23,6 +23,18 @@ export function recentArtifacts(artifacts: LivingArtifact[], limit: number): Liv
   return artifacts.slice(-limit).reverse();
 }
 
+export function artifactsForMission(
+  artifacts: LivingArtifact[],
+  missionId: string,
+  taskIds: Iterable<string>,
+): LivingArtifact[] {
+  const ownedTaskIds = new Set(taskIds);
+  return artifacts.filter((artifact) => {
+    if (artifact.taskId && ownedTaskIds.has(artifact.taskId)) return true;
+    return artifact.metadata.missionId === missionId;
+  });
+}
+
 export function canDownload(artifact: LivingArtifact): boolean {
   return artifact.uri.startsWith("file:");
 }
