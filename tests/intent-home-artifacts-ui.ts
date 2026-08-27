@@ -2,6 +2,7 @@ import { strict as assert } from "node:assert";
 import {
   MAX_VISIBLE_RESULTS,
   artifactHandoff,
+  artifactsForCurrentMission,
   artifactsForMission,
   canDownload,
   copyRunCommand,
@@ -44,6 +45,21 @@ assert.deepEqual(
   currentMissionResults.map((item) => item.id),
   ["current-task", "current-mission-metadata"],
   "the visible result handoff must not let unrelated workspace history impersonate the current Mission result",
+);
+assert.deepEqual(
+  artifactsForCurrentMission(mixedMissionResults, { missionId: "mission-current", taskIds: ["task-current"] }).map((item) => item.id),
+  ["current-task", "current-mission-metadata"],
+  "the primary result projection should follow the authoritative current Mission scope",
+);
+assert.deepEqual(
+  artifactsForCurrentMission(mixedMissionResults, null),
+  [],
+  "without an authoritative current Mission, workspace history must not masquerade as current-task results",
+);
+assert.deepEqual(
+  artifactsForCurrentMission(mixedMissionResults, undefined),
+  [],
+  "while Mission scope is loading, Chef should show no current-result claim rather than stale workspace history",
 );
 assert.deepEqual(
   recentArtifacts(currentMissionResults, MAX_VISIBLE_RESULTS).map((item) => item.id),
