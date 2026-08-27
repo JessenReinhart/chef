@@ -21,7 +21,7 @@ assert.ok(conditionalStart >= 0 && simpleBranchStart > conditionalStart && condi
 const powerBranch = main.slice(conditionalStart, simpleBranchStart);
 const simpleBranch = main.slice(simpleBranchStart, conditionalEnd);
 
-assert.match(powerBranch, /<App key="power" \/>/, "power mode owns the legacy/advanced App tree");
+assert.match(powerBranch, /<App key=\{viewMode\} \/>/, "power mode owns the legacy/advanced App tree");
 assert.doesNotMatch(simpleBranch, /<App\b/, "simple mode must not mount the hidden advanced App tree");
 assert.match(simpleBranch, /<LivingWorkspaceFeature \/>/, "simple mode mounts the Living Workspace");
 assert.match(simpleBranch, /<LivingArtifactFeature \/>/, "simple mode mounts the Living Artifact projection");
