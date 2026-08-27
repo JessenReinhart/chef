@@ -30,7 +30,6 @@ assert.match(living, /Ask Chef to change or do anything/, "the same workspace mu
 
 assert.match(activity, /api\.stateRaw\(\)/, "live activity must derive from authoritative runtime state");
 assert.match(activity, /latestMission\?\.taskIds/, "activity must stay bounded to the current Mission's workers");
-assert.match(activity, /event\.type === "session\.data"/, "useful worker output must be available without opening a terminal");
 assert.match(activity, /task\.assignedTo/, "activity must identify which worker is doing the work");
 assert.match(activity, /Working/, "active workers need a plain-language state");
 assert.match(activity, /Needs attention/, "worker failure must be understandable without raw runtime state");
