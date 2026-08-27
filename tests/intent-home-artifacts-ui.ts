@@ -1,24 +1,32 @@
 import { strict as assert } from "node:assert";
-import { readFile } from "node:fs/promises";
+import {
+  MAX_VISIBLE_RESULTS,
+  canDownload,
+  provenanceLabel,
+  recentArtifacts,
+  type LivingArtifact,
+} from "../web/src/artifactProjection.ts";
+import { workspaceSurfacePlan } from "../web/src/canonicalWorkspaceModel.ts";
 
-const main = await readFile(new URL("../web/src/main.tsx", import.meta.url), "utf8");
-const artifacts = await readFile(new URL("../web/src/LivingArtifactFeature.tsx", import.meta.url), "utf8");
-const projection = await readFile(new URL("../web/src/artifactProjection.ts", import.meta.url), "utf8");
+const artifact = (id: string, version: number, uri = `chef:${id}`): LivingArtifact => ({
+  id,
+  workspaceId: "workspace-1",
+  type: "document",
+  name: `Result ${version}`,
+  uri,
+  version,
+  createdBy: "claude-code",
+  taskId: `task-${version}`,
+  metadata: {},
+});
 
-assert.match(main, /<LivingArtifactFeature \/>/, "the canonical Living Workspace must mount its durable result projection");
-assert.doesNotMatch(main, /<HomeMissionArtifacts \/>/, "artifacts must not require the retired Intent Home surface");
-assert.match(artifacts, /fetch\("\/api\/artifacts"\)/, "Living Workspace results must reuse the canonical durable artifact API");
-assert.match(artifacts, /document\.querySelector\("\.chef-living-stage"\)/, "results must render inside the same Living Workspace instead of a second page");
-assert.match(artifacts, /recentArtifacts\(artifacts, MAX_VISIBLE_RESULTS\)/, "default result cards must remain bounded");
-assert.match(artifacts, /recentArtifacts\(artifacts, MAX_SHELF_RESULTS\)/, "the expanded result shelf must remain bounded");
-assert.match(artifacts, /provenanceLabel\(artifact\)/, "result cards must preserve durable artifact provenance");
-assert.match(artifacts, /selectedArtifact\.uri/, "artifact inspection must expose the durable result location");
-assert.match(artifacts, /canDownload\(artifact\)/, "download affordances must be derived from the artifact contract");
-assert.match(artifacts, /\/api\/artifacts\/\$\{encodeURIComponent\(artifact\.id\)\}\/download/, "downloads must reuse the canonical artifact endpoint");
-assert.match(artifacts, /Artifact shelf/, "older durable results must remain inspectable from the same workspace");
-assert.match(artifacts, /Artifact preview/, "results must be inspectable without leaving the canonical workspace");
-assert.match(artifacts, /new EventSource\("\/api\/events\?types=artifact\.\*"\)/, "artifact changes must refresh promptly while the Living Workspace is active");
-assert.match(artifacts, /if \(!enabled\)/, "the result projection must release its surface when runtime details replace the Living Workspace");
-assert.match(projection, /export function recentArtifacts/, "artifact ordering and bounding must remain a shared deterministic projection");
+const timeline = Array.from({ length: 6 }, (_, index) => artifact(`artifact-${index + 1}`, index + 1));
+const visible = recentArtifacts(timeline, MAX_VISIBLE_RESULTS);
+assert.deepEqual(visible.map((item) => item.id), ["artifact-6", "artifact-5", "artifact-4", "artifact-3"], "the canonical workspace should hand off the newest durable results first");
+assert.equal(workspaceSurfacePlan("simple").livingArtifacts, true, "normal work should keep result projection in the same Living Workspace");
+assert.equal(workspaceSurfacePlan("power").livingArtifacts, false, "opening runtime detail should not duplicate the normal result projection");
+assert.equal(canDownload(artifact("file-result", 7, "file:///tmp/result.txt")), true, "file-backed results should expose a real download action");
+assert.equal(canDownload(artifact("runtime-result", 8)), false, "runtime-only artifacts must not invent a download action");
+assert.equal(provenanceLabel(artifact("artifact-9", 9)), "v9 · by claude-code · task task-9", "result handoff should preserve concise provenance");
 
-console.log("intent-home-artifacts-ui: ok — durable results stay inside the canonical Living Workspace");
+console.log("intent-home-artifacts-ui: ok — result handoff is verified by artifact and workspace behavior");
