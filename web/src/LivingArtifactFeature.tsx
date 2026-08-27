@@ -5,6 +5,7 @@ import {
   MAX_SHELF_RESULTS,
   MAX_VISIBLE_RESULTS,
   SPATIAL_RESULT_SLOTS,
+  artifactHandoff,
   artifactsForMission,
   canDownload,
   metadataRows,
@@ -144,35 +145,41 @@ export function LivingArtifactFeature() {
         <span>Results</span>
         <small>{currentMissionArtifacts.length}</small>
       </div>
-      {visibleArtifacts.map((artifact, index) => (
-        <article
-          key={`${artifact.id}:${artifact.version}`}
-          className="chef-result-card"
-          data-result-slot={SPATIAL_RESULT_SLOTS[index]}
-          style={{ "--chef-result-index": index } as CSSProperties}
-        >
-          <button className="chef-result-card__inspect" type="button" onClick={() => inspectArtifact(artifact)} aria-label={`Inspect ${artifact.name}`}>
-            <div className="chef-result-card__icon" aria-hidden="true">{artifactIcon(artifact.type)}</div>
-            <div className="chef-result-card__body">
-              <span className="chef-result-card__eyebrow">{artifactLabel(artifact.type)}</span>
-              <strong title={artifact.name}>{artifact.name}</strong>
-              <small title={provenanceLabel(artifact)}>{provenanceLabel(artifact)}</small>
-            </div>
-          </button>
-          {canDownload(artifact) ? (
-            <a
-              className="chef-result-card__action"
-              href={`/api/artifacts/${encodeURIComponent(artifact.id)}/download`}
-              download
-              title={`Download ${artifact.name}`}
-            >
-              ↓
-            </a>
-          ) : (
-            <span className="chef-result-card__ready" title="Stored in Chef">✓</span>
-          )}
-        </article>
-      ))}
+      {visibleArtifacts.map((artifact, index) => {
+        const handoff = artifactHandoff(artifact);
+        return (
+          <article
+            key={`${artifact.id}:${artifact.version}`}
+            className="chef-result-card"
+            data-result-slot={SPATIAL_RESULT_SLOTS[index]}
+            style={{ "--chef-result-index": index } as CSSProperties}
+          >
+            <button className="chef-result-card__inspect" type="button" onClick={() => inspectArtifact(artifact)} aria-label={`Inspect ${artifact.name}`}>
+              <div className="chef-result-card__icon" aria-hidden="true">{artifactIcon(artifact.type)}</div>
+              <div className="chef-result-card__body">
+                <span className="chef-result-card__eyebrow">{artifactLabel(artifact.type)}</span>
+                <strong title={artifact.name}>{artifact.name}</strong>
+                {handoff.summary && <small title={handoff.summary}>{handoff.summary}</small>}
+                <small title={provenanceLabel(artifact)}>{provenanceLabel(artifact)}</small>
+                {handoff.runCommand && <small title={handoff.runCommand}>Run: <code>{handoff.runCommand}</code></small>}
+                {handoff.verifiedBy && <small title={handoff.verifiedBy}>Verified: {handoff.verifiedBy}</small>}
+              </div>
+            </button>
+            {canDownload(artifact) ? (
+              <a
+                className="chef-result-card__action"
+                href={`/api/artifacts/${encodeURIComponent(artifact.id)}/download`}
+                download
+                title={`Download ${artifact.name}`}
+              >
+                ↓
+              </a>
+            ) : (
+              <span className="chef-result-card__ready" title="Stored in Chef">✓</span>
+            )}
+          </article>
+        );
+      })}
 
       {artifacts.length > MAX_VISIBLE_RESULTS && (
         <button
