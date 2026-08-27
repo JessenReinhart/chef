@@ -3,6 +3,7 @@ import { access, readdir, stat } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
+import { shouldRejectOtherProjectRuntime } from "./launcher-policy.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const WEB = resolve(ROOT, "web");
@@ -80,11 +81,6 @@ async function runtimeProjectPath() {
 
 async function runtimeIsReady() {
   return (await runtimeProjectPath()) !== null;
-}
-
-function normalizedPath(path) {
-  const normalized = resolve(path);
-  return process.platform === "win32" ? normalized.toLowerCase() : normalized;
 }
 
 function findListeningPids() {
@@ -230,7 +226,11 @@ if (launcherArgs.has("--restart") && launcherArgs.has("--reuse")) {
 const existingProjectPath = await runtimeProjectPath();
 if (existingProjectPath !== null) {
   info(`Chef is already running at ${URL}`);
-  if (normalizedPath(existingProjectPath) !== normalizedPath(ROOT)) {
+  if (shouldRejectOtherProjectRuntime({
+    existingProjectPath,
+    currentProjectPath: ROOT,
+    restart: launcherArgs.has("--restart"),
+  })) {
     fail(`Port ${PORT} is used by a Chef runtime for another project: ${existingProjectPath}`);
   }
 
