@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "./api";
+import { summarizeMissionProgressEvent } from "./missionProgress";
 import type { HarnessInfo, UiMission, UiRuntimeEvent, UiTask } from "./types";
 
 type ActivitySnapshot = {
@@ -9,18 +10,6 @@ type ActivitySnapshot = {
 };
 
 const EMPTY: ActivitySnapshot = { missions: [], tasks: [], events: [] };
-
-function cleanWorkerOutput(value: unknown): string | null {
-  if (!value || typeof value !== "object") return null;
-  const data = (value as { data?: unknown }).data;
-  if (typeof data !== "string") return null;
-  const clean = data
-    .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-  if (!clean) return null;
-  return clean.length <= 180 ? clean : `${clean.slice(0, 177)}…`;
-}
 
 function workerState(task: UiTask): string {
   if (task.status === "running" || task.status === "spawning" || task.status === "assigned") return "Working";
@@ -88,8 +77,7 @@ export function MissionActivityRail() {
       const worker = task?.assignedTo ? (harnessNames.get(task.assignedTo) ?? task.assignedTo) : "Chef";
       let text: string | null = null;
       if (event.type === "session.data") {
-        const output = cleanWorkerOutput(event.payload);
-        if (output) text = `${worker}: ${output}`;
+        text = summarizeMissionProgressEvent(event)?.text ?? "A worker is actively producing output.";
       } else if (event.type === "task.running") {
         text = `${worker} started ${task?.title ?? "the task"}.`;
       } else if (event.type === "task.completed") {
