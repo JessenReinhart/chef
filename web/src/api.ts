@@ -21,6 +21,13 @@ import type {
   UiAutomationRun,
   UiRuntimeEvent,
 } from "./types";
+import { loadSelectedThreadId } from "./threadApi.ts";
+import {
+  scopeStateToThread,
+  threadChatPath,
+  threadMessagesPath,
+  type ThreadScopedState,
+} from "./threadScope.ts";
 
 export interface RecentProject {
   path: string;
@@ -57,6 +64,12 @@ export interface CreateNodeInput {
 export interface CreateNodeResult {
   taskId: string;
   workflowNodeId: string;
+}
+
+function selectedSimpleModeThreadId(): string | null {
+  if (typeof localStorage === "undefined") return null;
+  if (localStorage.getItem("chef:view-mode") === "power") return null;
+  return loadSelectedThreadId();
 }
 
 export class Api {
@@ -130,26 +143,9 @@ export class Api {
   }
 
   // ── State & graph ────────────────────────────────────────────────
-  async stateRaw(): Promise<{
-    tasks: UiTask[];
-    sessions: unknown[];
-    approvals: Array<{ id: string; reason: string; taskId: string; status: string }>;
-    canvasNodes: UiCanvasNode[];
-    canvasEdges: UiCanvasEdge[];
-    missions?: UiMission[];
-    automations?: UiAutomation[];
-    events: UiRuntimeEvent[];
-  }> {
-    return this.request<{
-      tasks: UiTask[];
-      sessions: unknown[];
-      approvals: Array<{ id: string; reason: string; taskId: string; status: string }>;
-      canvasNodes: UiCanvasNode[];
-      canvasEdges: UiCanvasEdge[];
-      missions?: UiMission[];
-      automations?: UiAutomation[];
-      events: UiRuntimeEvent[];
-    }>("/api/state");
+  async stateRaw(): Promise<ThreadScopedState> {
+    const state = await this.request<ThreadScopedState>("/api/state");
+    return scopeStateToThread(state, selectedSimpleModeThreadId());
   }
 
   // ── Canvas graph patch (runtime-owned projection) ───────────────
@@ -295,18 +291,18 @@ export class Api {
 
   // ── Chat ────────────────────────────────────────────────────────
   async chat(message: string): Promise<{ ok: boolean; taskIds: string[]; report: string }> {
-    return this.request<{ ok: boolean; data: { ok: boolean; taskIds: string[]; report: string } }>("/api/chat", {
+    return this.request<{ ok: boolean; data: { ok: boolean; taskIds: string[]; report: string } }>(threadChatPath(selectedSimpleModeThreadId()), {
       method: "POST",
       body: JSON.stringify({ message }),
     }).then((r) => r.data);
   }
 
   async chatMessages(): Promise<ChatMessage[]> {
-    const data = await this.request<{ ok: boolean; data: ChatMessage[] }>("/api/chat/messages");
+    const data = await this.request<{ ok: boolean; data: ChatMessage[] }>(threadMessagesPath(selectedSimpleModeThreadId()));
     return data.data;
   }
 
-  // ── Templates ───────────────────────────────────────────────────
+  // ── Templates ────────────────────────────────────────────────────
   async templates(): Promise<Template[]> {
     const data = await this.request<{ ok: boolean; data: Template[] }>("/api/templates");
     return data.data;
