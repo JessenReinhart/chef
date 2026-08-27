@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { UiRuntimeEvent, ViewMode } from "./types";
+import { missionDiagnosticDetail, missionDiagnosticLabel } from "./missionDiagnostics";
 
 type Props = {
   missionId: string;
@@ -80,46 +81,12 @@ type MissionProgressSummary = {
   highlights: OutcomeHighlight[];
 };
 
-const FRIENDLY_EVENT_LABELS: Record<string, string> = {
-  "mission.created": "Mission started",
-  "mission.status": "Mission status changed",
-  "mission.redirected": "Mission direction updated",
-  "plan.created": "Chef prepared a plan",
-  "plan.revised": "Chef revised the plan",
-  "task.created": "Work item added",
-  "task.assigned": "Work assigned",
-  "task.status": "Work status changed",
-  "task.completed": "Work item completed",
-  "task.failed": "Work item needs attention",
-  "approval.requested": "Approval requested",
-  "approval.resolved": "Approval resolved",
-  "artifact.created": "New result produced",
-};
-
 const PLAN_TASK_LIMIT = 12;
 const OUTCOME_HIGHLIGHT_LIMIT = 4;
 const PROGRESS_HIGHLIGHT_LIMIT = 3;
 const TERMINAL_PLAN_STATUSES = new Set(["completed", "failed", "cancelled"]);
 const ACTIVE_TASK_STATUSES = new Set(["assigned", "spawning", "running"]);
 const ATTENTION_TASK_STATUSES = new Set(["failed", "blocked"]);
-
-function friendlyEventLabel(event: UiRuntimeEvent): string {
-  return FRIENDLY_EVENT_LABELS[event.type]
-    ?? event.type
-      .replace(/[._-]+/g, " ")
-      .replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
-
-function eventDetail(event: UiRuntimeEvent): string | null {
-  if (!event.payload || typeof event.payload !== "object" || Array.isArray(event.payload)) return null;
-  const payload = event.payload as Record<string, unknown>;
-  const detail = payload.reason
-    ?? payload.message
-    ?? payload.status
-    ?? payload.title
-    ?? payload.result;
-  return typeof detail === "string" && detail.trim() ? detail.trim() : null;
-}
 
 function planTaskStatusLabel(status: string): string {
   const labels: Record<string, string> = {
@@ -481,11 +448,11 @@ export function MissionTimelineFeature({ missionId, mode }: Props) {
         ) : (
           <div className="grid gap-1.5 sm:grid-cols-2 xl:grid-cols-4">
             {visibleEvents.map((event) => {
-              const detail = eventDetail(event);
+              const detail = missionDiagnosticDetail(event);
               return (
                 <div key={event.id} className="min-w-0 rounded-md border border-[#21262d] bg-[#0d1117] px-2.5 py-2">
                   <div className="flex items-start justify-between gap-2">
-                    <span className="truncate text-[10px] font-medium text-[#c9d1d9]" title={friendlyEventLabel(event)}>{friendlyEventLabel(event)}</span>
+                    <span className="truncate text-[10px] font-medium text-[#c9d1d9]" title={missionDiagnosticLabel(event)}>{missionDiagnosticLabel(event)}</span>
                     <time className="shrink-0 text-[9px] text-[#484f58]" dateTime={new Date(event.timestamp).toISOString()}>
                       {new Date(event.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                     </time>
