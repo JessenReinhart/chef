@@ -64,6 +64,22 @@ function eventBelongsToThread(
   return payloadStrings(payload, "taskIds").some((taskId) => taskIds.has(taskId));
 }
 
+function sessionIdForEvent(event: UiRuntimeEvent): string | null {
+  if (event.sessionId) return event.sessionId;
+  if (event.source.type === "session") return event.source.id;
+  return payloadString(eventPayload(event), "sessionId");
+}
+
+function preserveSessionTaskLineage(
+  event: UiRuntimeEvent,
+  sessionTaskIds: Map<string, string>,
+): UiRuntimeEvent {
+  if (event.taskId) return event;
+  const sessionId = sessionIdForEvent(event);
+  const taskId = sessionId ? sessionTaskIds.get(sessionId) : undefined;
+  return taskId ? { ...event, taskId } : event;
+}
+
 export function scopeStateToThread(state: ThreadScopedState, threadId: string | null): ThreadScopedState {
   if (!threadId) return state;
 
@@ -71,9 +87,15 @@ export function scopeStateToThread(state: ThreadScopedState, threadId: string | 
   const missionIds = new Set(missions.map((mission) => mission.id));
   const taskIds = new Set(missions.flatMap((mission) => mission.taskIds));
   const sessions = state.sessions.filter((session) => taskIds.has(session.taskId));
-  const sessionIds = new Set(sessions.flatMap((session) => typeof session.id === "string" ? [session.id] : []));
+  const sessionTaskIds = new Map(
+    sessions.flatMap((session) => typeof session.id === "string" ? [[session.id, session.taskId] as const] : []),
+  );
+  const sessionIds = new Set(sessionTaskIds.keys());
   const canvasNodes = state.canvasNodes.filter((node) => !node.taskId || taskIds.has(node.taskId));
   const canvasNodeIds = new Set(canvasNodes.map((node) => node.id));
+  const events = state.events
+    .filter((event) => eventBelongsToThread(event, missionIds, taskIds, sessionIds))
+    .map((event) => preserveSessionTaskLineage(event, sessionTaskIds));
 
   return {
     ...state,
@@ -83,7 +105,7 @@ export function scopeStateToThread(state: ThreadScopedState, threadId: string | 
     approvals: state.approvals.filter((approval) => taskIds.has(approval.taskId)),
     canvasNodes,
     canvasEdges: state.canvasEdges.filter((edge) => canvasNodeIds.has(edge.source) && canvasNodeIds.has(edge.target)),
-    events: state.events.filter((event) => eventBelongsToThread(event, missionIds, taskIds, sessionIds)),
+    events,
   };
 }
 
