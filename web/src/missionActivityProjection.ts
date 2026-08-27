@@ -1,5 +1,5 @@
-import { summarizeMissionProgressEvent } from "./missionProgress";
-import type { HarnessInfo, UiMission, UiRuntimeEvent, UiTask } from "./types";
+import { summarizeMissionProgressEvent } from "./missionProgress.ts";
+import type { HarnessInfo, UiMission, UiRuntimeEvent, UiTask } from "./types.ts";
 
 export interface MissionActivitySnapshot {
   missions: UiMission[];
