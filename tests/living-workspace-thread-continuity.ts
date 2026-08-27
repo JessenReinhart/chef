@@ -7,7 +7,7 @@ import {
   threadMessagesPath,
   type ThreadScopedState,
 } from "../web/src/threadScope.ts";
-import type { UiMission, UiTask } from "../web/src/types.ts";
+import type { UiMission, UiRuntimeEvent, UiTask } from "../web/src/types.ts";
 
 const mission = (id: string, threadId: string, taskId: string, status: UiMission["status"], createdAt: number): UiMission => ({
   id,
@@ -24,6 +24,22 @@ const task = (id: string, status: UiTask["status"]): UiTask => ({
   title: `Task ${id}`,
   description: "thread continuity fixture",
   status,
+});
+
+const runtimeEvent = (
+  id: string,
+  seq: number,
+  source: UiRuntimeEvent["source"],
+  type: string,
+  overrides: Partial<UiRuntimeEvent> = {},
+): UiRuntimeEvent => ({
+  id,
+  seq,
+  timestamp: seq * 100,
+  source,
+  type,
+  payload: {},
+  ...overrides,
 });
 
 const selectedMission = mission("mission-a", "thread-a", "task-a", "active", 100);
@@ -44,8 +60,19 @@ const state: ThreadScopedState = {
     { id: "node-a", workspaceId: "workspace-1", taskId: "task-a", label: "Selected worker", nodeType: "proxy", kind: "agent", harnessId: "claude-code", position: { x: 0, y: 0 }, updatedAt: 1 },
     { id: "node-b", workspaceId: "workspace-1", taskId: "task-b", label: "Other worker", nodeType: "proxy", kind: "agent", harnessId: "claude-code", position: { x: 0, y: 0 }, updatedAt: 1 },
   ],
-  canvasEdges: [],
-  events: [],
+  canvasEdges: [
+    { id: "edge-a", workspaceId: "workspace-1", source: "helper", target: "node-a", sourceHandle: null, targetHandle: null, updatedAt: 1 },
+    { id: "edge-b", workspaceId: "workspace-1", source: "helper", target: "node-b", sourceHandle: null, targetHandle: null, updatedAt: 1 },
+  ],
+  events: [
+    runtimeEvent("mission-a-plan", 1, { type: "orchestrator", id: "orchestrator" }, "orchestrator.plan.started", { correlationId: "mission-a", payload: { missionId: "mission-a" } }),
+    runtimeEvent("task-a-running", 2, { type: "task", id: "task-a" }, "task.running", { taskId: "task-a" }),
+    runtimeEvent("session-a-data", 3, { type: "session", id: "session-a" }, "session.data", { sessionId: "session-a" }),
+    runtimeEvent("mission-b-plan", 4, { type: "orchestrator", id: "orchestrator" }, "orchestrator.plan.started", { correlationId: "mission-b", payload: { missionId: "mission-b" } }),
+    runtimeEvent("task-b-running", 5, { type: "task", id: "task-b" }, "task.running", { taskId: "task-b" }),
+    runtimeEvent("session-b-data", 6, { type: "session", id: "session-b" }, "session.data", { sessionId: "session-b" }),
+    runtimeEvent("project-only", 7, { type: "runtime", id: "workspace-1" }, "runtime.note"),
+  ],
 };
 
 const scoped = scopeStateToThread(state, "thread-a");
@@ -54,11 +81,18 @@ assert.deepEqual(scoped.tasks.map((item) => item.id), ["task-a"], "another Threa
 assert.deepEqual(scoped.sessions.map((item) => item.id), ["session-a"], "another Thread's worker Session must not appear in the selected conversation");
 assert.deepEqual(scoped.approvals.map((item) => item.id), ["approval-a"], "another Thread's approval must not interrupt the selected conversation");
 assert.deepEqual(scoped.canvasNodes.map((item) => item.id), ["helper", "node-a"], "project helpers may remain visible but task-backed nodes must follow selected Thread lineage");
+assert.deepEqual(scoped.canvasEdges.map((item) => item.id), ["edge-a"], "Simple Mode graph edges must not reference nodes owned by another Thread");
+assert.deepEqual(
+  scoped.events.map((item) => item.id),
+  ["mission-a-plan", "task-a-running", "session-a-data"],
+  "Simple Mode runtime evidence must include selected Mission/Task/Session lineage and exclude another Thread or unscoped project activity",
+);
 
 const activity = projectMissionActivity({ missions: scoped.missions ?? [], tasks: scoped.tasks, events: scoped.events }, []);
 assert.ok(activity);
 assert.equal(activity.mission.id, "mission-a", "Living Workspace activity must stay on the selected Thread even when another Thread has newer active work");
 assert.equal(activity.mission.goal, "Goal for thread-a");
+assert.ok(activity.feed.some((item) => item.includes("actively producing output")), "selected Thread Session activity must remain visible after runtime-event scoping");
 
 assert.equal(threadChatPath("thread-a"), "/api/threads/thread-a/chat", "Simple Mode submissions must use the selected Thread chat boundary");
 assert.equal(threadMessagesPath("thread-a"), "/api/threads/thread-a/messages", "Simple Mode assistant history must come from the selected Thread");
@@ -113,15 +147,17 @@ try {
   const scopedState = await client.stateRaw();
   assert.deepEqual(scopedState.missions?.map((item) => item.id), ["mission-a"], "the API state consumed by Living Workspace must exclude another Thread's newer Mission");
   assert.deepEqual(scopedState.sessions.map((item) => item.id), ["session-a"], "the API state consumed by Living Workspace must exclude another Thread's worker Session");
+  assert.deepEqual(scopedState.events.map((item) => item.id), ["mission-a-plan", "task-a-running", "session-a-data"], "the actual Simple Mode API state must exclude another Thread's runtime activity");
 
   storage.set("chef:view-mode", "power");
   const powerState = await client.stateRaw();
   assert.deepEqual(powerState.missions?.map((item) => item.id), ["mission-a", "mission-b"], "Power Mode must retain project-wide runtime visibility");
   assert.deepEqual(powerState.sessions.map((item) => item.id), ["session-a", "session-b"], "Power Mode must retain project-wide worker Session visibility");
+  assert.deepEqual(powerState.events.map((item) => item.id), state.events.map((item) => item.id), "Power Mode must retain the complete project runtime event stream");
 } finally {
   globalThis.fetch = originalFetch;
   if (originalLocalStorage) Object.defineProperty(globalThis, "localStorage", originalLocalStorage);
   else delete (globalThis as { localStorage?: unknown }).localStorage;
 }
 
-console.log("living-workspace-thread-continuity: ok — Simple Mode submission, history, Mission activity, worker Sessions, approvals, and results stay in the selected Thread lineage");
+console.log("living-workspace-thread-continuity: ok — Simple Mode submission, history, Mission/Task/Session runtime evidence, approvals, graph state, and results stay in the selected Thread lineage");
