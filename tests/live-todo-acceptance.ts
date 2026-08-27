@@ -8,14 +8,13 @@ import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
 import type { RuntimeEvent } from "../src/core/types.ts";
 import { createChef, type ChefRuntime } from "../src/main.ts";
+import { applyOrchestratorProviderEnv } from "../src/server/orchestrator-config.ts";
 import { createHttpServer } from "../src/server/http-server.ts";
+import { createThreadServer } from "../src/server/thread-http.ts";
 
 const DEFAULT_TIMEOUT_MS = 10 * 60_000;
+const DEFAULT_STARTUP_BUDGET_MS = 5_000;
 const MAX_PROGRESS_TRACE = 20;
-
-function hasLLMKey(): boolean {
-  return Boolean(process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY || process.env.CHEF_API_KEY);
-}
 
 function isMeaningfulProgress(event: RuntimeEvent): boolean {
   return event.type.startsWith("mission.") || event.type.startsWith("task.") || event.type.startsWith("session.");
@@ -79,12 +78,31 @@ async function waitForHttp(url: string, child: ChildProcess, timeoutMs = 20_000)
   throw new Error(`Generated app did not become reachable: ${String(lastError)}`);
 }
 
-async function main(): Promise<void> {
-  assert.ok(process.env.CHEF_PROVIDER?.trim(), "Set CHEF_PROVIDER before running the live acceptance diagnostic");
-  assert.ok(hasLLMKey(), "Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or CHEF_API_KEY before running the live acceptance diagnostic");
+async function waitForFreshWorkerSession(
+  chef: ChefRuntime,
+  workerIds: ReadonlySet<string>,
+  existingSessionIds: ReadonlySet<string>,
+  budgetMs: number,
+): Promise<{ id: string; taskId: string; agentId: string }> {
+  const deadline = Date.now() + budgetMs;
+  while (Date.now() < deadline) {
+    const snapshot = await chef.inspectState();
+    const session = snapshot.sessions.find(
+      (candidate) => workerIds.has(candidate.agentId) && !existingSessionIds.has(candidate.id),
+    );
+    if (session) return { id: session.id, taskId: session.taskId, agentId: session.agentId };
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`No new detected task-capable CLI worker Session started within ${budgetMs}ms`);
+}
 
+async function main(): Promise<void> {
   const timeoutMs = Number(process.env.CHEF_E2E_TIMEOUT_MS ?? DEFAULT_TIMEOUT_MS);
+  const startupBudgetMs = Number(process.env.CHEF_LIVE_STARTUP_BUDGET_MS ?? DEFAULT_STARTUP_BUDGET_MS);
   assert.ok(Number.isFinite(timeoutMs) && timeoutMs > 0, "CHEF_E2E_TIMEOUT_MS must be a positive number");
+  assert.ok(Number.isFinite(startupBudgetMs) && startupBudgetMs > 0, "CHEF_LIVE_STARTUP_BUDGET_MS must be a positive number");
+
+  await applyOrchestratorProviderEnv();
 
   const projectDir = await mkdtemp(join(tmpdir(), "chef-todo-acceptance-"));
   const dbPath = join(projectDir, "chef.sqlite");
@@ -92,6 +110,7 @@ async function main(): Promise<void> {
   let apiServer: Server | undefined;
   let app: ChildProcess | undefined;
   let unsubscribeEvents: (() => void) | undefined;
+  let chatAbort: AbortController | undefined;
   let passed = false;
   let requestCompleted = false;
   const progressEvents: RuntimeEvent[] = [];
@@ -102,10 +121,17 @@ async function main(): Promise<void> {
     await chef.start();
 
     const workers = chef.specializedHarnesses.detections().filter((worker) => worker.available && worker.taskCapable);
-    assert.equal(chef.llmStatus.configured, true, "Chef must report a configured planner");
+    assert.equal(
+      chef.llmStatus.configured,
+      true,
+      "Chef must have a real configured planner. Configure Chef normally or set CHEF_PROVIDER plus its API key.",
+    );
     assert.ok(workers.length > 0, "At least one real task-capable worker must be detected");
+    const workerIds = new Set(workers.map((worker) => worker.id));
+    const beforeExecution = await chef.inspectState();
+    const existingSessionIds = new Set(beforeExecution.sessions.map((session) => session.id));
 
-    apiServer = createHttpServer(chef);
+    apiServer = createThreadServer(chef, createHttpServer(chef));
     await new Promise<void>((resolve, reject) => {
       apiServer!.once("error", reject);
       apiServer!.listen(0, "127.0.0.1", resolve);
@@ -118,21 +144,36 @@ async function main(): Promise<void> {
       if (!requestCompleted) inFlightProgressEvents.push(event);
     });
 
-    const request = [
-      "Create a simple todo app in this selected project.",
-      "Keep it intentionally small and reliable.",
-      "Use only Node.js built-ins plus browser HTML/CSS/JavaScript so installation is not required.",
-      "Create package.json with an npm start script.",
-      "The server must listen on process.env.PORT and serve the todo UI from /.",
-      "The UI must let a user add a todo, mark it complete, and remove it.",
-      "Verify the app can start before you finish, then summarize what changed and how to run it.",
-    ].join(" ");
+    const createThreadResponse = await fetch(`http://127.0.0.1:${apiPort}/api/threads`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Live todo acceptance" }),
+    });
+    assert.equal(createThreadResponse.status, 201, "Live acceptance must create a Thread through the product HTTP boundary");
+    const createdThread = await createThreadResponse.json() as { data?: { id?: string } };
+    const threadId = createdThread.data?.id;
+    assert.ok(threadId, "Created Thread must expose an id");
 
-    const response = await fetch(`http://127.0.0.1:${apiPort}/api/chat`, {
+    const request = "Create a todo app in this selected project using only Node.js built-ins and browser HTML/CSS/JavaScript, with package.json npm start, PORT support, and add/complete/remove controls. Verify it starts and summarize how to run it.";
+
+    chatAbort = new AbortController();
+    const responsePromise = fetch(`http://127.0.0.1:${apiPort}/api/threads/${encodeURIComponent(threadId)}/chat`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ message: request }),
+      signal: chatAbort.signal,
     });
+
+    let startedSession: { id: string; taskId: string; agentId: string };
+    try {
+      startedSession = await waitForFreshWorkerSession(chef, workerIds, existingSessionIds, startupBudgetMs);
+    } catch (error) {
+      chatAbort.abort();
+      await responsePromise.catch(() => undefined);
+      throw error;
+    }
+
+    const response = await responsePromise;
     requestCompleted = true;
     const body = await response.json() as { ok?: boolean; data?: { ok?: boolean; taskIds?: string[]; report?: string }; error?: string };
 
@@ -140,19 +181,25 @@ async function main(): Promise<void> {
       inFlightProgressEvents.length > 0,
       `Chef produced no Mission/Task/Session progress while the canonical request was in flight. Recent progress trace:\n${formatProgressTrace(progressEvents)}`,
     );
-    assert.equal(response.status, 200, `Chef HTTP request failed: ${JSON.stringify(body)}`);
+    assert.equal(response.status, 200, `Chef Thread chat request failed: ${JSON.stringify(body)}`);
     assert.equal(body.ok, true, body.error ?? body.data?.report ?? "Chef reported failure");
     assert.equal(body.data?.ok, true, body.data?.report ?? "Mission did not complete successfully");
     assert.ok((body.data?.taskIds?.length ?? 0) > 0, "Mission must create at least one task");
+    assert.ok(body.data!.taskIds!.includes(startedSession.taskId), "Observed fresh CLI Session must belong to the completed Mission");
 
     const snapshot = await chef.inspectState();
     const taskIds = new Set(body.data!.taskIds!);
     const missionTasks = snapshot.tasks.filter((task) => taskIds.has(task.id));
     const missionSessions = snapshot.sessions.filter((session) => taskIds.has(session.taskId));
+    const singleWorkerRoutingEvent = snapshot.events.find((event) => {
+      if (event.type !== "orchestrator.plan.proposed" || !event.payload || typeof event.payload !== "object") return false;
+      return (event.payload as { routingMode?: unknown }).routingMode === "single-worker";
+    });
 
+    assert.ok(singleWorkerRoutingEvent, "Canonical todo request must durably record the single-worker route instead of paying a planner round-trip");
     assert.equal(missionTasks.length, taskIds.size, "Every returned task must exist in durable state");
     assert.ok(missionTasks.every((task) => task.status === "completed"), "Every Mission task must complete");
-    assert.ok(missionSessions.length > 0, "The Mission must create at least one real worker session");
+    assert.ok(missionSessions.some((session) => session.id === startedSession.id), "The bounded startup Session must remain in durable Mission state");
     assert.ok(missionSessions.every((session) => session.status === "completed"), "Every Mission worker session must terminate successfully");
     assert.ok(snapshot.events.some((event) => event.type === "task.completed"), "Runtime must record task completion");
 
@@ -173,11 +220,15 @@ async function main(): Promise<void> {
     assert.ok(/todo/i.test(html), "Generated app root must visibly identify itself as a todo app");
 
     passed = true;
-    console.log(`live-todo-acceptance: ok (${chef.llmStatus.provider}/${chef.llmStatus.model}; worker candidates: ${workers.map((worker) => worker.id).join(", ")})`);
+    console.log(`live-todo-acceptance: ok (${chef.llmStatus.provider}/${chef.llmStatus.model}; worker: ${startedSession.agentId}; candidates: ${workers.map((worker) => worker.id).join(", ")})`);
+    console.log(`Thread: ${threadId}`);
+    console.log(`Worker startup: session=${startedSession.id} task=${startedSession.taskId} within ${startupBudgetMs}ms budget.`);
+    console.log("Routing: single-worker (durable orchestrator.plan.proposed evidence).");
     console.log(`Observed ${inFlightProgressEvents.length} in-flight Mission/Task/Session progress events.`);
     console.log(`Chef summary: ${body.data?.report ?? "(no report)"}`);
   } finally {
     requestCompleted = true;
+    chatAbort?.abort();
     unsubscribeEvents?.();
     if (!passed) console.error(`Recent Chef progress trace:\n${formatProgressTrace(progressEvents)}`);
     await stopProcessTree(app);
