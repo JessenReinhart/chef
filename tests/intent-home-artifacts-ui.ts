@@ -11,7 +11,8 @@ assert.match(artifacts, /fetch\("\/api\/artifacts"\)/, "Living Workspace results
 assert.match(artifacts, /document\.querySelector\("\.chef-living-stage"\)/, "results must render inside the same Living Workspace instead of a second page");
 assert.match(artifacts, /recentArtifacts\(artifacts, MAX_VISIBLE_RESULTS\)/, "default result cards must remain bounded");
 assert.match(artifacts, /recentArtifacts\(artifacts, MAX_SHELF_RESULTS\)/, "the expanded result shelf must remain bounded");
-assert.match(artifacts, /artifact\.uri/, "result cards must preserve durable artifact location/provenance");
+assert.match(artifacts, /provenanceLabel\(artifact\)/, "result cards must preserve durable artifact provenance");
+assert.match(artifacts, /selectedArtifact\.uri/, "artifact inspection must expose the durable result location");
 assert.match(artifacts, /canDownload\(artifact\)/, "download affordances must be derived from the artifact contract");
 assert.match(artifacts, /\/api\/artifacts\/\$\{encodeURIComponent\(artifact\.id\)\}\/download/, "downloads must reuse the canonical artifact endpoint");
 assert.match(artifacts, /Artifact shelf/, "older durable results must remain inspectable from the same workspace");
