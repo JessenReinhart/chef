@@ -18,10 +18,9 @@ export class ClaudeCodeHarness extends SpecializedCliHarness {
       name: "Claude Code",
       binary,
       taskArgs: (prompt) => ["-p", prompt],
-      // Disable telemetry through the supported environment contract rather
-      // than a CLI flag. Current Claude Code builds reject `--no-telemetry`,
-      // which made every Chef-routed Claude task crash before execution.
-      env: { CLAUDE_CODE_DISABLE_TELEMETRY: "1" },
+      // Current Claude Code builds reject the old `--no-telemetry` flag.
+      // Keep the privacy intent through Claude Code's documented opt-out env.
+      env: { DISABLE_TELEMETRY: "1" },
       ...runtime,
     });
   }
