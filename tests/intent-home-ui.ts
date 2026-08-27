@@ -132,4 +132,44 @@ assert.deepEqual(planningActivity.feed, [
   "Chef is deciding how to approach this Mission.",
 ], "Mission-correlated planning must be visible before any Task or Session exists");
 
+const startupMission: UiMission = {
+  ...mission,
+  id: "mission-startup",
+  taskIds: [],
+  createdAt: 300,
+  updatedAt: 305,
+};
+const startupActivity = projectMissionActivity({
+  missions: [startupMission],
+  tasks: [task],
+  events: [
+    {
+      id: "event-startup-plan",
+      seq: 6,
+      timestamp: 300,
+      source: { type: "orchestrator", id: "orchestrator" },
+      type: "orchestrator.plan.proposed",
+      payload: { missionId: "mission-startup", routingMode: "single-worker", taskIds: ["task-1"] },
+      correlationId: "mission-startup",
+    },
+    {
+      id: "event-startup-worker",
+      seq: 7,
+      timestamp: 305,
+      source: { type: "task", id: "task-1" },
+      type: "task.running",
+      payload: {},
+      taskId: "task-1",
+    },
+  ],
+}, harnesses);
+assert.ok(startupActivity, "startup activity should recover durable Task ownership from the Mission plan");
+assert.deepEqual(startupActivity.workers.map((worker) => [worker.name, worker.title, worker.state]), [
+  ["Claude Code", "Build the app", "Working"],
+], "the worker list should not disappear while the Mission snapshot catches up to its durable plan");
+assert.deepEqual(startupActivity.feed, [
+  "Claude Code started Build the app.",
+  "Chef chose one worker for this Mission.",
+]);
+
 console.log("intent-home-ui: ok — canonical workspace and Mission activity are verified by executable behavior, not source shape");
