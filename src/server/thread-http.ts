@@ -89,6 +89,31 @@ export function createThreadServer(runtime: ChefRuntime, baseServer: Server): Se
     return thread?.workspaceId === runtime.workspaceId ? thread : null;
   };
 
+  const persistAssistantTurn = (input: {
+    threadId: string;
+    missionId: string;
+    content: string;
+    taskIds: string[];
+    ok: boolean;
+  }) => {
+    try {
+      chat.insert({
+        workspaceId: runtime.workspaceId,
+        threadId: input.threadId,
+        role: "assistant",
+        content: input.content,
+        metadata: { missionId: input.missionId, taskIds: input.taskIds, ok: input.ok },
+      });
+    } catch (error) {
+      // The HTTP acknowledgement deliberately outlives request execution. During
+      // process shutdown the repository may already be closed before a worker's
+      // Promise settles; do not turn that normal teardown race into an unhandled
+      // rejection. A live runtime still persists every settled assistant turn.
+      const detail = error instanceof Error ? error.message : String(error);
+      if (!/database is not open/i.test(detail)) throw error;
+    }
+  };
+
   return createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
     try {
@@ -171,24 +196,28 @@ export function createThreadServer(runtime: ChefRuntime, baseServer: Server): Se
           throw new Error("Mission was not created before Thread acknowledgement");
         }
 
-        void execution.then((result) => {
-          chat.insert({
-            workspaceId: runtime.workspaceId,
-            threadId: thread.id,
-            role: "assistant",
-            content: result.report,
-            metadata: { missionId: mission!.id, taskIds: result.taskIds, ok: result.ok },
-          });
-        }).catch((error) => {
-          const detail = error instanceof Error ? error.message : String(error);
-          chat.insert({
-            workspaceId: runtime.workspaceId,
-            threadId: thread.id,
-            role: "assistant",
-            content: `Chef could not finish that work: ${detail}`,
-            metadata: { missionId: mission!.id, taskIds: [], ok: false },
-          });
-        });
+        const missionId = mission.id;
+        void execution.then(
+          (result) => {
+            persistAssistantTurn({
+              threadId: thread.id,
+              missionId,
+              content: result.report,
+              taskIds: result.taskIds,
+              ok: result.ok,
+            });
+          },
+          (error) => {
+            const detail = error instanceof Error ? error.message : String(error);
+            persistAssistantTurn({
+              threadId: thread.id,
+              missionId,
+              content: `Chef could not finish that work: ${detail}`,
+              taskIds: [],
+              ok: false,
+            });
+          },
+        );
 
         sendJson(res, 202, {
           ok: true,
@@ -197,7 +226,7 @@ export function createThreadServer(runtime: ChefRuntime, baseServer: Server): Se
             accepted: true,
             taskIds: [],
             report: "",
-            missionId: mission.id,
+            missionId,
             threadId: thread.id,
           },
         });
