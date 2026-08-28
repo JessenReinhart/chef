@@ -55,7 +55,10 @@ function scopeMissionActivity(events: UiRuntimeEvent[], mission: UiMission): {
 
   for (const event of events) {
     if (!directlyBelongsToMission(event, mission.id)) continue;
-    for (const taskId of payloadStrings(eventPayload(event), "taskIds")) ownedTaskIds.add(taskId);
+    const payload = eventPayload(event);
+    const taskId = payloadString(payload, "taskId");
+    if (taskId) ownedTaskIds.add(taskId);
+    for (const payloadTaskId of payloadStrings(payload, "taskIds")) ownedTaskIds.add(payloadTaskId);
   }
 
   return {
@@ -64,7 +67,10 @@ function scopeMissionActivity(events: UiRuntimeEvent[], mission: UiMission): {
       .filter((event) => {
         if (directlyBelongsToMission(event, mission.id)) return true;
         if (event.taskId && ownedTaskIds.has(event.taskId)) return true;
-        return payloadStrings(eventPayload(event), "taskIds").some((taskId) => ownedTaskIds.has(taskId));
+        const payload = eventPayload(event);
+        const taskId = payloadString(payload, "taskId");
+        if (taskId && ownedTaskIds.has(taskId)) return true;
+        return payloadStrings(payload, "taskIds").some((payloadTaskId) => ownedTaskIds.has(payloadTaskId));
       })
       .sort((a, b) => b.seq - a.seq),
   };
