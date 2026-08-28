@@ -143,24 +143,9 @@ export function projectMissionActivity(
 
   const feed: string[] = [];
   const seen = new Set<string>();
-  const heartbeat = missionCanHeartbeat(mission)
-    ? deriveMissionHeartbeat(snapshot.events, mission.id, scoped.ownedTaskIds, now)
-    : null;
-  if (heartbeat) {
-    feed.push(heartbeat.text);
-    seen.add(heartbeat.text);
-  }
 
-  // Keep the routing decision visible even after worker output starts. It tells
-  // the user why Chef chose a single worker or a coordinated plan, which is
-  // more durable context than another transient task-state line.
-  const routingEvent = scoped.events.find((event) => event.type === "orchestrator.plan.proposed");
-  const routingUpdate = routingEvent ? summarizeMissionProgressEvent(routingEvent) : null;
-  if (routingUpdate && !seen.has(routingUpdate.text)) {
-    feed.push(routingUpdate.text);
-    seen.add(routingUpdate.text);
-  }
-
+  // Prefer concrete recent progress. A heartbeat is useful only when there are
+  // not already enough meaningful runtime updates to explain what is happening.
   for (const event of scoped.events) {
     const task = event.taskId ? tasksById.get(event.taskId) : undefined;
     const worker = task?.assignedTo ? (harnessNames.get(task.assignedTo) ?? task.assignedTo) : "Chef";
@@ -182,6 +167,11 @@ export function projectMissionActivity(
     seen.add(text);
     feed.push(text);
     if (feed.length === 3) break;
+  }
+
+  if (feed.length < 3 && missionCanHeartbeat(mission)) {
+    const heartbeat = deriveMissionHeartbeat(snapshot.events, mission.id, scoped.ownedTaskIds, now);
+    if (heartbeat && !seen.has(heartbeat.text)) feed.unshift(heartbeat.text);
   }
 
   return {
