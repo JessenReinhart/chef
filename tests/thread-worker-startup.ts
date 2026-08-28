@@ -40,6 +40,7 @@ await once(server, "listening");
 const address = server.address();
 if (!address || typeof address === "string") throw new Error("worker-startup HTTP server did not bind");
 const baseUrl = `http://127.0.0.1:${address.port}`;
+let acknowledgedMissionId: string | undefined;
 
 try {
   const createThreadResponse = await fetch(`${baseUrl}/api/threads`, {
@@ -67,6 +68,7 @@ try {
   assert.equal(body.data?.threadId, threadId);
   const missionId = body.data?.missionId;
   assert.ok(missionId, "Thread acknowledgement must expose its durable Mission lineage");
+  acknowledgedMissionId = missionId;
 
   await waitForWorkerStartup(async () => {
     const snapshot = await chef.inspectState();
@@ -106,9 +108,15 @@ try {
   assert.ok(taskCreated, "worker startup must retain durable Task creation evidence");
   assert.ok(planningSucceeded.seq < taskCreated.seq, "accepted plan evidence must precede real worker Task creation");
 } finally {
+  if (acknowledgedMissionId) {
+    const mission = chef.repository.getMission(acknowledgedMissionId);
+    if (mission && !["completed", "failed", "cancelled"].includes(mission.status)) {
+      await chef.cancelMission(acknowledgedMissionId);
+    }
+  }
   await new Promise<void>((resolve) => server.close(() => resolve()));
   await chef.close();
   await rm(dir, { recursive: true, force: true });
 }
 
-console.log("thread-worker-startup: ok — Thread chat acknowledges first, then durably reaches a real worker Session within its startup budget");
+console.log("thread-worker-startup: ok — Thread chat acknowledges first, durably reaches a real worker Session within budget, then cancels bounded work before teardown");
