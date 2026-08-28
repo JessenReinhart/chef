@@ -63,6 +63,22 @@ try {
     assert.equal(plannerRequestCount, requestsBeforeIntent, `${intentGoal} must not pay a planner-provider round trip`);
   }
 
+  const explanatoryGoals = [
+    "What is React?",
+    "How does React reconciliation work?",
+    "Tell me about Vite",
+  ];
+  for (const explanatoryGoal of explanatoryGoals) {
+    const requestsBeforeExplanation = plannerRequestCount;
+    const explanationFastPath = await provider.proposePlan({ ...context, goal: explanatoryGoal });
+    assert.ok(explanationFastPath);
+    assert.equal(explanationFastPath.routingMode, "single-worker", `${explanatoryGoal} should route directly as a single-stage explanation`);
+    assert.equal(explanationFastPath.tasks.length, 1, `${explanatoryGoal} should keep one worker owner`);
+    assert.equal(explanationFastPath.tasks[0].assignedTo, "codex", `${explanatoryGoal} should use the available task-capable worker`);
+    assert.equal(explanationFastPath.tasks[0].description, explanatoryGoal, `${explanatoryGoal} must reach the worker unchanged`);
+    assert.equal(plannerRequestCount, requestsBeforeExplanation, `${explanatoryGoal} must not pay a planner-provider round trip`);
+  }
+
   const fastEvaluationRequestsBefore = plannerRequestCount;
   const fastEvaluation = await provider.evaluate({
     taskId: fastPath.tasks[0].id,
@@ -278,7 +294,36 @@ try {
   assert.equal(plannerRequestCount, plannerRequestsBeforeComplexIntent + 1, "complex intent phrasing must still invoke the planner");
   assert.equal(complexIntentPlan.tasks.length, 2, "planner decomposition remains available for complex intent phrasing");
 
-  console.log("mission-worker-routing: ok — simple intent phrasing and qualifier-free direct work stay provider-independent while explicit complexity still plans and evaluates through the provider");
+  const complexExplanationGoal = "How does this architecture compare to the old system and then write a migration report?";
+  const plannerRequestsBeforeComplexExplanation = plannerRequestCount;
+  responsePlan = {
+    goal: complexExplanationGoal,
+    tasks: [
+      {
+        id: "task-8",
+        title: "Compare systems",
+        description: "Compare the current architecture with the old system.",
+        dependencies: [],
+        priority: 1,
+        nodeType: "agent.llm",
+      },
+      {
+        id: "task-9",
+        title: "Write migration report",
+        description: "Write a migration report from the comparison.",
+        dependencies: ["task-8"],
+        priority: 0,
+        nodeType: "agent.llm",
+      },
+    ],
+  };
+  const complexExplanationPlan = await provider.proposePlan({ ...context, goal: complexExplanationGoal });
+  assert.ok(complexExplanationPlan);
+  assert.equal(complexExplanationPlan.routingMode, "planner", "question phrasing must not override explicit comparison and chained-deliverable complexity");
+  assert.equal(plannerRequestCount, plannerRequestsBeforeComplexExplanation + 1, "complex explanatory wording must still invoke the planner");
+  assert.equal(complexExplanationPlan.tasks.length, 2, "planner decomposition remains available for complex explanatory requests");
+
+  console.log("mission-worker-routing: ok — direct work, simple intent, research, and ordinary explanations stay provider-independent while explicit complexity still plans and evaluates through the provider");
 } finally {
   await new Promise<void>((resolve) => server.close(() => resolve()));
 }
