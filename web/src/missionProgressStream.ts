@@ -9,6 +9,7 @@ export const MISSION_PROGRESS_EVENT_TYPES = [
 
 export type MissionProgressEventStream = Pick<EventSource, "onmessage" | "close">;
 export type MissionProgressEventStreamFactory = (url: string) => MissionProgressEventStream;
+export type MissionProgressRefresh = () => void | Promise<void>;
 
 /** Keep human-readable Mission progress subscribed to every runtime family it can translate. */
 export function missionProgressEventStreamUrl(): string {
@@ -17,13 +18,41 @@ export function missionProgressEventStreamUrl(): string {
 
 /**
  * Refresh a mounted progress projection whenever authoritative runtime evidence arrives.
- * The factory seam keeps the behavior executable in Node-based acceptance tests without a browser.
+ * Keep at most one refresh in flight and collapse a burst into one trailing refresh so
+ * high-frequency worker output cannot create an unbounded /api/state request storm.
  */
 export function subscribeMissionProgressRefresh(
-  onRefresh: () => void,
+  onRefresh: MissionProgressRefresh,
   createStream: MissionProgressEventStreamFactory = (url) => new EventSource(url),
 ): () => void {
   const stream = createStream(missionProgressEventStreamUrl());
-  stream.onmessage = () => onRefresh();
-  return () => stream.close();
+  let closed = false;
+  let refreshing = false;
+  let queued = false;
+
+  const refresh = () => {
+    if (closed) return;
+    if (refreshing) {
+      queued = true;
+      return;
+    }
+
+    refreshing = true;
+    Promise.resolve(onRefresh())
+      .catch(() => undefined)
+      .finally(() => {
+        refreshing = false;
+        if (!closed && queued) {
+          queued = false;
+          refresh();
+        }
+      });
+  };
+
+  stream.onmessage = refresh;
+  return () => {
+    closed = true;
+    queued = false;
+    stream.close();
+  };
 }
