@@ -66,11 +66,11 @@ const state: ThreadScopedState = {
   ],
   events: [
     runtimeEvent("mission-a-plan", 1, { type: "orchestrator", id: "orchestrator" }, "orchestrator.plan.started", { correlationId: "mission-a", payload: { missionId: "mission-a" } }),
-    runtimeEvent("task-a-running", 2, { type: "task", id: "task-a" }, "task.running", { taskId: "task-a" }),
-    runtimeEvent("session-a-data", 3, { type: "session", id: "session-a" }, "session.data", { sessionId: "session-a" }),
+    runtimeEvent("task-a-running", 2, { type: "runtime", id: "workspace-1" }, "task.running", { payload: { taskId: "task-a" } }),
+    runtimeEvent("session-a-data", 3, { type: "runtime", id: "workspace-1" }, "session.data", { payload: { sessionId: "session-a" } }),
     runtimeEvent("mission-b-plan", 4, { type: "orchestrator", id: "orchestrator" }, "orchestrator.plan.started", { correlationId: "mission-b", payload: { missionId: "mission-b" } }),
-    runtimeEvent("task-b-running", 5, { type: "task", id: "task-b" }, "task.running", { taskId: "task-b" }),
-    runtimeEvent("session-b-data", 6, { type: "session", id: "session-b" }, "session.data", { sessionId: "session-b" }),
+    runtimeEvent("task-b-running", 5, { type: "runtime", id: "workspace-1" }, "task.running", { payload: { taskId: "task-b" } }),
+    runtimeEvent("session-b-data", 6, { type: "runtime", id: "workspace-1" }, "session.data", { payload: { sessionId: "session-b" } }),
     runtimeEvent("project-only", 7, { type: "runtime", id: "workspace-1" }, "runtime.note"),
   ],
 };
@@ -85,14 +85,51 @@ assert.deepEqual(scoped.canvasEdges.map((item) => item.id), ["edge-a"], "Simple 
 assert.deepEqual(
   scoped.events.map((item) => item.id),
   ["mission-a-plan", "task-a-running", "session-a-data"],
-  "Simple Mode runtime evidence must include selected Mission/Task/Session lineage and exclude another Thread or unscoped project activity",
+  "Simple Mode runtime evidence must include selected Mission/Task/Session lineage even when task/session ids only exist inside event payloads",
 );
+assert.equal(scoped.events.find((item) => item.id === "session-a-data")?.taskId, "task-a", "payload-only Session lineage must be enriched with its selected-Thread Task before activity projection");
 
 const activity = projectMissionActivity({ missions: scoped.missions ?? [], tasks: scoped.tasks, events: scoped.events }, []);
 assert.ok(activity);
 assert.equal(activity.mission.id, "mission-a", "Living Workspace activity must stay on the selected Thread even when another Thread has newer active work");
 assert.equal(activity.mission.goal, "Goal for thread-a");
 assert.ok(activity.feed.some((item) => item.includes("actively producing output")), "selected Thread Session activity must remain visible after runtime-event scoping");
+
+const laggingState: ThreadScopedState = {
+  ...state,
+  missions: [
+    { ...selectedMission, taskIds: [] },
+    { ...otherMission, taskIds: [] },
+  ],
+  events: [
+    runtimeEvent("mission-a-plan", 1, { type: "orchestrator", id: "orchestrator" }, "orchestrator.plan.proposed", {
+      correlationId: "mission-a",
+      payload: { missionId: "mission-a", taskId: "task-a", routingMode: "single-worker" },
+    }),
+    runtimeEvent("task-a-running", 2, { type: "runtime", id: "workspace-1" }, "task.running", { payload: { taskId: "task-a" } }),
+    runtimeEvent("session-a-data", 3, { type: "runtime", id: "workspace-1" }, "session.data", { payload: { sessionId: "session-a" } }),
+    runtimeEvent("mission-b-plan", 4, { type: "orchestrator", id: "orchestrator" }, "orchestrator.plan.proposed", {
+      correlationId: "mission-b",
+      payload: { missionId: "mission-b", taskId: "task-b", routingMode: "single-worker" },
+    }),
+    runtimeEvent("task-b-running", 5, { type: "runtime", id: "workspace-1" }, "task.running", { payload: { taskId: "task-b" } }),
+    runtimeEvent("session-b-data", 6, { type: "runtime", id: "workspace-1" }, "session.data", { payload: { sessionId: "session-b" } }),
+  ],
+};
+
+const laggingScoped = scopeStateToThread(laggingState, "thread-a");
+assert.deepEqual(laggingScoped.missions?.[0]?.taskIds, [], "fixture must represent a Mission snapshot that has not caught up with durable plan lineage yet");
+assert.deepEqual(laggingScoped.tasks.map((item) => item.id), ["task-a"], "a Mission-correlated singular payload.taskId must recover selected-Thread Task ownership while the Mission snapshot lags");
+assert.deepEqual(laggingScoped.sessions.map((item) => item.id), ["session-a"], "a freshly started worker Session must remain visible when Task ownership is only durable in the plan event");
+assert.deepEqual(laggingScoped.canvasNodes.map((item) => item.id), ["helper", "node-a"], "worker canvas state must stay visible through the same recovered Task lineage");
+assert.deepEqual(
+  laggingScoped.events.map((item) => item.id),
+  ["mission-a-plan", "task-a-running", "session-a-data"],
+  "payload-only recovered Task and Session lineage must preserve later worker activity while still excluding another Thread",
+);
+const laggingActivity = projectMissionActivity({ missions: laggingScoped.missions ?? [], tasks: laggingScoped.tasks, events: laggingScoped.events }, []);
+assert.ok(laggingActivity?.feed.some((item) => item.includes("one worker")), "pre-worker routing feedback must remain visible while the Mission task list catches up");
+assert.ok(laggingActivity?.feed.some((item) => item.includes("actively producing output")), "worker activity must remain visible after payload-based ownership recovery");
 
 assert.equal(threadChatPath("thread-a"), "/api/threads/thread-a/chat", "Simple Mode submissions must use the selected Thread chat boundary");
 assert.equal(threadMessagesPath("thread-a"), "/api/threads/thread-a/messages", "Simple Mode assistant history must come from the selected Thread");
@@ -147,7 +184,7 @@ try {
   const scopedState = await client.stateRaw();
   assert.deepEqual(scopedState.missions?.map((item) => item.id), ["mission-a"], "the API state consumed by Living Workspace must exclude another Thread's newer Mission");
   assert.deepEqual(scopedState.sessions.map((item) => item.id), ["session-a"], "the API state consumed by Living Workspace must exclude another Thread's worker Session");
-  assert.deepEqual(scopedState.events.map((item) => item.id), ["mission-a-plan", "task-a-running", "session-a-data"], "the actual Simple Mode API state must exclude another Thread's runtime activity");
+  assert.deepEqual(scopedState.events.map((item) => item.id), ["mission-a-plan", "task-a-running", "session-a-data"], "the actual Simple Mode API state must retain payload-linked selected-Thread runtime activity and exclude another Thread");
 
   storage.set("chef:view-mode", "power");
   const powerState = await client.stateRaw();

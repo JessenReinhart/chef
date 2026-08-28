@@ -55,7 +55,10 @@ function scopeMissionActivity(events: UiRuntimeEvent[], mission: UiMission): {
 
   for (const event of events) {
     if (!directlyBelongsToMission(event, mission.id)) continue;
-    for (const taskId of payloadStrings(eventPayload(event), "taskIds")) ownedTaskIds.add(taskId);
+    const payload = eventPayload(event);
+    const taskId = payloadString(payload, "taskId");
+    if (taskId) ownedTaskIds.add(taskId);
+    for (const payloadTaskId of payloadStrings(payload, "taskIds")) ownedTaskIds.add(payloadTaskId);
   }
 
   return {
@@ -64,7 +67,10 @@ function scopeMissionActivity(events: UiRuntimeEvent[], mission: UiMission): {
       .filter((event) => {
         if (directlyBelongsToMission(event, mission.id)) return true;
         if (event.taskId && ownedTaskIds.has(event.taskId)) return true;
-        return payloadStrings(eventPayload(event), "taskIds").some((taskId) => ownedTaskIds.has(taskId));
+        const payload = eventPayload(event);
+        const taskId = payloadString(payload, "taskId");
+        if (taskId && ownedTaskIds.has(taskId)) return true;
+        return payloadStrings(payload, "taskIds").some((payloadTaskId) => ownedTaskIds.has(payloadTaskId));
       })
       .sort((a, b) => b.seq - a.seq),
   };
@@ -137,14 +143,9 @@ export function projectMissionActivity(
 
   const feed: string[] = [];
   const seen = new Set<string>();
-  const heartbeat = missionCanHeartbeat(mission)
-    ? deriveMissionHeartbeat(snapshot.events, mission.id, scoped.ownedTaskIds, now)
-    : null;
-  if (heartbeat) {
-    feed.push(heartbeat.text);
-    seen.add(heartbeat.text);
-  }
 
+  // Prefer concrete recent progress. A heartbeat is useful only when there are
+  // not already enough meaningful runtime updates to explain what is happening.
   for (const event of scoped.events) {
     const task = event.taskId ? tasksById.get(event.taskId) : undefined;
     const worker = task?.assignedTo ? (harnessNames.get(task.assignedTo) ?? task.assignedTo) : "Chef";
@@ -166,6 +167,11 @@ export function projectMissionActivity(
     seen.add(text);
     feed.push(text);
     if (feed.length === 3) break;
+  }
+
+  if (feed.length < 3 && missionCanHeartbeat(mission)) {
+    const heartbeat = deriveMissionHeartbeat(snapshot.events, mission.id, scoped.ownedTaskIds, now);
+    if (heartbeat && !seen.has(heartbeat.text)) feed.unshift(heartbeat.text);
   }
 
   return {
