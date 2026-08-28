@@ -1,23 +1,39 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "./api";
-import { projectMissionActivity, type MissionActivitySnapshot } from "./missionActivityProjection";
+import { projectMissionActivity, selectLivingWorkspaceMission, type MissionActivitySnapshot } from "./missionActivityProjection";
 import { subscribeMissionProgressRefresh } from "./missionProgressStream";
+import { loadSelectedThreadId, threadMessages } from "./threadApi";
+import { latestAssistantThreadNote } from "./threadSelection";
 import type { HarnessInfo } from "./types";
 
 const EMPTY: MissionActivitySnapshot = { missions: [], tasks: [], events: [] };
+const TERMINAL_MISSION_STATES = new Set(["completed", "failed", "cancelled"]);
 
 export function MissionActivityRail() {
   const [snapshot, setSnapshot] = useState<MissionActivitySnapshot>(EMPTY);
   const [harnesses, setHarnesses] = useState<HarnessInfo[]>([]);
+  const [resultNote, setResultNote] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
+      const selectedThreadId = loadSelectedThreadId();
       const state = await api.stateRaw();
-      setSnapshot({
+      const nextSnapshot = {
         missions: state.missions ?? [],
         tasks: state.tasks,
         events: state.events,
-      });
+      };
+      setSnapshot(nextSnapshot);
+
+      const mission = selectLivingWorkspaceMission(nextSnapshot.missions);
+      if (!selectedThreadId || !mission || !TERMINAL_MISSION_STATES.has(mission.status)) {
+        setResultNote(null);
+        return;
+      }
+
+      const messages = await threadMessages(selectedThreadId);
+      if (loadSelectedThreadId() !== selectedThreadId) return;
+      setResultNote(latestAssistantThreadNote(messages, mission.id)?.content ?? null);
     } catch {
       // The Living Workspace owns the primary error surface. Keep this rail quiet.
     }
@@ -71,6 +87,13 @@ export function MissionActivityRail() {
           ? activity.feed.map((line) => <p key={line}>{line}</p>)
           : <p>{activity.fallback}</p>}
       </div>
+
+      {resultNote && (
+        <div className="chef-live-activity__feed">
+          <span>Chef's summary</span>
+          <p>{resultNote}</p>
+        </div>
+      )}
     </aside>
   );
 }
