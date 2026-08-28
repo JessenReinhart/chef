@@ -2,6 +2,7 @@
 
 ## 2026-08-28
 
+- **Simple Mode notes and progress now stay with the selected Thread (#239):** Switching conversations can no longer let a slow response from the previous Thread replace the current Chef note. Freshly started worker activity also stays visible while Mission snapshots catch up, and real recent progress is shown before generic heartbeat messages.
 - **Simple Mode now stays inside the Thread you selected (#238):** New requests, Mission progress, worker activity, approvals, runtime events, and task-backed canvas state are scoped to the active Thread so activity from another conversation cannot take over the current workspace. Power Mode still keeps project-wide visibility.
 - **Chef now keeps the normal workflow inside one Living Workspace (#237):** The selected project, task progress, worker activity, results, run instructions, and verification details now stay together in the main workspace instead of competing across separate home/workbench surfaces. Results are tied to the current Mission so old artifacts are not presented as the latest task output, and advanced runtime details remain available when needed.
 
