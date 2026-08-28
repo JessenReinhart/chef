@@ -38,7 +38,8 @@ export function subscribeMissionProgressRefresh(
     }
 
     refreshing = true;
-    Promise.resolve(onRefresh())
+    Promise.resolve()
+      .then(onRefresh)
       .catch(() => undefined)
       .finally(() => {
         refreshing = false;
