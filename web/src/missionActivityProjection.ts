@@ -80,7 +80,7 @@ function isMissionOngoing(mission: UiMission): boolean {
   return mission.status !== "completed" && mission.status !== "cancelled" && mission.status !== "failed";
 }
 
-function selectMission(missions: UiMission[]): UiMission | null {
+export function selectLivingWorkspaceMission(missions: UiMission[]): UiMission | null {
   const newestFirst = [...missions].sort((a, b) => b.createdAt - a.createdAt);
   return newestFirst.find(isMissionOngoing) ?? newestFirst[0] ?? null;
 }
@@ -123,7 +123,7 @@ export function projectMissionActivity(
   harnesses: HarnessInfo[],
   now = Date.now(),
 ): MissionActivityProjection | null {
-  const mission = selectMission(snapshot.missions);
+  const mission = selectLivingWorkspaceMission(snapshot.missions);
   if (!mission) return null;
 
   const tasksById = new Map(snapshot.tasks.map((task) => [task.id, task]));
