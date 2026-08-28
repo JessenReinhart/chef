@@ -2,7 +2,7 @@ import { strict as assert } from "node:assert";
 import { createServer } from "node:http";
 import { once } from "node:events";
 import { LLMDecisionProvider } from "../src/orchestrator/llm-decision-provider.ts";
-import { SingleWorkerFastPathDecisionProvider } from "../src/orchestrator/fast-path-decision-provider.ts";
+import { createMissionDecisionProvider, SingleWorkerFastPathDecisionProvider } from "../src/orchestrator/fast-path-decision-provider.ts";
 
 let responsePlan: Record<string, unknown> = {};
 let plannerRequestCount = 0;
@@ -50,6 +50,32 @@ try {
   assert.equal(fastPath.tasks[0].assignedTo, "codex", "the fast path uses a real available task-capable worker");
   assert.equal(fastPath.tasks[0].description, canonicalGoal, "the worker receives the full user goal");
   assert.equal(plannerRequestCount, 0, "the canonical simple request must not pay a planner-provider round trip");
+
+  const previousEnv = {
+    provider: process.env.CHEF_PROVIDER,
+    apiKey: process.env.CHEF_API_KEY,
+    model: process.env.CHEF_MODEL,
+    baseUrl: process.env.CHEF_BASE_URL,
+  };
+  try {
+    process.env.CHEF_PROVIDER = "custom";
+    process.env.CHEF_API_KEY = "test-key";
+    process.env.CHEF_MODEL = "test-model";
+    process.env.CHEF_BASE_URL = `http://127.0.0.1:${address.port}/v1`;
+    const configuredProvider = createMissionDecisionProvider();
+    assert.ok(configuredProvider, "configured Chef runtime must construct a Mission routing provider");
+    const requestsBeforeConfiguredFastPath = plannerRequestCount;
+    const configuredFastPath = await configuredProvider.proposePlan({ ...context, goal: canonicalGoal });
+    assert.ok(configuredFastPath);
+    assert.equal(configuredFastPath.routingMode, "single-worker", "the configured runtime factory must preserve the canonical direct-worker route");
+    assert.equal(configuredFastPath.tasks[0].assignedTo, "codex");
+    assert.equal(plannerRequestCount, requestsBeforeConfiguredFastPath, "the configured runtime factory must not call the planner for the canonical request");
+  } finally {
+    if (previousEnv.provider === undefined) delete process.env.CHEF_PROVIDER; else process.env.CHEF_PROVIDER = previousEnv.provider;
+    if (previousEnv.apiKey === undefined) delete process.env.CHEF_API_KEY; else process.env.CHEF_API_KEY = previousEnv.apiKey;
+    if (previousEnv.model === undefined) delete process.env.CHEF_MODEL; else process.env.CHEF_MODEL = previousEnv.model;
+    if (previousEnv.baseUrl === undefined) delete process.env.CHEF_BASE_URL; else process.env.CHEF_BASE_URL = previousEnv.baseUrl;
+  }
 
   const straightforwardResearchGoal = "Research the best way on how to create a system with AI";
   const researchRequestsBefore = plannerRequestCount;
@@ -172,7 +198,7 @@ try {
   assert.equal(plannerRequestCount, plannerRequestsBeforeComplexGoal + 1, "complex work must still invoke the planner");
   assert.equal(complexPlan.tasks.length, 2, "the planner remains free to decompose genuinely complex work");
 
-  console.log("mission-worker-routing: ok — simple work stays fast while chained deliverables and complex work use planning");
+  console.log("mission-worker-routing: ok — configured runtime and direct provider keep simple work fast while chained deliverables and complex work use planning");
 } finally {
   await new Promise<void>((resolve) => server.close(() => resolve()));
 }
