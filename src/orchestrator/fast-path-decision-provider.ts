@@ -8,8 +8,7 @@ import type {
 import { createLLMDecisionProvider } from "./llm-decision-provider.ts";
 
 const MAX_FAST_PATH_GOAL_LENGTH = 240;
-const SIMPLE_QUALIFIER = /\b(simple|small|basic|minimal|tiny)\b/i;
-const IMPLEMENTATION_ACTION = /\b(create|build|make|implement|add|fix|update|change|rename|remove)\b/i;
+const MAX_TRACKED_FAST_PATH_TASKS = 1_024;
 const DIRECT_SINGLE_STAGE_ACTION = /\b(create|build|make|implement|add|fix|update|change|rename|remove|write|draft|generate)\b/i;
 const INFORMATION_ACTION = /\b(research|explain|summari[sz]e)\b/i;
 const COMPLEXITY_MARKER = /\b(compare|evaluate|analy[sz]e|audit|investigate|architecture|architect|migrate|migration|benchmark|parallel|multiple|multi[- ]agent|across)\b|\b(and then|then verify|then test|after that)\b|\b(and|then)\s+(create|build|implement|fix|update|change|remove|write|draft|document|prepare|produce)\b/i;
@@ -27,6 +26,22 @@ function routedPlan(plan: Plan, routingMode: MissionRoutingMode): RoutedPlan {
   return { ...plan, routingMode };
 }
 
+function deterministicTaskEvaluation(taskResult: PlanTaskOutcome, madeBy: string): Decision {
+  const accepted = taskResult.status === "completed";
+  return {
+    id: crypto.randomUUID(),
+    workspaceId: taskResult.taskId,
+    type: "task.evaluation",
+    summary: accepted
+      ? `Task ${taskResult.taskId} completed${taskResult.resultSummary ? `: ${taskResult.resultSummary}` : ""}`
+      : `Task ${taskResult.taskId} did not complete (status ${taskResult.status})`,
+    payload: taskResult,
+    madeBy,
+    timestamp: Date.now(),
+    status: accepted ? "accepted" : "rejected",
+  };
+}
+
 /**
  * Short, single-stage work should not pay a planner round-trip just because the
  * user omitted a magic qualifier such as "simple". Keep explicit complexity
@@ -38,18 +53,14 @@ export function shouldUseSingleWorkerFastPath(goal: string): boolean {
   if (normalized.includes("\n") || normalized.includes(";")) return false;
   if (COMPLEXITY_MARKER.test(normalized)) return false;
 
-  const qualifiedImplementation = SIMPLE_QUALIFIER.test(normalized)
-    && IMPLEMENTATION_ACTION.test(normalized);
-  const straightforwardSingleStageWork = DIRECT_SINGLE_STAGE_ACTION.test(normalized);
-  const straightforwardInformationRequest = INFORMATION_ACTION.test(normalized);
-
-  return qualifiedImplementation || straightforwardSingleStageWork || straightforwardInformationRequest;
+  return DIRECT_SINGLE_STAGE_ACTION.test(normalized) || INFORMATION_ACTION.test(normalized);
 }
 
 export class SingleWorkerFastPathDecisionProvider implements DecisionProvider {
   readonly name: string;
   readonly #delegate: DecisionProvider;
   readonly #plannerTimeoutMs: number;
+  readonly #fastPathTaskIds = new Set<string>();
 
   constructor(delegate: DecisionProvider, options: SingleWorkerFastPathOptions = {}) {
     this.#delegate = delegate;
@@ -68,6 +79,7 @@ export class SingleWorkerFastPathDecisionProvider implements DecisionProvider {
     }
 
     const taskId = crypto.randomUUID();
+    this.#rememberFastPathTask(taskId);
     return routedPlan({
       id: crypto.randomUUID(),
       workspaceId: input.workspaceId,
@@ -87,8 +99,19 @@ export class SingleWorkerFastPathDecisionProvider implements DecisionProvider {
     }, "single-worker");
   }
 
-  evaluate(taskResult: PlanTaskOutcome): Promise<Decision> {
+  async evaluate(taskResult: PlanTaskOutcome): Promise<Decision> {
+    if (this.#fastPathTaskIds.delete(taskResult.taskId)) {
+      return deterministicTaskEvaluation(taskResult, this.name);
+    }
     return this.#delegate.evaluate(taskResult);
+  }
+
+  #rememberFastPathTask(taskId: string): void {
+    if (this.#fastPathTaskIds.size >= MAX_TRACKED_FAST_PATH_TASKS) {
+      const oldest = this.#fastPathTaskIds.values().next().value;
+      if (oldest !== undefined) this.#fastPathTaskIds.delete(oldest);
+    }
+    this.#fastPathTaskIds.add(taskId);
   }
 
   async #proposeWithTimeout(input: PlanProposalContext): Promise<Plan | null> {

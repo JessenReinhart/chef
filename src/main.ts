@@ -38,7 +38,8 @@ import {
   type OrchestratorHarness,
   type RuntimeAdapter,
 } from "./orchestrator/orchestrator.ts";
-import { createLLMDecisionProvider, readLLMProviderConfig } from "./orchestrator/llm-decision-provider.ts";
+import { createMissionDecisionProvider } from "./orchestrator/fast-path-decision-provider.ts";
+import { readLLMProviderConfig } from "./orchestrator/llm-decision-provider.ts";
 
 class RuntimeHarnessRegistry implements HarnessRegistry {
   readonly #byAgent = new Map<AgentId, HarnessLike>();
@@ -257,7 +258,7 @@ export function createChef(options: {
   // Use LLM provider from env if configured, otherwise use provided or scripted.
   // The wrapper injects live worker readiness and request-scoped Thread context
   // at proposal time so LLM plans can separate continuity from runtime state.
-  const llmProvider = options.decisionProvider ?? createLLMDecisionProvider();
+  const llmProvider = options.decisionProvider ?? createMissionDecisionProvider();
   const scripted = llmProvider ?? new ScriptedDecisionProvider();
   const provider: OrchestratorDecisionProvider = {
     name: scripted.name,
