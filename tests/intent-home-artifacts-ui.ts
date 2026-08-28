@@ -9,6 +9,7 @@ import {
   missingResultHandoffNotice,
   provenanceLabel,
   recentArtifacts,
+  visibleArtifactsForCurrentMission,
   type LivingArtifact,
 } from "../web/src/artifactProjection.ts";
 import { workspaceSurfacePlan } from "../web/src/canonicalWorkspaceModel.ts";
@@ -68,6 +69,22 @@ assert.deepEqual(
   "current Mission results should still be newest-first after lineage scoping",
 );
 
+const earlyMissionResult = artifact(
+  "early-current-result",
+  11,
+  "task-not-yet-in-mission-snapshot",
+  "chef:early-result",
+  { missionId: "mission-current", summary: "First durable result is ready" },
+);
+assert.deepEqual(
+  visibleArtifactsForCurrentMission(
+    [artifact("other-thread-result", 12, "task-other-thread", "chef:other", { missionId: "mission-other" }), earlyMissionResult],
+    { missionId: "mission-current", taskIds: [] },
+  ).map((item) => item.id),
+  ["early-current-result"],
+  "a durable current-Mission result should become visible immediately even while the Mission taskIds snapshot is still catching up",
+);
+
 assert.equal(
   missingResultHandoffNotice("completed", 0),
   "Work is marked complete, but Chef did not publish a durable result for this Mission.",
@@ -89,7 +106,7 @@ assert.equal(
   "failed work should explain why no result is available without pretending completion succeeded",
 );
 
-const goldenTodoResult = artifact("golden-todo", 11, "task-todo", "file:///tmp/todo-app.mjs", {
+const goldenTodoResult = artifact("golden-todo", 13, "task-todo", "file:///tmp/todo-app.mjs", {
   content: "Created runnable todo app at /tmp/todo-app.mjs",
   run: "node /tmp/todo-app.mjs",
   verifiedBy: "golden-path",
@@ -123,15 +140,15 @@ assert.equal(
 );
 
 assert.deepEqual(
-  artifactHandoff(artifact("legacy-result", 12, "task-legacy", "chef:legacy", { description: "Generated report", runCommand: "npm start", verification: "runtime smoke" })),
+  artifactHandoff(artifact("legacy-result", 14, "task-legacy", "chef:legacy", { description: "Generated report", runCommand: "npm start", verification: "runtime smoke" })),
   { summary: "Generated report", runCommand: "npm start", verifiedBy: "runtime smoke" },
   "result handoff should remain useful for older/custom artifact metadata aliases",
 );
 
 assert.equal(workspaceSurfacePlan("simple").livingArtifacts, true, "normal work should keep result projection in the same Living Workspace");
 assert.equal(workspaceSurfacePlan("power").livingArtifacts, false, "opening runtime detail should not duplicate the normal result projection");
-assert.equal(canDownload(artifact("file-result", 13, "task-file", "file:///tmp/result.txt")), true, "file-backed results should expose a real download action");
-assert.equal(canDownload(artifact("runtime-result", 14)), false, "runtime-only artifacts must not invent a download action");
-assert.equal(provenanceLabel(artifact("artifact-15", 15)), "v15 · by claude-code · task task-15", "result handoff should preserve concise provenance");
+assert.equal(canDownload(artifact("file-result", 15, "task-file", "file:///tmp/result.txt")), true, "file-backed results should expose a real download action");
+assert.equal(canDownload(artifact("runtime-result", 16)), false, "runtime-only artifacts must not invent a download action");
+assert.equal(provenanceLabel(artifact("artifact-17", 17)), "v17 · by claude-code · task task-17", "result handoff should preserve concise provenance");
 
-console.log("intent-home-artifacts-ui: ok — current Mission result handoff is lineage-scoped, actionable, and cannot silently disappear after completion");
+console.log("intent-home-artifacts-ui: ok — current Mission result handoff is lineage-scoped, actionable, and can surface durable results before task snapshot convergence");
