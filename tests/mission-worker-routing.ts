@@ -51,6 +51,20 @@ try {
   assert.equal(fastPath.tasks[0].description, canonicalGoal, "the worker receives the full user goal");
   assert.equal(plannerRequestCount, 0, "the canonical simple request must not pay a planner-provider round trip");
 
+  const fastEvaluationRequestsBefore = plannerRequestCount;
+  const fastEvaluation = await provider.evaluate({
+    taskId: fastPath.tasks[0].id,
+    status: "completed",
+    resultSummary: "Todo app created and verified",
+  });
+  assert.equal(fastEvaluation.status, "accepted", "a completed direct-worker task should finish deterministically");
+  assert.match(fastEvaluation.summary, /Todo app created and verified/);
+  assert.equal(
+    plannerRequestCount,
+    fastEvaluationRequestsBefore,
+    "a completed direct-worker task must not pay a second provider round trip before Chef can report completion",
+  );
+
   const previousEnv = {
     provider: process.env.CHEF_PROVIDER,
     apiKey: process.env.CHEF_API_KEY,
@@ -70,6 +84,17 @@ try {
     assert.equal(configuredFastPath.routingMode, "single-worker", "the configured runtime factory must preserve the canonical direct-worker route");
     assert.equal(configuredFastPath.tasks[0].assignedTo, "codex");
     assert.equal(plannerRequestCount, requestsBeforeConfiguredFastPath, "the configured runtime factory must not call the planner for the canonical request");
+    const configuredEvaluation = await configuredProvider.evaluate({
+      taskId: configuredFastPath.tasks[0].id,
+      status: "completed",
+      resultSummary: "Configured runtime worker finished",
+    });
+    assert.equal(configuredEvaluation.status, "accepted");
+    assert.equal(
+      plannerRequestCount,
+      requestsBeforeConfiguredFastPath,
+      "the configured direct route must remain provider-independent through its terminal evaluation",
+    );
   } finally {
     if (previousEnv.provider === undefined) delete process.env.CHEF_PROVIDER; else process.env.CHEF_PROVIDER = previousEnv.provider;
     if (previousEnv.apiKey === undefined) delete process.env.CHEF_API_KEY; else process.env.CHEF_API_KEY = previousEnv.apiKey;
@@ -132,6 +157,20 @@ try {
   assert.equal(routed.routingMode, "planner", "non-fast-path work must retain that it went through planning");
   assert.equal(routed.tasks[0].nodeType, "agent.llm", "nodeType describes the kind of work");
   assert.equal(routed.tasks[0].assignedTo, "codex", "omitted assignee routes to an available worker identity");
+
+  const plannerEvaluationRequestsBefore = plannerRequestCount;
+  responsePlan = { summary: "Planner-routed task accepted", status: "accepted" };
+  const plannerEvaluation = await provider.evaluate({
+    taskId: routed.tasks[0].id,
+    status: "completed",
+    resultSummary: "Architecture analysis complete",
+  });
+  assert.equal(plannerEvaluation.status, "accepted");
+  assert.equal(
+    plannerRequestCount,
+    plannerEvaluationRequestsBefore + 1,
+    "planner-routed work must retain provider-backed evaluation instead of being mistaken for a direct task",
+  );
 
   responsePlan = {
     goal: context.goal,
@@ -198,7 +237,7 @@ try {
   assert.equal(plannerRequestCount, plannerRequestsBeforeComplexGoal + 1, "complex work must still invoke the planner");
   assert.equal(complexPlan.tasks.length, 2, "the planner remains free to decompose genuinely complex work");
 
-  console.log("mission-worker-routing: ok — configured runtime and direct provider keep simple work fast while chained deliverables and complex work use planning");
+  console.log("mission-worker-routing: ok — configured direct work stays provider-independent through completion while planner-routed work still plans and evaluates through the provider");
 } finally {
   await new Promise<void>((resolve) => server.close(() => resolve()));
 }
