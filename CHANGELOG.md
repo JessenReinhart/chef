@@ -2,6 +2,7 @@
 
 ## 2026-08-28
 
+- **Simple Mode now refreshes worker activity as live runtime events arrive (#252):** The mounted activity rail listens to Mission, Task, and Session events instead of relying only on polling, while bursty worker output is coalesced so live progress does not create an unbounded stream of state requests.
 - **Simple Mode now shows live worker progress while a task is running (#250):** Task and worker-session activity now reaches the same human-readable progress feed as Mission events, so starts, retries, failures, crashes, and useful worker activity are less likely to disappear while work is still in progress.
 - **Ordinary explanatory questions can start one worker without unnecessary planning (#248):** Simple questions such as “What is React?” or “How does React reconciliation work?” now use the bounded single-worker fast path, while comparisons, evaluations, and multi-step requests still keep the planner path.
 - **Simple intent phrasing now takes the same fast route as direct commands (#246):** Requests such as “I need a todo app” and “I want a todo app” can start one worker without an unnecessary planner round-trip, while explicitly complex requests still use planning.
