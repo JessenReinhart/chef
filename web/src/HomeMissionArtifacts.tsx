@@ -5,6 +5,7 @@ import { artifactHandoff } from "./artifactHandoff";
 import { visibleArtifactsForSelectedThreadMission } from "./artifactProjection";
 import { copyRunCommand } from "./resultActions";
 import { selectLivingWorkspaceMission } from "./missionActivityProjection";
+import { subscribeMissionProgressRefresh } from "./missionProgressStream";
 import { missionTaskIdsFromEvents } from "./threadScope";
 import type { UiMission, UiRuntimeEvent } from "./types";
 
@@ -85,6 +86,8 @@ export function HomeMissionArtifacts() {
       window.removeEventListener(SELECTED_THREAD_EVENT, onThreadChanged);
     };
   }, [refresh]);
+
+  useEffect(() => subscribeMissionProgressRefresh(refresh), [refresh]);
 
   const missionArtifacts = useMemo(() => {
     if (!mission) return [];
