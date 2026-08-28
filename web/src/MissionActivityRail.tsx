@@ -31,6 +31,7 @@ export function MissionActivityRail() {
         return;
       }
 
+      setResultNote(null);
       const messages = await threadMessages(selectedThreadId);
       if (loadSelectedThreadId() !== selectedThreadId) return;
       setResultNote(latestAssistantThreadNote(messages, mission.id)?.content ?? null);
