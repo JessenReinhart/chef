@@ -51,8 +51,11 @@ async function send(threadId: string, message: string): Promise<void> {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ message }),
   });
-  assert.equal(response.status, 200, `expected Thread send to succeed: ${message}`);
-  await response.json();
+  assert.equal(response.status, 202, `expected Thread send to be accepted: ${message}`);
+  const body = await response.json() as { data?: { accepted?: boolean; missionId?: string; threadId?: string } };
+  assert.equal(body.data?.accepted, true);
+  assert.ok(body.data?.missionId);
+  assert.equal(body.data?.threadId, threadId);
   await new Promise((resolve) => setTimeout(resolve, 2));
 }
 
@@ -93,7 +96,7 @@ try {
     "the current goal must not be duplicated into prior Thread context",
   );
 
-  console.log("thread-planning-continuity: ok — summary and prior Missions are bounded, advisory, and Thread-isolated");
+  console.log("thread-planning-continuity: ok — accepted Thread sends keep summary and prior Missions bounded, advisory, and Thread-isolated");
 } finally {
   await new Promise<void>((resolve) => server.close(() => resolve()));
   repository.close();
