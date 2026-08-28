@@ -2,6 +2,7 @@
 
 ## 2026-08-28
 
+- **Simple intent phrasing now takes the same fast route as direct commands (#246):** Requests such as “I need a todo app” and “I want a todo app” can start one worker without an unnecessary planner round-trip, while explicitly complex requests still use planning.
 - **Mission timeouts now return control even when downstream work ignores cancellation (#244):** Chef can leave a stuck Working/Verifying state at the configured deadline instead of waiting forever for an evaluator or provider promise that never settles. Timed-out Missions and Plans stay failed even if abandoned work finishes later.
 - **Simple Mode surfaces current Mission results sooner (#240):** Durable result artifacts can appear as soon as they are linked to the active Mission, even before Task snapshots finish catching up. Switching Threads still hides results that belong to another conversation.
 - **Simple task routing now reaches one worker without unnecessary extra planning (#242):** Normal short requests such as creating a todo app can use the configured single-worker fast path, while genuinely complex work still goes through the planner. Completion evaluation now follows the actual worker outcome instead of making an unnecessary second provider request.
