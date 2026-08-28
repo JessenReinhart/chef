@@ -61,6 +61,24 @@ assert.deepEqual(explicit, {
   verification: "Smoke test passed",
 });
 
+const booleanVerified = artifactHandoff({
+  uri: "file:///tmp/chef-project/todo-app.mjs",
+  metadata: { verified: true },
+});
+assert.equal(booleanVerified.verification, "Verified", "boolean success evidence should remain visible in the Simple Mode handoff");
+
+const booleanUnverified = artifactHandoff({
+  uri: "file:///tmp/chef-project/todo-app.mjs",
+  metadata: { verified: false },
+});
+assert.equal(booleanUnverified.verification, null, "verified=false must never be rendered as successful verification");
+
+const attributedBooleanVerification = artifactHandoff({
+  uri: "file:///tmp/chef-project/todo-app.mjs",
+  metadata: { verified: true, verifiedBy: "golden-path" },
+});
+assert.equal(attributedBooleanVerification.verification, "Verified by golden-path", "specific verifier evidence should remain more informative than a boolean success flag");
+
 const noisy = artifactHandoff({
   uri: "sideband://result",
   metadata: { content: "Created   the todo app\nwith the requested form and list." },
