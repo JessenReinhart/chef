@@ -4,6 +4,7 @@ import { loadSelectedThreadId, SELECTED_THREAD_EVENT } from "./threadApi";
 import { artifactHandoff } from "./artifactHandoff";
 import { visibleArtifactsForSelectedThreadMission } from "./artifactProjection";
 import { copyRunCommand } from "./resultActions";
+import { selectLivingWorkspaceMission } from "./missionActivityProjection";
 import { missionTaskIdsFromEvents } from "./threadScope";
 import type { UiMission, UiRuntimeEvent } from "./types";
 
@@ -53,9 +54,9 @@ export function HomeMissionArtifacts() {
       const artifactBody = await artifactResponse.json() as { ok?: boolean; data?: HomeArtifact[] };
       if (sequence !== refreshSequence.current || loadSelectedThreadId() !== selectedThreadId) return;
 
-      const currentMission = [...(state.missions ?? [])]
-        .filter((candidate) => candidate.metadata?.threadId === selectedThreadId)
-        .sort((a, b) => b.createdAt - a.createdAt)[0] ?? null;
+      const currentMission = selectLivingWorkspaceMission(
+        (state.missions ?? []).filter((candidate) => candidate.metadata?.threadId === selectedThreadId),
+      );
       const scopedMission = currentMission
         ? {
             ...currentMission,
