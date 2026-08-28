@@ -2,6 +2,8 @@
 
 ## 2026-08-28
 
+- **Simple Mode now shows live worker progress while a task is running (#250):** Task and worker-session activity now reaches the same human-readable progress feed as Mission events, so starts, retries, failures, crashes, and useful worker activity are less likely to disappear while work is still in progress.
+- **Ordinary explanatory questions can start one worker without unnecessary planning (#248):** Simple questions such as “What is React?” or “How does React reconciliation work?” now use the bounded single-worker fast path, while comparisons, evaluations, and multi-step requests still keep the planner path.
 - **Simple intent phrasing now takes the same fast route as direct commands (#246):** Requests such as “I need a todo app” and “I want a todo app” can start one worker without an unnecessary planner round-trip, while explicitly complex requests still use planning.
 - **Mission timeouts now return control even when downstream work ignores cancellation (#244):** Chef can leave a stuck Working/Verifying state at the configured deadline instead of waiting forever for an evaluator or provider promise that never settles. Timed-out Missions and Plans stay failed even if abandoned work finishes later.
 - **Simple Mode surfaces current Mission results sooner (#240):** Durable result artifacts can appear as soon as they are linked to the active Mission, even before Task snapshots finish catching up. Switching Threads still hides results that belong to another conversation.
