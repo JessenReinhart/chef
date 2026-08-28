@@ -27,6 +27,22 @@ function routedPlan(plan: Plan, routingMode: MissionRoutingMode): RoutedPlan {
   return { ...plan, routingMode };
 }
 
+function deterministicTaskEvaluation(taskResult: PlanTaskOutcome, madeBy: string): Decision {
+  const accepted = taskResult.status === "completed";
+  return {
+    id: crypto.randomUUID(),
+    workspaceId: taskResult.taskId,
+    type: "task.evaluation",
+    summary: accepted
+      ? `Task ${taskResult.taskId} completed${taskResult.resultSummary ? `: ${taskResult.resultSummary}` : ""}`
+      : `Task ${taskResult.taskId} did not complete (status ${taskResult.status})`,
+    payload: taskResult,
+    madeBy,
+    timestamp: Date.now(),
+    status: accepted ? "accepted" : "rejected",
+  };
+}
+
 /**
  * Short, single-stage work should not pay a planner round-trip just because the
  * user omitted a magic qualifier such as "simple". Keep explicit complexity
@@ -50,6 +66,7 @@ export class SingleWorkerFastPathDecisionProvider implements DecisionProvider {
   readonly name: string;
   readonly #delegate: DecisionProvider;
   readonly #plannerTimeoutMs: number;
+  readonly #fastPathTaskIds = new Set<string>();
 
   constructor(delegate: DecisionProvider, options: SingleWorkerFastPathOptions = {}) {
     this.#delegate = delegate;
@@ -68,6 +85,7 @@ export class SingleWorkerFastPathDecisionProvider implements DecisionProvider {
     }
 
     const taskId = crypto.randomUUID();
+    this.#fastPathTaskIds.add(taskId);
     return routedPlan({
       id: crypto.randomUUID(),
       workspaceId: input.workspaceId,
@@ -87,7 +105,10 @@ export class SingleWorkerFastPathDecisionProvider implements DecisionProvider {
     }, "single-worker");
   }
 
-  evaluate(taskResult: PlanTaskOutcome): Promise<Decision> {
+  async evaluate(taskResult: PlanTaskOutcome): Promise<Decision> {
+    if (this.#fastPathTaskIds.delete(taskResult.taskId)) {
+      return deterministicTaskEvaluation(taskResult, this.name);
+    }
     return this.#delegate.evaluate(taskResult);
   }
 
