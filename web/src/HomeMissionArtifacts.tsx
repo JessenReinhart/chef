@@ -2,8 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { loadSelectedThreadId, SELECTED_THREAD_EVENT } from "./threadApi";
 import { artifactHandoff } from "./artifactHandoff";
+import { visibleArtifactsForSelectedThreadMission } from "./artifactProjection";
 import { copyRunCommand } from "./resultActions";
-import type { UiMission } from "./types";
+import { selectLivingWorkspaceMission } from "./missionActivityProjection";
+import { missionTaskIdsFromEvents } from "./threadScope";
+import type { UiMission, UiRuntimeEvent } from "./types";
 
 type HomeArtifact = {
   id: string;
@@ -15,7 +18,7 @@ type HomeArtifact = {
   metadata: Record<string, unknown>;
 };
 
-type StateSnapshot = { missions?: UiMission[] };
+type StateSnapshot = { missions?: UiMission[]; events?: UiRuntimeEvent[] };
 type RunCopyState = "copied" | "error";
 
 const MAX_HOME_ARTIFACTS = 4;
@@ -51,11 +54,17 @@ export function HomeMissionArtifacts() {
       const artifactBody = await artifactResponse.json() as { ok?: boolean; data?: HomeArtifact[] };
       if (sequence !== refreshSequence.current || loadSelectedThreadId() !== selectedThreadId) return;
 
-      const currentMission = [...(state.missions ?? [])]
-        .filter((candidate) => candidate.metadata?.threadId === selectedThreadId)
-        .sort((a, b) => b.createdAt - a.createdAt)[0] ?? null;
+      const currentMission = selectLivingWorkspaceMission(
+        (state.missions ?? []).filter((candidate) => candidate.metadata?.threadId === selectedThreadId),
+      );
+      const scopedMission = currentMission
+        ? {
+            ...currentMission,
+            taskIds: [...missionTaskIdsFromEvents(state.events ?? [], [currentMission.id], currentMission.taskIds)],
+          }
+        : null;
 
-      setMission(currentMission);
+      setMission(scopedMission);
       setArtifacts(artifactBody.ok && Array.isArray(artifactBody.data) ? artifactBody.data : []);
       setError(null);
     } catch (cause) {
@@ -79,11 +88,14 @@ export function HomeMissionArtifacts() {
 
   const missionArtifacts = useMemo(() => {
     if (!mission) return [];
-    const taskIds = new Set(mission.taskIds);
-    return artifacts
-      .filter((artifact) => artifact.taskId && taskIds.has(artifact.taskId))
-      .slice(-MAX_HOME_ARTIFACTS)
-      .reverse();
+    const selectedThreadId = loadSelectedThreadId();
+    const missionThreadId = typeof mission.metadata?.threadId === "string" ? mission.metadata.threadId : undefined;
+    return visibleArtifactsForSelectedThreadMission(
+      artifacts,
+      { missionId: mission.id, taskIds: mission.taskIds, threadId: missionThreadId },
+      selectedThreadId,
+      MAX_HOME_ARTIFACTS,
+    );
   }, [artifacts, mission]);
 
   const handleCopyRunCommand = useCallback(async (artifactId: string, runCommand: string) => {
