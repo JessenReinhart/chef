@@ -10,6 +10,7 @@ import {
   provenanceLabel,
   recentArtifacts,
   visibleArtifactsForCurrentMission,
+  visibleArtifactsForSelectedThreadMission,
   type LivingArtifact,
 } from "../web/src/artifactProjection.ts";
 import { workspaceSurfacePlan } from "../web/src/canonicalWorkspaceModel.ts";
@@ -85,6 +86,25 @@ assert.deepEqual(
   ).map((item) => item.id),
   ["early-current-result"],
   "a durable current-Mission result should become visible immediately even while the Mission taskIds snapshot is still catching up",
+);
+
+assert.deepEqual(
+  visibleArtifactsForSelectedThreadMission(
+    [earlyMissionResult],
+    { missionId: "mission-current", taskIds: [], threadId: "thread-a" },
+    "thread-b",
+  ),
+  [],
+  "switching Threads must suppress the previous Thread's Mission results immediately while the new Thread state is loading",
+);
+assert.deepEqual(
+  visibleArtifactsForSelectedThreadMission(
+    [earlyMissionResult],
+    { missionId: "mission-current", taskIds: [], threadId: "thread-a" },
+    "thread-a",
+  ).map((item) => item.id),
+  ["early-current-result"],
+  "the selected Thread should still surface its own current Mission result",
 );
 
 const durableTaskLineageEvent: UiRuntimeEvent = {
@@ -179,4 +199,4 @@ assert.equal(canDownload(artifact("file-result", 18, "task-file", "file:///tmp/r
 assert.equal(canDownload(artifact("runtime-result", 19)), false, "runtime-only artifacts must not invent a download action");
 assert.equal(provenanceLabel(artifact("artifact-20", 20)), "v20 · by claude-code · task task-20", "result handoff should preserve concise provenance");
 
-console.log("intent-home-artifacts-ui: ok — current Mission result handoff is lineage-scoped, actionable, and can surface mission- or task-linked durable results before snapshot convergence");
+console.log("intent-home-artifacts-ui: ok — current Mission result handoff is lineage-scoped, thread-correct, actionable, and can surface mission- or task-linked durable results before snapshot convergence");
