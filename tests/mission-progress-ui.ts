@@ -50,12 +50,17 @@ assert.equal(
 let requestedProgressStream = "";
 let liveRefreshCount = 0;
 let liveStreamClosed = false;
+let releaseFirstRefresh!: () => void;
+const firstRefresh = new Promise<void>((resolve) => { releaseFirstRefresh = resolve; });
 const fakeProgressStream = {
   onmessage: null as ((event: MessageEvent) => void) | null,
   close() { liveStreamClosed = true; },
 };
 const unsubscribeLiveProgress = subscribeMissionProgressRefresh(
-  () => { liveRefreshCount += 1; },
+  () => {
+    liveRefreshCount += 1;
+    return liveRefreshCount === 1 ? firstRefresh : Promise.resolve();
+  },
   (url) => {
     requestedProgressStream = url;
     return fakeProgressStream;
@@ -64,7 +69,12 @@ const unsubscribeLiveProgress = subscribeMissionProgressRefresh(
 assert.equal(requestedProgressStream, missionProgressEventStreamUrl(), "the mounted progress projection must open the worker-aware runtime stream");
 assert.ok(fakeProgressStream.onmessage, "the mounted progress projection must attach a live event handler");
 fakeProgressStream.onmessage?.({} as MessageEvent);
-assert.equal(liveRefreshCount, 1, "an authoritative worker event must refresh the human-readable progress projection immediately rather than waiting for polling");
+fakeProgressStream.onmessage?.({} as MessageEvent);
+fakeProgressStream.onmessage?.({} as MessageEvent);
+assert.equal(liveRefreshCount, 1, "bursty worker output must not start concurrent state refreshes while one refresh is still in flight");
+releaseFirstRefresh();
+await new Promise<void>((resolve) => setImmediate(resolve));
+assert.equal(liveRefreshCount, 2, "bursty worker output must collapse into one trailing refresh so the latest state is still observed");
 unsubscribeLiveProgress();
 assert.equal(liveStreamClosed, true, "unmounting the progress projection must release its EventSource connection");
 
@@ -274,4 +284,4 @@ assert.equal(
   "a crashed worker session must never degrade into a misleading still-working heartbeat",
 );
 
-console.log("mission-progress-ui: ok — mounted live refresh, scoped progress, recovery, and truthful long-running heartbeat behavior are covered");
+console.log("mission-progress-ui: ok — mounted live refresh, bounded event bursts, scoped progress, recovery, and truthful long-running heartbeat behavior are covered");
