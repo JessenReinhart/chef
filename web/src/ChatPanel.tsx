@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { api } from "./api";
 import type { ChatMessage, LlmStatus, UiRuntimeEvent, ViewMode } from "./types";
 import { summarizeMissionProgress, summarizeMissionProgressEvent, type MissionProgressItem } from "./missionProgress";
+import { missionProgressEventStreamUrl } from "./missionProgressStream";
 
 interface ChatPanelProps {
   onPlanProposed: (taskIds: string[]) => void;
@@ -88,7 +89,7 @@ export function ChatPanel({ onPlanProposed, mode }: ChatPanelProps) {
 
   // Keep the digest live from authoritative runtime events without exposing raw-log noise.
   useEffect(() => {
-    const es = new EventSource("/api/events?types=mission.*,orchestrator.*,approval.*,node.failed,task.*,session.*");
+    const es = new EventSource(missionProgressEventStreamUrl());
     es.onmessage = (ev) => {
       try {
         const event = JSON.parse(ev.data) as UiRuntimeEvent;
