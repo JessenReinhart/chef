@@ -66,6 +66,18 @@ class HangingEvaluationProvider extends SlowDecisionProvider {
   }
 }
 
+class DeferredEvaluationProvider extends SlowDecisionProvider {
+  #settlement = Promise.withResolvers<{ status: "accepted"; summary: string }>();
+
+  override async evaluate(): Promise<{ status: "accepted"; summary: string }> {
+    return this.#settlement.promise;
+  }
+
+  settle(): void {
+    this.#settlement.resolve({ status: "accepted", summary: "late evaluation" });
+  }
+}
+
 async function within<T>(work: Promise<T>, timeoutMs: number, label: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -251,6 +263,58 @@ if (!orchestratorSource.includes("class MissionTimeoutError extends Error")) {
   rmSync(dir, { recursive: true, force: true });
 }
 
+// Detached timed-out work may settle later. That late provider completion must
+// never resurrect the already-failed Plan or Mission into a misleading success.
+{
+  const dir = mkdtempSync(join(tmpdir(), "chef-timeout-late-evaluation-test-"));
+  const dbPath = join(dir, "test.db");
+  const script = join(dir, "quick-agent.js");
+  writeFileSync(script, "process.exit(0);\n");
+
+  const provider = new DeferredEvaluationProvider(script, "late-evaluation-plan", "late-evaluation-task");
+  const chef = createChef({
+    dbPath,
+    projectDir: dir,
+    decisionProvider: provider,
+    orchestratorTimeoutMs: 1_000,
+  });
+
+  const result = await within(
+    chef.sendUserMessage("finish the worker then let evaluation settle after timeout"),
+    3_000,
+    "Mission timeout did not return before late evaluation settlement",
+  );
+  if (result.ok) throw new Error(`expected timeout before deferred evaluation settles, got: ${result.report}`);
+
+  let snapshot = chef.repository.getWorkspaceSnapshot(chef.workspaceId);
+  const timedOutPlan = snapshot.plans.find((plan) => plan.id === "late-evaluation-plan");
+  const timedOutMission = timedOutPlan ? snapshot.missions.find((mission) => mission.planId === timedOutPlan.id) : undefined;
+  if (!timedOutPlan || timedOutPlan.status !== "failed" || !timedOutMission || timedOutMission.status !== "failed") {
+    throw new Error(`late-settlement setup must already be terminal-failed: plan=${timedOutPlan?.status ?? "missing"}, mission=${timedOutMission?.status ?? "missing"}`);
+  }
+
+  provider.settle();
+  await new Promise<void>((resolve) => setTimeout(resolve, 100));
+
+  snapshot = chef.repository.getWorkspaceSnapshot(chef.workspaceId);
+  const settledPlan = snapshot.plans.find((plan) => plan.id === "late-evaluation-plan");
+  const settledMission = settledPlan ? snapshot.missions.find((mission) => mission.planId === settledPlan.id) : undefined;
+  if (settledPlan?.status !== "failed" || settledMission?.status !== "failed") {
+    throw new Error(`late evaluation resurrected timed-out work: plan=${settledPlan?.status ?? "missing"}, mission=${settledMission?.status ?? "missing"}`);
+  }
+  const completedMissionEvents = snapshot.events.filter((event) => {
+    if (event.type !== "mission.status") return false;
+    const payload = event.payload as { missionId?: string; status?: string };
+    return payload.missionId === timedOutMission.id && payload.status === "completed";
+  });
+  if (completedMissionEvents.length !== 0) {
+    throw new Error("late evaluation must not publish a completed Mission status after timeout");
+  }
+
+  await chef.close();
+  rmSync(dir, { recursive: true, force: true });
+}
+
 // A spontaneous worker failure must stay on the crash/failure path and must
 // never be relabeled as a Mission timeout merely because timeout policy exists.
 {
@@ -284,4 +348,4 @@ if (!orchestratorSource.includes("class MissionTimeoutError extends Error")) {
   rmSync(dir, { recursive: true, force: true });
 }
 
-console.log("timeout-cancellation: ok — Mission deadlines are bounded, timeout diagnostics are explicit, and worker crashes stay distinct");
+console.log("timeout-cancellation: ok — Mission deadlines are bounded, late settlement stays failed, timeout diagnostics are explicit, and worker crashes stay distinct");
