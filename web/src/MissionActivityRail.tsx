@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "./api";
 import { projectMissionActivity, type MissionActivitySnapshot } from "./missionActivityProjection";
+import { subscribeMissionProgressRefresh } from "./missionProgressStream";
 import type { HarnessInfo } from "./types";
 
 const EMPTY: MissionActivitySnapshot = { missions: [], tasks: [], events: [] };
@@ -27,6 +28,8 @@ export function MissionActivityRail() {
     const timer = window.setInterval(() => void refresh(), 1200);
     return () => window.clearInterval(timer);
   }, [refresh]);
+
+  useEffect(() => subscribeMissionProgressRefresh(() => void refresh()), [refresh]);
 
   useEffect(() => {
     void api.harnesses().then(setHarnesses).catch(() => setHarnesses([]));
