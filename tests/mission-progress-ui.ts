@@ -6,7 +6,11 @@ import {
   summarizeMissionProgressEvent,
   summarizeMissionProgressForMission,
 } from "../web/src/missionProgress.ts";
-import { MISSION_PROGRESS_EVENT_TYPES, missionProgressEventStreamUrl } from "../web/src/missionProgressStream.ts";
+import {
+  MISSION_PROGRESS_EVENT_TYPES,
+  missionProgressEventStreamUrl,
+  subscribeMissionProgressRefresh,
+} from "../web/src/missionProgressStream.ts";
 import type { UiRuntimeEvent } from "../web/src/types.ts";
 
 function missionStatusEvent(id: string, status: string, missionId = "mission-1", timestamp = 1_000): UiRuntimeEvent {
@@ -42,6 +46,27 @@ assert.equal(
   "/api/events?types=mission.*,orchestrator.*,approval.*,node.failed,task.*,session.*",
   "the live progress EventSource URL must retain Task and Session events alongside existing Mission signals",
 );
+
+let requestedProgressStream = "";
+let liveRefreshCount = 0;
+let liveStreamClosed = false;
+const fakeProgressStream = {
+  onmessage: null as ((event: MessageEvent) => void) | null,
+  close() { liveStreamClosed = true; },
+};
+const unsubscribeLiveProgress = subscribeMissionProgressRefresh(
+  () => { liveRefreshCount += 1; },
+  (url) => {
+    requestedProgressStream = url;
+    return fakeProgressStream;
+  },
+);
+assert.equal(requestedProgressStream, missionProgressEventStreamUrl(), "the mounted progress projection must open the worker-aware runtime stream");
+assert.ok(fakeProgressStream.onmessage, "the mounted progress projection must attach a live event handler");
+fakeProgressStream.onmessage?.({} as MessageEvent);
+assert.equal(liveRefreshCount, 1, "an authoritative worker event must refresh the human-readable progress projection immediately rather than waiting for polling");
+unsubscribeLiveProgress();
+assert.equal(liveStreamClosed, true, "unmounting the progress projection must release its EventSource connection");
 
 const cancelled = summarizeMissionProgressEvent(missionStatusEvent("event-1", "cancelled"));
 assert.ok(cancelled);
@@ -249,4 +274,4 @@ assert.equal(
   "a crashed worker session must never degrade into a misleading still-working heartbeat",
 );
 
-console.log("mission-progress-ui: ok — submitted work, live worker subscriptions, scoped progress, recovery, and truthful long-running heartbeat behavior are covered");
+console.log("mission-progress-ui: ok — mounted live refresh, scoped progress, recovery, and truthful long-running heartbeat behavior are covered");
