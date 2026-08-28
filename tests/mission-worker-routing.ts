@@ -41,15 +41,15 @@ const context = {
 };
 
 try {
-  const canonicalGoal = "Create a simple todo app";
+  const canonicalGoal = "Create a todo app";
   const fastPath = await provider.proposePlan({ ...context, goal: canonicalGoal });
   assert.ok(fastPath);
-  assert.equal(fastPath.routingMode, "single-worker", "the canonical request must retain its direct execution route");
-  assert.equal(fastPath.tasks.length, 1, "the canonical simple request should have one owner");
+  assert.equal(fastPath.routingMode, "single-worker", "the canonical request must retain its direct execution route without magic qualifier wording");
+  assert.equal(fastPath.tasks.length, 1, "the canonical request should have one owner");
   assert.equal(fastPath.tasks[0].nodeType, "agent.llm");
   assert.equal(fastPath.tasks[0].assignedTo, "codex", "the fast path uses a real available task-capable worker");
   assert.equal(fastPath.tasks[0].description, canonicalGoal, "the worker receives the full user goal");
-  assert.equal(plannerRequestCount, 0, "the canonical simple request must not pay a planner-provider round trip");
+  assert.equal(plannerRequestCount, 0, "the canonical request must not pay a planner-provider round trip");
 
   const fastEvaluationRequestsBefore = plannerRequestCount;
   const fastEvaluation = await provider.evaluate({
@@ -81,9 +81,9 @@ try {
     const requestsBeforeConfiguredFastPath = plannerRequestCount;
     const configuredFastPath = await configuredProvider.proposePlan({ ...context, goal: canonicalGoal });
     assert.ok(configuredFastPath);
-    assert.equal(configuredFastPath.routingMode, "single-worker", "the configured runtime factory must preserve the canonical direct-worker route");
+    assert.equal(configuredFastPath.routingMode, "single-worker", "the configured runtime factory must preserve the qualifier-free canonical direct-worker route");
     assert.equal(configuredFastPath.tasks[0].assignedTo, "codex");
-    assert.equal(plannerRequestCount, requestsBeforeConfiguredFastPath, "the configured runtime factory must not call the planner for the canonical request");
+    assert.equal(plannerRequestCount, requestsBeforeConfiguredFastPath, "the configured runtime factory must not call the planner for the qualifier-free canonical request");
     const configuredEvaluation = await configuredProvider.evaluate({
       taskId: configuredFastPath.tasks[0].id,
       status: "completed",
@@ -237,7 +237,7 @@ try {
   assert.equal(plannerRequestCount, plannerRequestsBeforeComplexGoal + 1, "complex work must still invoke the planner");
   assert.equal(complexPlan.tasks.length, 2, "the planner remains free to decompose genuinely complex work");
 
-  console.log("mission-worker-routing: ok — configured direct work stays provider-independent through completion while planner-routed work still plans and evaluates through the provider");
+  console.log("mission-worker-routing: ok — qualifier-free configured direct work stays provider-independent through completion while planner-routed work still plans and evaluates through the provider");
 } finally {
   await new Promise<void>((resolve) => server.close(() => resolve()));
 }
