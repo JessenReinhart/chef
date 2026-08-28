@@ -24,6 +24,11 @@ export type MissionArtifactScope = {
   taskIds: Iterable<string>;
 };
 
+type MissionLinkedArtifact = {
+  taskId?: string;
+  metadata: Record<string, unknown>;
+};
+
 export type RunCommandCopyResult = "copied" | "unavailable" | "failed";
 
 export const MAX_VISIBLE_RESULTS = 4;
@@ -33,15 +38,15 @@ const MAX_PREVIEW_LENGTH = 800;
 const MAX_HANDOFF_SUMMARY_LENGTH = 280;
 const MAX_METADATA_ROWS = 8;
 
-export function recentArtifacts(artifacts: LivingArtifact[], limit: number): LivingArtifact[] {
+export function recentArtifacts<T>(artifacts: T[], limit: number): T[] {
   return artifacts.slice(-limit).reverse();
 }
 
-export function artifactsForMission(
-  artifacts: LivingArtifact[],
+export function artifactsForMission<T extends MissionLinkedArtifact>(
+  artifacts: T[],
   missionId: string,
   taskIds: Iterable<string>,
-): LivingArtifact[] {
+): T[] {
   const ownedTaskIds = new Set(taskIds);
   return artifacts.filter((artifact) => {
     if (artifact.taskId && ownedTaskIds.has(artifact.taskId)) return true;
@@ -49,12 +54,20 @@ export function artifactsForMission(
   });
 }
 
-export function artifactsForCurrentMission(
-  artifacts: LivingArtifact[],
+export function artifactsForCurrentMission<T extends MissionLinkedArtifact>(
+  artifacts: T[],
   scope: MissionArtifactScope | null | undefined,
-): LivingArtifact[] {
+): T[] {
   if (!scope) return [];
   return artifactsForMission(artifacts, scope.missionId, scope.taskIds);
+}
+
+export function visibleArtifactsForCurrentMission<T extends MissionLinkedArtifact>(
+  artifacts: T[],
+  scope: MissionArtifactScope | null | undefined,
+  limit = MAX_VISIBLE_RESULTS,
+): T[] {
+  return recentArtifacts(artifactsForCurrentMission(artifacts, scope), limit);
 }
 
 export function missingResultHandoffNotice(missionStatus: string | undefined, resultCount: number): string | null {
