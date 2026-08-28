@@ -151,6 +151,16 @@ export function projectMissionActivity(
     seen.add(heartbeat.text);
   }
 
+  // Keep the routing decision visible even after worker output starts. It tells
+  // the user why Chef chose a single worker or a coordinated plan, which is
+  // more durable context than another transient task-state line.
+  const routingEvent = scoped.events.find((event) => event.type === "orchestrator.plan.proposed");
+  const routingUpdate = routingEvent ? summarizeMissionProgressEvent(routingEvent) : null;
+  if (routingUpdate && !seen.has(routingUpdate.text)) {
+    feed.push(routingUpdate.text);
+    seen.add(routingUpdate.text);
+  }
+
   for (const event of scoped.events) {
     const task = event.taskId ? tasksById.get(event.taskId) : undefined;
     const worker = task?.assignedTo ? (harnessNames.get(task.assignedTo) ?? task.assignedTo) : "Chef";
