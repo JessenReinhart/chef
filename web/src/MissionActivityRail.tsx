@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "./api";
 import { projectMissionActivity, selectLivingWorkspaceMission, type MissionActivitySnapshot } from "./missionActivityProjection";
 import { subscribeMissionProgressRefresh } from "./missionProgressStream";
@@ -13,6 +13,7 @@ export function MissionActivityRail() {
   const [snapshot, setSnapshot] = useState<MissionActivitySnapshot>(EMPTY);
   const [harnesses, setHarnesses] = useState<HarnessInfo[]>([]);
   const [resultNote, setResultNote] = useState<string | null>(null);
+  const summarizedMissionKey = useRef<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -27,14 +28,20 @@ export function MissionActivityRail() {
 
       const mission = selectLivingWorkspaceMission(nextSnapshot.missions);
       if (!selectedThreadId || !mission || !TERMINAL_MISSION_STATES.has(mission.status)) {
+        summarizedMissionKey.current = null;
         setResultNote(null);
         return;
       }
 
+      const missionKey = `${selectedThreadId}:${mission.id}`;
+      if (summarizedMissionKey.current === missionKey) return;
+
       setResultNote(null);
       const messages = await threadMessages(selectedThreadId);
       if (loadSelectedThreadId() !== selectedThreadId) return;
-      setResultNote(latestAssistantThreadNote(messages, mission.id)?.content ?? null);
+      const summary = latestAssistantThreadNote(messages, mission.id)?.content ?? null;
+      setResultNote(summary);
+      if (summary) summarizedMissionKey.current = missionKey;
     } catch {
       // The Living Workspace owns the primary error surface. Keep this rail quiet.
     }
