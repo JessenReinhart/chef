@@ -51,6 +51,18 @@ try {
   assert.equal(fastPath.tasks[0].description, canonicalGoal, "the worker receives the full user goal");
   assert.equal(plannerRequestCount, 0, "the canonical request must not pay a planner-provider round trip");
 
+  const simpleIntentGoals = ["I need a todo app", "I want a todo app"];
+  for (const intentGoal of simpleIntentGoals) {
+    const requestsBeforeIntent = plannerRequestCount;
+    const intentFastPath = await provider.proposePlan({ ...context, goal: intentGoal });
+    assert.ok(intentFastPath);
+    assert.equal(intentFastPath.routingMode, "single-worker", `${intentGoal} should route directly without requiring an action-verb rewrite`);
+    assert.equal(intentFastPath.tasks.length, 1, `${intentGoal} should keep one worker owner`);
+    assert.equal(intentFastPath.tasks[0].assignedTo, "codex", `${intentGoal} should use the available task-capable worker`);
+    assert.equal(intentFastPath.tasks[0].description, intentGoal, `${intentGoal} must reach the worker unchanged`);
+    assert.equal(plannerRequestCount, requestsBeforeIntent, `${intentGoal} must not pay a planner-provider round trip`);
+  }
+
   const fastEvaluationRequestsBefore = plannerRequestCount;
   const fastEvaluation = await provider.evaluate({
     taskId: fastPath.tasks[0].id,
@@ -237,7 +249,36 @@ try {
   assert.equal(plannerRequestCount, plannerRequestsBeforeComplexGoal + 1, "complex work must still invoke the planner");
   assert.equal(complexPlan.tasks.length, 2, "the planner remains free to decompose genuinely complex work");
 
-  console.log("mission-worker-routing: ok — qualifier-free configured direct work stays provider-independent through completion while planner-routed work still plans and evaluates through the provider");
+  const complexIntentGoal = "I need an architecture comparison and then write a migration report";
+  const plannerRequestsBeforeComplexIntent = plannerRequestCount;
+  responsePlan = {
+    goal: complexIntentGoal,
+    tasks: [
+      {
+        id: "task-6",
+        title: "Compare architectures",
+        description: "Compare the candidate architectures.",
+        dependencies: [],
+        priority: 1,
+        nodeType: "agent.llm",
+      },
+      {
+        id: "task-7",
+        title: "Write migration report",
+        description: "Write the migration report from the comparison.",
+        dependencies: ["task-6"],
+        priority: 0,
+        nodeType: "agent.llm",
+      },
+    ],
+  };
+  const complexIntentPlan = await provider.proposePlan({ ...context, goal: complexIntentGoal });
+  assert.ok(complexIntentPlan);
+  assert.equal(complexIntentPlan.routingMode, "planner", "intent phrasing must not override explicit complexity markers");
+  assert.equal(plannerRequestCount, plannerRequestsBeforeComplexIntent + 1, "complex intent phrasing must still invoke the planner");
+  assert.equal(complexIntentPlan.tasks.length, 2, "planner decomposition remains available for complex intent phrasing");
+
+  console.log("mission-worker-routing: ok — simple intent phrasing and qualifier-free direct work stay provider-independent while explicit complexity still plans and evaluates through the provider");
 } finally {
   await new Promise<void>((resolve) => server.close(() => resolve()));
 }
