@@ -59,8 +59,11 @@ function recoverMissionTaskIds(
 ): void {
   for (const event of events) {
     if (!eventNamesMission(event, missionIds)) continue;
+    const payload = eventPayload(event);
     if (event.taskId) taskIds.add(event.taskId);
-    for (const taskId of payloadStrings(eventPayload(event), "taskIds")) taskIds.add(taskId);
+    const payloadTaskId = payloadString(payload, "taskId");
+    if (payloadTaskId) taskIds.add(payloadTaskId);
+    for (const taskId of payloadStrings(payload, "taskIds")) taskIds.add(taskId);
   }
 }
 
@@ -76,6 +79,10 @@ function eventBelongsToThread(
   if (event.source.type === "session" && sessionIds.has(event.source.id)) return true;
   if (event.taskId && taskIds.has(event.taskId)) return true;
   if (event.sessionId && sessionIds.has(event.sessionId)) return true;
+  const payloadTaskId = payloadString(payload, "taskId");
+  if (payloadTaskId && taskIds.has(payloadTaskId)) return true;
+  const payloadSessionId = payloadString(payload, "sessionId");
+  if (payloadSessionId && sessionIds.has(payloadSessionId)) return true;
   return payloadStrings(payload, "taskIds").some((taskId) => taskIds.has(taskId));
 }
 
