@@ -88,7 +88,7 @@ export function ChatPanel({ onPlanProposed, mode }: ChatPanelProps) {
 
   // Keep the digest live from authoritative runtime events without exposing raw-log noise.
   useEffect(() => {
-    const es = new EventSource("/api/events?types=mission.*,orchestrator.*,approval.*,node.failed");
+    const es = new EventSource("/api/events?types=mission.*,orchestrator.*,approval.*,node.failed,task.*,session.*");
     es.onmessage = (ev) => {
       try {
         const event = JSON.parse(ev.data) as UiRuntimeEvent;
