@@ -14,6 +14,7 @@ import {
   type LivingArtifact,
 } from "../web/src/artifactProjection.ts";
 import { workspaceSurfacePlan } from "../web/src/canonicalWorkspaceModel.ts";
+import { missionProgressEventStreamUrl, subscribeMissionProgressRefresh } from "../web/src/missionProgressStream.ts";
 import { missionTaskIdsFromEvents } from "../web/src/threadScope.ts";
 import type { UiRuntimeEvent } from "../web/src/types.ts";
 
@@ -193,10 +194,36 @@ assert.deepEqual(
   "result handoff should remain useful for older/custom artifact metadata aliases",
 );
 
+let requestedLiveResultStream = "";
+let liveResultRefreshCount = 0;
+let liveResultStreamClosed = false;
+const fakeLiveResultStream = {
+  onmessage: null as ((event: MessageEvent) => void) | null,
+  close() { liveResultStreamClosed = true; },
+};
+const unsubscribeLiveResults = subscribeMissionProgressRefresh(
+  () => { liveResultRefreshCount += 1; },
+  (url) => {
+    requestedLiveResultStream = url;
+    return fakeLiveResultStream;
+  },
+);
+assert.equal(
+  requestedLiveResultStream,
+  missionProgressEventStreamUrl(),
+  "the Simple Mode result handoff should reuse the authoritative worker-aware Mission event stream instead of waiting only for polling",
+);
+assert.ok(fakeLiveResultStream.onmessage, "the live result handoff must attach an event-driven refresh callback");
+fakeLiveResultStream.onmessage?.({} as MessageEvent);
+await new Promise<void>((resolve) => setImmediate(resolve));
+assert.equal(liveResultRefreshCount, 1, "authoritative Mission/Task/Session activity should make durable results eligible for immediate refresh");
+unsubscribeLiveResults();
+assert.equal(liveResultStreamClosed, true, "unmounting the result handoff must release the live progress stream");
+
 assert.equal(workspaceSurfacePlan("simple").livingArtifacts, true, "normal work should keep result projection in the same Living Workspace");
 assert.equal(workspaceSurfacePlan("power").livingArtifacts, false, "opening runtime detail should not duplicate the normal result projection");
 assert.equal(canDownload(artifact("file-result", 18, "task-file", "file:///tmp/result.txt")), true, "file-backed results should expose a real download action");
 assert.equal(canDownload(artifact("runtime-result", 19)), false, "runtime-only artifacts must not invent a download action");
 assert.equal(provenanceLabel(artifact("artifact-20", 20)), "v20 · by claude-code · task task-20", "result handoff should preserve concise provenance");
 
-console.log("intent-home-artifacts-ui: ok — current Mission result handoff is lineage-scoped, thread-correct, actionable, and can surface mission- or task-linked durable results before snapshot convergence");
+console.log("intent-home-artifacts-ui: ok — current Mission result handoff is lineage-scoped, thread-correct, actionable, live-refreshable, and can surface mission- or task-linked durable results before snapshot convergence");
