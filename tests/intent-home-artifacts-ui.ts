@@ -13,6 +13,8 @@ import {
   type LivingArtifact,
 } from "../web/src/artifactProjection.ts";
 import { workspaceSurfacePlan } from "../web/src/canonicalWorkspaceModel.ts";
+import { missionTaskIdsFromEvents } from "../web/src/threadScope.ts";
+import type { UiRuntimeEvent } from "../web/src/types.ts";
 
 const artifact = (
   id: string,
@@ -85,6 +87,32 @@ assert.deepEqual(
   "a durable current-Mission result should become visible immediately even while the Mission taskIds snapshot is still catching up",
 );
 
+const durableTaskLineageEvent: UiRuntimeEvent = {
+  id: "mission-current-plan",
+  seq: 13,
+  timestamp: 1_300,
+  source: { type: "orchestrator", id: "orchestrator" },
+  type: "orchestrator.plan.proposed",
+  correlationId: "mission-current",
+  payload: { taskId: "task-event-linked" },
+};
+const recoveredTaskIds = missionTaskIdsFromEvents(
+  [durableTaskLineageEvent],
+  ["mission-current"],
+  [],
+);
+assert.deepEqual(
+  visibleArtifactsForCurrentMission(
+    [
+      artifact("other-task-only-result", 14, "task-other-thread"),
+      artifact("early-task-only-result", 15, "task-event-linked", "chef:task-only-result", { summary: "Task-linked result is ready" }),
+    ],
+    { missionId: "mission-current", taskIds: recoveredTaskIds },
+  ).map((item) => item.id),
+  ["early-task-only-result"],
+  "durable Mission-correlated Task lineage should surface a current result even before Mission.taskIds converges, without leaking another Task's artifact",
+);
+
 assert.equal(
   missingResultHandoffNotice("completed", 0),
   "Work is marked complete, but Chef did not publish a durable result for this Mission.",
@@ -106,7 +134,7 @@ assert.equal(
   "failed work should explain why no result is available without pretending completion succeeded",
 );
 
-const goldenTodoResult = artifact("golden-todo", 13, "task-todo", "file:///tmp/todo-app.mjs", {
+const goldenTodoResult = artifact("golden-todo", 16, "task-todo", "file:///tmp/todo-app.mjs", {
   content: "Created runnable todo app at /tmp/todo-app.mjs",
   run: "node /tmp/todo-app.mjs",
   verifiedBy: "golden-path",
@@ -140,15 +168,15 @@ assert.equal(
 );
 
 assert.deepEqual(
-  artifactHandoff(artifact("legacy-result", 14, "task-legacy", "chef:legacy", { description: "Generated report", runCommand: "npm start", verification: "runtime smoke" })),
+  artifactHandoff(artifact("legacy-result", 17, "task-legacy", "chef:legacy", { description: "Generated report", runCommand: "npm start", verification: "runtime smoke" })),
   { summary: "Generated report", runCommand: "npm start", verifiedBy: "runtime smoke" },
   "result handoff should remain useful for older/custom artifact metadata aliases",
 );
 
 assert.equal(workspaceSurfacePlan("simple").livingArtifacts, true, "normal work should keep result projection in the same Living Workspace");
 assert.equal(workspaceSurfacePlan("power").livingArtifacts, false, "opening runtime detail should not duplicate the normal result projection");
-assert.equal(canDownload(artifact("file-result", 15, "task-file", "file:///tmp/result.txt")), true, "file-backed results should expose a real download action");
-assert.equal(canDownload(artifact("runtime-result", 16)), false, "runtime-only artifacts must not invent a download action");
-assert.equal(provenanceLabel(artifact("artifact-17", 17)), "v17 · by claude-code · task task-17", "result handoff should preserve concise provenance");
+assert.equal(canDownload(artifact("file-result", 18, "task-file", "file:///tmp/result.txt")), true, "file-backed results should expose a real download action");
+assert.equal(canDownload(artifact("runtime-result", 19)), false, "runtime-only artifacts must not invent a download action");
+assert.equal(provenanceLabel(artifact("artifact-20", 20)), "v20 · by claude-code · task task-20", "result handoff should preserve concise provenance");
 
-console.log("intent-home-artifacts-ui: ok — current Mission result handoff is lineage-scoped, actionable, and can surface durable results before task snapshot convergence");
+console.log("intent-home-artifacts-ui: ok — current Mission result handoff is lineage-scoped, actionable, and can surface mission- or task-linked durable results before snapshot convergence");
