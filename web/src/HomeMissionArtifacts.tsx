@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { loadSelectedThreadId, SELECTED_THREAD_EVENT } from "./threadApi";
 import { artifactHandoff } from "./artifactHandoff";
+import { visibleArtifactsForCurrentMission } from "./artifactProjection";
 import { copyRunCommand } from "./resultActions";
 import type { UiMission } from "./types";
 
@@ -79,11 +80,11 @@ export function HomeMissionArtifacts() {
 
   const missionArtifacts = useMemo(() => {
     if (!mission) return [];
-    const taskIds = new Set(mission.taskIds);
-    return artifacts
-      .filter((artifact) => artifact.taskId && taskIds.has(artifact.taskId))
-      .slice(-MAX_HOME_ARTIFACTS)
-      .reverse();
+    return visibleArtifactsForCurrentMission(
+      artifacts,
+      { missionId: mission.id, taskIds: mission.taskIds },
+      MAX_HOME_ARTIFACTS,
+    );
   }, [artifacts, mission]);
 
   const handleCopyRunCommand = useCallback(async (artifactId: string, runCommand: string) => {
