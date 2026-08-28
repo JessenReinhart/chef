@@ -52,19 +52,22 @@ function eventNamesMission(event: UiRuntimeEvent, missionIds: Set<string>): bool
   return Boolean(missionId && missionIds.has(missionId));
 }
 
-function recoverMissionTaskIds(
+export function missionTaskIdsFromEvents(
   events: UiRuntimeEvent[],
-  missionIds: Set<string>,
-  taskIds: Set<string>,
-): void {
+  missionIds: Iterable<string>,
+  seedTaskIds: Iterable<string> = [],
+): Set<string> {
+  const ownedMissionIds = new Set(missionIds);
+  const taskIds = new Set(seedTaskIds);
   for (const event of events) {
-    if (!eventNamesMission(event, missionIds)) continue;
+    if (!eventNamesMission(event, ownedMissionIds)) continue;
     const payload = eventPayload(event);
     if (event.taskId) taskIds.add(event.taskId);
     const payloadTaskId = payloadString(payload, "taskId");
     if (payloadTaskId) taskIds.add(payloadTaskId);
     for (const taskId of payloadStrings(payload, "taskIds")) taskIds.add(taskId);
   }
+  return taskIds;
 }
 
 function eventBelongsToThread(
@@ -107,12 +110,15 @@ export function scopeStateToThread(state: ThreadScopedState, threadId: string | 
 
   const missions = (state.missions ?? []).filter((mission) => missionThreadId(mission) === threadId);
   const missionIds = new Set(missions.map((mission) => mission.id));
-  const taskIds = new Set(missions.flatMap((mission) => mission.taskIds));
 
   // Plan/runtime events can durably name a Mission's Tasks before the Mission
   // snapshot catches up. Keep that lineage so Simple Mode does not briefly
-  // lose workers and activity during the pre-worker/startup boundary.
-  recoverMissionTaskIds(state.events, missionIds, taskIds);
+  // lose workers, activity, or outputs during the pre-worker/startup boundary.
+  const taskIds = missionTaskIdsFromEvents(
+    state.events,
+    missionIds,
+    missions.flatMap((mission) => mission.taskIds),
+  );
 
   const sessions = state.sessions.filter((session) => taskIds.has(session.taskId));
   const sessionTaskIds = new Map(
