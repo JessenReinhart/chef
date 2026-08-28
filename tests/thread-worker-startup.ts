@@ -58,23 +58,33 @@ try {
     body: JSON.stringify({ message: "Investigate the selected project" }),
   });
 
-  await waitForWorkerStartup(async () => {
-    const snapshot = await chef.inspectState();
-    return { tasks: snapshot.tasks, sessions: snapshot.sessions };
-  });
-
   const response = await request;
-  assert.equal(response.status, 200);
-  const body = await response.json() as { ok?: boolean; data?: { ok?: boolean; missionId?: string; taskIds?: string[] } };
+  assert.equal(response.status, 202, "selected-Thread chat must acknowledge durable work without waiting for completion");
+  const body = await response.json() as { ok?: boolean; data?: { ok?: boolean; accepted?: boolean; missionId?: string; threadId?: string } };
   assert.equal(body.ok, true);
   assert.equal(body.data?.ok, true);
+  assert.equal(body.data?.accepted, true);
+  assert.equal(body.data?.threadId, threadId);
   const missionId = body.data?.missionId;
-  assert.ok(missionId, "completed Thread request must expose its Mission lineage");
-  assert.ok((body.data?.taskIds?.length ?? 0) > 0, "completed Thread request must retain worker Task lineage");
+  assert.ok(missionId, "Thread acknowledgement must expose its durable Mission lineage");
+
+  await waitForWorkerStartup(async () => {
+    const snapshot = await chef.inspectState();
+    const missionTasks = snapshot.tasks.filter((task) => task.missionId === missionId);
+    const taskIds = new Set(missionTasks.map((task) => task.id));
+    return {
+      tasks: missionTasks,
+      sessions: snapshot.sessions.filter((session) => taskIds.has(session.taskId)),
+    };
+  });
 
   const finalSnapshot = await chef.inspectState();
-  assert.ok(finalSnapshot.sessions.length > 0, "Thread request must persist its real worker Session");
-  assert.ok(finalSnapshot.sessions.every((session) => session.command.length > 0), "worker Session command must be observable");
+  const missionTasks = finalSnapshot.tasks.filter((task) => task.missionId === missionId);
+  const missionTaskIds = new Set(missionTasks.map((task) => task.id));
+  const missionSessions = finalSnapshot.sessions.filter((session) => missionTaskIds.has(session.taskId));
+  assert.ok(missionTasks.length > 0, "acknowledged Mission must create a real worker Task");
+  assert.ok(missionSessions.length > 0, "acknowledged Mission must persist its real worker Session");
+  assert.ok(missionSessions.every((session) => session.command.length > 0), "worker Session command must be observable");
 
   const planningStarted = finalSnapshot.events.find((event) =>
     event.type === "orchestrator.plan.started"
@@ -89,7 +99,7 @@ try {
   assert.ok(planningSucceeded, "successful planning must remain correlated to the Mission before Task creation");
   assert.ok(planningStarted.seq < planningSucceeded.seq, "planning-start evidence must precede the accepted plan");
 
-  const firstTaskId = body.data?.taskIds?.[0];
+  const firstTaskId = missionTasks[0]?.id;
   const taskCreated = firstTaskId
     ? finalSnapshot.events.find((event) => event.type === "orchestrator.task.created" && event.taskId === firstTaskId)
     : undefined;
@@ -101,4 +111,4 @@ try {
   await rm(dir, { recursive: true, force: true });
 }
 
-console.log("thread-worker-startup: ok — Thread chat durably shows planning before reaching a real worker Session within its startup budget");
+console.log("thread-worker-startup: ok — Thread chat acknowledges first, then durably reaches a real worker Session within its startup budget");
