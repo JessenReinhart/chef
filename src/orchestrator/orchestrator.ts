@@ -1122,7 +1122,9 @@ export class Orchestrator {
     try {
       const result = await Promise.race([work, timeout]);
       if (result === TIMED_OUT) {
-        try { await work; } catch { /* timeout remains the primary error */ }
+        // Cancellation is best-effort. A Mission deadline must still return
+        // control when downstream work ignores AbortSignal or cannot abort.
+        void work.catch(() => undefined);
         throw new MissionTimeoutError(timeoutMs, label);
       }
       return result;

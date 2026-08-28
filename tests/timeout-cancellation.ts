@@ -60,6 +60,26 @@ class SlowDecisionProvider implements DecisionProvider {
   }
 }
 
+class HangingEvaluationProvider extends SlowDecisionProvider {
+  override async evaluate(): Promise<{ status: "accepted"; summary: string }> {
+    return new Promise<never>(() => {});
+  }
+}
+
+async function within<T>(work: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      work,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(label)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 // Default policy is a constructor contract, not a wall-clock behavior test.
 // Keep this assertion deterministic: a successful real worker can legitimately
 // run for an arbitrary duration when no Mission deadline is configured.
@@ -150,6 +170,69 @@ if (!orchestratorSource.includes("class MissionTimeoutError extends Error")) {
   rmSync(dir, { recursive: true, force: true });
 }
 
+// A Mission deadline is a user-facing bound even when downstream provider work
+// cannot be cancelled. A worker can finish successfully and then leave an
+// evaluator Promise pending forever; Chef must still leave Working/Verifying.
+{
+  const dir = mkdtempSync(join(tmpdir(), "chef-timeout-evaluation-test-"));
+  const dbPath = join(dir, "test.db");
+  const script = join(dir, "quick-agent.js");
+  writeFileSync(script, "process.exit(0);\n");
+
+  const provider = new HangingEvaluationProvider(script, "stuck-evaluation-plan", "evaluated-task");
+  const chef = createChef({
+    dbPath,
+    projectDir: dir,
+    decisionProvider: provider,
+    orchestratorTimeoutMs: 1_500,
+  });
+
+  const startedAt = Date.now();
+  const result = await within(
+    chef.sendUserMessage("finish the worker then exercise a stuck evaluation"),
+    4_000,
+    "Mission deadline elapsed but sendUserMessage never returned control",
+  );
+  const elapsedMs = Date.now() - startedAt;
+  if (result.ok) throw new Error(`expected plan failure on stuck evaluation timeout, got: ${result.report}`);
+  if (!result.report.includes("Timed out after 1500ms")) {
+    throw new Error(`expected configured Mission timeout in report, got: ${result.report}`);
+  }
+  if (elapsedMs >= 4_000) {
+    throw new Error(`Mission timeout was not a real response bound (${elapsedMs}ms)`);
+  }
+
+  const snapshot = chef.repository.getWorkspaceSnapshot(chef.workspaceId);
+  const task = snapshot.tasks.find((candidate) => candidate.id === "evaluated-task");
+  if (!task || task.status !== "completed") {
+    throw new Error(`worker must finish before the evaluator stall is classified as a Mission timeout: ${task?.status ?? "missing"}`);
+  }
+  const timedOutPlan = snapshot.plans.find((plan) => plan.id === "stuck-evaluation-plan");
+  if (!timedOutPlan || timedOutPlan.status !== "failed") {
+    throw new Error(`stuck-evaluation Plan must be failed durably, got: ${timedOutPlan?.status ?? "missing"}`);
+  }
+  const timedOutMission = snapshot.missions.find((mission) => mission.planId === timedOutPlan.id);
+  if (!timedOutMission || timedOutMission.status !== "failed") {
+    throw new Error(`stuck-evaluation Mission must be failed durably, got: ${timedOutMission?.status ?? "missing"}`);
+  }
+  const timeoutEvents = snapshot.events.filter((event) => event.type === "mission.timeout");
+  if (timeoutEvents.length !== 1) {
+    throw new Error(`stuck evaluation must produce exactly one durable mission.timeout event, got ${timeoutEvents.length}`);
+  }
+  const timeoutPayload = timeoutEvents[0].payload as { missionId?: string; planId?: string; timeoutMs?: number; cause?: string };
+  if (
+    timeoutPayload.missionId !== timedOutMission.id ||
+    timeoutPayload.planId !== timedOutPlan.id ||
+    timeoutPayload.timeoutMs !== 1_500 ||
+    timeoutPayload.cause !== "mission_timeout"
+  ) {
+    throw new Error(`stuck-evaluation timeout diagnostic is incomplete: ${JSON.stringify(timeoutPayload)}`);
+  }
+
+  await chef.close();
+  rmSync(dir, { recursive: true, force: true });
+}
+
 // A spontaneous worker failure must stay on the crash/failure path and must
 // never be relabeled as a Mission timeout merely because timeout policy exists.
 {
@@ -183,4 +266,4 @@ if (!orchestratorSource.includes("class MissionTimeoutError extends Error")) {
   rmSync(dir, { recursive: true, force: true });
 }
 
-console.log("timeout-cancellation: ok — timeout diagnostics are explicit and worker crashes stay distinct");
+console.log("timeout-cancellation: ok — Mission deadlines are bounded, timeout diagnostics are explicit, and worker crashes stay distinct");
