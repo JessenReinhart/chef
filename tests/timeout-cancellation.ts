@@ -60,6 +60,53 @@ class SlowDecisionProvider implements DecisionProvider {
   }
 }
 
+class HangingEvaluationProvider extends SlowDecisionProvider {
+  override async evaluate(): Promise<{ status: "accepted"; summary: string }> {
+    return new Promise<never>(() => {});
+  }
+}
+
+class DeferredEvaluationProvider extends SlowDecisionProvider {
+  #settlement = Promise.withResolvers<{ status: "accepted"; summary: string }>();
+
+  override async evaluate(): Promise<{ status: "accepted"; summary: string }> {
+    return this.#settlement.promise;
+  }
+
+  settle(): void {
+    this.#settlement.resolve({ status: "accepted", summary: "late evaluation" });
+  }
+}
+
+async function within<T>(work: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      work,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(label)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+async function waitForNoLiveTaskSessions(
+  chef: ReturnType<typeof createChef>,
+  taskId: string,
+  timeoutMs: number,
+): Promise<void> {
+  await within((async () => {
+    while (true) {
+      const sessions = chef.repository.getWorkspaceSnapshot(chef.workspaceId).sessions.filter((session) => session.taskId === taskId);
+      const live = sessions.find((session) => session.status === "running" || session.status === "spawning");
+      if (!live) return;
+      await new Promise<void>((resolve) => setTimeout(resolve, 25));
+    }
+  })(), timeoutMs, `task ${taskId} still had a live session after timeout cleanup budget`);
+}
+
 // Default policy is a constructor contract, not a wall-clock behavior test.
 // Keep this assertion deterministic: a successful real worker can legitimately
 // run for an arbitrary duration when no Mission deadline is configured.
@@ -102,13 +149,16 @@ if (!orchestratorSource.includes("class MissionTimeoutError extends Error")) {
     throw new Error(`expected timeout error in report, got: ${result.report}`);
   }
 
-  // The plan session must be gone: terminate()/forget() ran in the finally
-  // cleanup path. Probe by snapshotting; a live session is a leak.
+  // The timeout response is deliberately no longer coupled to arbitrary
+  // downstream settlement. Cancellation continues asynchronously, but a real
+  // PTY still has to converge out of its live state within a bounded budget.
+  await waitForNoLiveTaskSessions(chef, "t1", 1_500);
+
   const snapshot = chef.repository.getWorkspaceSnapshot(chef.workspaceId);
   const sessions = snapshot.sessions.filter((s) => s.taskId === "t1");
   for (const session of sessions) {
     if (session.status === "running" || session.status === "spawning") {
-      throw new Error(`session ${session.id} still live after plan timeout (${session.status})`);
+      throw new Error(`session ${session.id} still live after bounded timeout cleanup (${session.status})`);
     }
   }
 
@@ -150,6 +200,121 @@ if (!orchestratorSource.includes("class MissionTimeoutError extends Error")) {
   rmSync(dir, { recursive: true, force: true });
 }
 
+// A Mission deadline is a user-facing bound even when downstream provider work
+// cannot be cancelled. A worker can finish successfully and then leave an
+// evaluator Promise pending forever; Chef must still leave Working/Verifying.
+{
+  const dir = mkdtempSync(join(tmpdir(), "chef-timeout-evaluation-test-"));
+  const dbPath = join(dir, "test.db");
+  const script = join(dir, "quick-agent.js");
+  writeFileSync(script, "process.exit(0);\n");
+
+  const provider = new HangingEvaluationProvider(script, "stuck-evaluation-plan", "evaluated-task");
+  const chef = createChef({
+    dbPath,
+    projectDir: dir,
+    decisionProvider: provider,
+    orchestratorTimeoutMs: 1_500,
+  });
+
+  const startedAt = Date.now();
+  const result = await within(
+    chef.sendUserMessage("finish the worker then exercise a stuck evaluation"),
+    4_000,
+    "Mission deadline elapsed but sendUserMessage never returned control",
+  );
+  const elapsedMs = Date.now() - startedAt;
+  if (result.ok) throw new Error(`expected plan failure on stuck evaluation timeout, got: ${result.report}`);
+  if (!result.report.includes("Timed out after 1500ms")) {
+    throw new Error(`expected configured Mission timeout in report, got: ${result.report}`);
+  }
+  if (elapsedMs >= 4_000) {
+    throw new Error(`Mission timeout was not a real response bound (${elapsedMs}ms)`);
+  }
+
+  const snapshot = chef.repository.getWorkspaceSnapshot(chef.workspaceId);
+  const task = snapshot.tasks.find((candidate) => candidate.id === "evaluated-task");
+  if (!task || task.status !== "completed") {
+    throw new Error(`worker must finish before the evaluator stall is classified as a Mission timeout: ${task?.status ?? "missing"}`);
+  }
+  const timedOutPlan = snapshot.plans.find((plan) => plan.id === "stuck-evaluation-plan");
+  if (!timedOutPlan || timedOutPlan.status !== "failed") {
+    throw new Error(`stuck-evaluation Plan must be failed durably, got: ${timedOutPlan?.status ?? "missing"}`);
+  }
+  const timedOutMission = snapshot.missions.find((mission) => mission.planId === timedOutPlan.id);
+  if (!timedOutMission || timedOutMission.status !== "failed") {
+    throw new Error(`stuck-evaluation Mission must be failed durably, got: ${timedOutMission?.status ?? "missing"}`);
+  }
+  const timeoutEvents = snapshot.events.filter((event) => event.type === "mission.timeout");
+  if (timeoutEvents.length !== 1) {
+    throw new Error(`stuck evaluation must produce exactly one durable mission.timeout event, got ${timeoutEvents.length}`);
+  }
+  const timeoutPayload = timeoutEvents[0].payload as { missionId?: string; planId?: string; timeoutMs?: number; cause?: string };
+  if (
+    timeoutPayload.missionId !== timedOutMission.id ||
+    timeoutPayload.planId !== timedOutPlan.id ||
+    timeoutPayload.timeoutMs !== 1_500 ||
+    timeoutPayload.cause !== "mission_timeout"
+  ) {
+    throw new Error(`stuck-evaluation timeout diagnostic is incomplete: ${JSON.stringify(timeoutPayload)}`);
+  }
+
+  await chef.close();
+  rmSync(dir, { recursive: true, force: true });
+}
+
+// Detached timed-out work may settle later. That late provider completion must
+// never resurrect the already-failed Plan or Mission into a misleading success.
+{
+  const dir = mkdtempSync(join(tmpdir(), "chef-timeout-late-evaluation-test-"));
+  const dbPath = join(dir, "test.db");
+  const script = join(dir, "quick-agent.js");
+  writeFileSync(script, "process.exit(0);\n");
+
+  const provider = new DeferredEvaluationProvider(script, "late-evaluation-plan", "late-evaluation-task");
+  const chef = createChef({
+    dbPath,
+    projectDir: dir,
+    decisionProvider: provider,
+    orchestratorTimeoutMs: 1_000,
+  });
+
+  const result = await within(
+    chef.sendUserMessage("finish the worker then let evaluation settle after timeout"),
+    3_000,
+    "Mission timeout did not return before late evaluation settlement",
+  );
+  if (result.ok) throw new Error(`expected timeout before deferred evaluation settles, got: ${result.report}`);
+
+  let snapshot = chef.repository.getWorkspaceSnapshot(chef.workspaceId);
+  const timedOutPlan = snapshot.plans.find((plan) => plan.id === "late-evaluation-plan");
+  const timedOutMission = timedOutPlan ? snapshot.missions.find((mission) => mission.planId === timedOutPlan.id) : undefined;
+  if (!timedOutPlan || timedOutPlan.status !== "failed" || !timedOutMission || timedOutMission.status !== "failed") {
+    throw new Error(`late-settlement setup must already be terminal-failed: plan=${timedOutPlan?.status ?? "missing"}, mission=${timedOutMission?.status ?? "missing"}`);
+  }
+
+  provider.settle();
+  await new Promise<void>((resolve) => setTimeout(resolve, 100));
+
+  snapshot = chef.repository.getWorkspaceSnapshot(chef.workspaceId);
+  const settledPlan = snapshot.plans.find((plan) => plan.id === "late-evaluation-plan");
+  const settledMission = settledPlan ? snapshot.missions.find((mission) => mission.planId === settledPlan.id) : undefined;
+  if (settledPlan?.status !== "failed" || settledMission?.status !== "failed") {
+    throw new Error(`late evaluation resurrected timed-out work: plan=${settledPlan?.status ?? "missing"}, mission=${settledMission?.status ?? "missing"}`);
+  }
+  const completedMissionEvents = snapshot.events.filter((event) => {
+    if (event.type !== "mission.status") return false;
+    const payload = event.payload as { missionId?: string; status?: string };
+    return payload.missionId === timedOutMission.id && payload.status === "completed";
+  });
+  if (completedMissionEvents.length !== 0) {
+    throw new Error("late evaluation must not publish a completed Mission status after timeout");
+  }
+
+  await chef.close();
+  rmSync(dir, { recursive: true, force: true });
+}
+
 // A spontaneous worker failure must stay on the crash/failure path and must
 // never be relabeled as a Mission timeout merely because timeout policy exists.
 {
@@ -183,4 +348,4 @@ if (!orchestratorSource.includes("class MissionTimeoutError extends Error")) {
   rmSync(dir, { recursive: true, force: true });
 }
 
-console.log("timeout-cancellation: ok — timeout diagnostics are explicit and worker crashes stay distinct");
+console.log("timeout-cancellation: ok — Mission deadlines are bounded, late settlement stays failed, timeout diagnostics are explicit, and worker crashes stay distinct");
