@@ -8,6 +8,7 @@ import type {
 import { createLLMDecisionProvider } from "./llm-decision-provider.ts";
 
 const MAX_FAST_PATH_GOAL_LENGTH = 240;
+const MAX_TRACKED_FAST_PATH_TASKS = 1_024;
 const SIMPLE_QUALIFIER = /\b(simple|small|basic|minimal|tiny)\b/i;
 const IMPLEMENTATION_ACTION = /\b(create|build|make|implement|add|fix|update|change|rename|remove)\b/i;
 const DIRECT_SINGLE_STAGE_ACTION = /\b(create|build|make|implement|add|fix|update|change|rename|remove|write|draft|generate)\b/i;
@@ -85,7 +86,7 @@ export class SingleWorkerFastPathDecisionProvider implements DecisionProvider {
     }
 
     const taskId = crypto.randomUUID();
-    this.#fastPathTaskIds.add(taskId);
+    this.#rememberFastPathTask(taskId);
     return routedPlan({
       id: crypto.randomUUID(),
       workspaceId: input.workspaceId,
@@ -110,6 +111,14 @@ export class SingleWorkerFastPathDecisionProvider implements DecisionProvider {
       return deterministicTaskEvaluation(taskResult, this.name);
     }
     return this.#delegate.evaluate(taskResult);
+  }
+
+  #rememberFastPathTask(taskId: string): void {
+    if (this.#fastPathTaskIds.size >= MAX_TRACKED_FAST_PATH_TASKS) {
+      const oldest = this.#fastPathTaskIds.values().next().value;
+      if (oldest !== undefined) this.#fastPathTaskIds.delete(oldest);
+    }
+    this.#fastPathTaskIds.add(taskId);
   }
 
   async #proposeWithTimeout(input: PlanProposalContext): Promise<Plan | null> {
