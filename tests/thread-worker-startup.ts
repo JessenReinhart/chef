@@ -3,11 +3,12 @@ import { once } from "node:events";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createChef } from "../src/main.ts";
+import { createChef, type ChefRuntime } from "../src/main.ts";
 import { createHttpServer } from "../src/server/http-server.ts";
 import { createThreadServer } from "../src/server/thread-http.ts";
 
 const WORKER_STARTUP_BUDGET_MS = 1_500;
+const FIXTURE_SETTLE_BUDGET_MS = 5_000;
 const POLL_MS = 20;
 
 async function waitForWorkerStartup(
@@ -29,6 +30,20 @@ async function waitForWorkerStartup(
     `Thread request did not reach a real worker session within ${WORKER_STARTUP_BUDGET_MS}ms `
     + `(tasks=${lastTaskCount}, sessions=${lastSessionCount})`,
   );
+}
+
+async function allowFixtureToSettle(chef: ChefRuntime, missionId: string): Promise<void> {
+  const deadline = Date.now() + FIXTURE_SETTLE_BUDGET_MS;
+  while (Date.now() < deadline) {
+    const mission = chef.repository.getMission(missionId);
+    if (!mission || ["completed", "failed", "cancelled"].includes(mission.status)) return;
+    await new Promise((resolve) => setTimeout(resolve, POLL_MS));
+  }
+
+  const mission = chef.repository.getMission(missionId);
+  if (mission && !["completed", "failed", "cancelled"].includes(mission.status)) {
+    await chef.cancelMission(missionId);
+  }
 }
 
 const dir = await mkdtemp(join(tmpdir(), "chef-thread-worker-startup-"));
@@ -53,13 +68,11 @@ try {
   const threadId = created.data?.id;
   assert.ok(threadId);
 
-  const request = fetch(`${baseUrl}/api/threads/${encodeURIComponent(threadId)}/chat`, {
+  const response = await fetch(`${baseUrl}/api/threads/${encodeURIComponent(threadId)}/chat`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ message: "Investigate the selected project" }),
   });
-
-  const response = await request;
   assert.equal(response.status, 202, "selected-Thread chat must acknowledge durable work without waiting for completion");
   const body = await response.json() as { ok?: boolean; data?: { ok?: boolean; accepted?: boolean; missionId?: string; threadId?: string } };
   assert.equal(body.ok, true);
@@ -108,15 +121,10 @@ try {
   assert.ok(taskCreated, "worker startup must retain durable Task creation evidence");
   assert.ok(planningSucceeded.seq < taskCreated.seq, "accepted plan evidence must precede real worker Task creation");
 } finally {
-  if (acknowledgedMissionId) {
-    const mission = chef.repository.getMission(acknowledgedMissionId);
-    if (mission && !["completed", "failed", "cancelled"].includes(mission.status)) {
-      await chef.cancelMission(acknowledgedMissionId);
-    }
-  }
+  if (acknowledgedMissionId) await allowFixtureToSettle(chef, acknowledgedMissionId);
   await new Promise<void>((resolve) => server.close(() => resolve()));
   await chef.close();
   await rm(dir, { recursive: true, force: true });
 }
 
-console.log("thread-worker-startup: ok — Thread chat acknowledges first, durably reaches a real worker Session within budget, then cancels bounded work before teardown");
+console.log("thread-worker-startup: ok — Thread chat acknowledges first and durably reaches a real worker Session within its startup budget");
