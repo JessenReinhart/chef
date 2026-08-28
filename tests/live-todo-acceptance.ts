@@ -35,13 +35,11 @@ async function closeServer(server: Server | undefined): Promise<void> {
 
 async function stopProcessTree(child: ChildProcess | undefined): Promise<void> {
   if (!child || child.exitCode !== null || !child.pid) return;
-
   if (process.platform === "win32") {
     const killer = spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"], { stdio: "ignore" });
     await new Promise<void>((resolve) => killer.once("exit", () => resolve()));
     return;
   }
-
   child.kill("SIGTERM");
   await Promise.race([
     new Promise<void>((resolve) => child!.once("exit", () => resolve())),
@@ -82,18 +80,50 @@ async function waitForFreshWorkerSession(
   chef: ChefRuntime,
   workerIds: ReadonlySet<string>,
   existingSessionIds: ReadonlySet<string>,
+  missionId: string,
   budgetMs: number,
 ): Promise<{ id: string; taskId: string; agentId: string }> {
   const deadline = Date.now() + budgetMs;
   while (Date.now() < deadline) {
     const snapshot = await chef.inspectState();
+    const missionTaskIds = new Set(snapshot.tasks.filter((task) => task.missionId === missionId).map((task) => task.id));
     const session = snapshot.sessions.find(
-      (candidate) => workerIds.has(candidate.agentId) && !existingSessionIds.has(candidate.id),
+      (candidate) => workerIds.has(candidate.agentId) && !existingSessionIds.has(candidate.id) && missionTaskIds.has(candidate.taskId),
     );
     if (session) return { id: session.id, taskId: session.taskId, agentId: session.agentId };
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   throw new Error(`No new detected task-capable CLI worker Session started within ${budgetMs}ms`);
+}
+
+async function waitForMissionCompletion(chef: ChefRuntime, missionId: string, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const mission = chef.repository.getMission(missionId);
+    if (mission?.status === "completed") return;
+    if (mission && ["failed", "cancelled"].includes(mission.status)) {
+      throw new Error(`Canonical todo Mission ended as ${mission.status}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(`Canonical todo Mission did not complete within ${timeoutMs}ms`);
+}
+
+async function waitForAssistantResult(origin: string, threadId: string, missionId: string, timeoutMs = 5_000): Promise<string> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const response = await fetch(`${origin}/api/threads/${encodeURIComponent(threadId)}/messages`);
+    if (response.ok) {
+      const body = await response.json() as { data?: Array<{ role?: string; content?: string; metadata?: { missionId?: string; ok?: boolean } }> };
+      const assistant = body.data?.find((message) => message.role === "assistant" && message.metadata?.missionId === missionId);
+      if (assistant?.content) {
+        assert.equal(assistant.metadata?.ok, true, assistant.content);
+        return assistant.content;
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error("Completed Mission did not publish its final assistant result back into the selected Thread");
 }
 
 async function main(): Promise<void> {
@@ -110,11 +140,10 @@ async function main(): Promise<void> {
   let apiServer: Server | undefined;
   let app: ChildProcess | undefined;
   let unsubscribeEvents: (() => void) | undefined;
-  let chatAbort: AbortController | undefined;
   let passed = false;
-  let requestCompleted = false;
   const progressEvents: RuntimeEvent[] = [];
-  const inFlightProgressEvents: RuntimeEvent[] = [];
+  const postAckProgressEvents: RuntimeEvent[] = [];
+  let acknowledged = false;
 
   try {
     chef = createChef({ dbPath, projectDir, orchestratorTimeoutMs: timeoutMs });
@@ -137,14 +166,15 @@ async function main(): Promise<void> {
       apiServer!.listen(0, "127.0.0.1", resolve);
     });
     const apiPort = (apiServer.address() as AddressInfo).port;
+    const origin = `http://127.0.0.1:${apiPort}`;
 
     unsubscribeEvents = chef.subscribeEvents((event) => {
       if (!isMeaningfulProgress(event)) return;
       progressEvents.push(event);
-      if (!requestCompleted) inFlightProgressEvents.push(event);
+      if (acknowledged) postAckProgressEvents.push(event);
     });
 
-    const createThreadResponse = await fetch(`http://127.0.0.1:${apiPort}/api/threads`, {
+    const createThreadResponse = await fetch(`${origin}/api/threads`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ title: "Live todo acceptance" }),
@@ -155,53 +185,48 @@ async function main(): Promise<void> {
     assert.ok(threadId, "Created Thread must expose an id");
 
     const request = "Create a todo app in this selected project using only Node.js built-ins and browser HTML/CSS/JavaScript, with package.json npm start, PORT support, and add/complete/remove controls. Verify it starts and summarize how to run it.";
-
-    chatAbort = new AbortController();
-    const responsePromise = fetch(`http://127.0.0.1:${apiPort}/api/threads/${encodeURIComponent(threadId)}/chat`, {
+    const response = await fetch(`${origin}/api/threads/${encodeURIComponent(threadId)}/chat`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ message: request }),
-      signal: chatAbort.signal,
+      signal: AbortSignal.timeout(Math.min(timeoutMs, 10_000)),
     });
+    const body = await response.json() as { ok?: boolean; data?: { ok?: boolean; accepted?: boolean; missionId?: string; threadId?: string }; error?: string };
+    assert.equal(response.status, 202, `Chef Thread chat acknowledgement failed: ${JSON.stringify(body)}`);
+    assert.equal(body.ok, true, body.error ?? "Chef did not accept the canonical todo request");
+    assert.equal(body.data?.ok, true);
+    assert.equal(body.data?.accepted, true);
+    assert.equal(body.data?.threadId, threadId);
+    const missionId = body.data?.missionId;
+    assert.ok(missionId, "Immediate acknowledgement must expose durable Mission lineage");
+    acknowledged = true;
 
-    let startedSession: { id: string; taskId: string; agentId: string };
-    try {
-      startedSession = await waitForFreshWorkerSession(chef, workerIds, existingSessionIds, startupBudgetMs);
-    } catch (error) {
-      chatAbort.abort();
-      await responsePromise.catch(() => undefined);
-      throw error;
-    }
-
-    const response = await responsePromise;
-    requestCompleted = true;
-    const body = await response.json() as { ok?: boolean; data?: { ok?: boolean; taskIds?: string[]; report?: string }; error?: string };
-
+    const startedSession = await waitForFreshWorkerSession(chef, workerIds, existingSessionIds, missionId, startupBudgetMs);
     assert.ok(
-      inFlightProgressEvents.length > 0,
-      `Chef produced no Mission/Task/Session progress while the canonical request was in flight. Recent progress trace:\n${formatProgressTrace(progressEvents)}`,
+      postAckProgressEvents.length > 0,
+      `Chef produced no Mission/Task/Session progress after acknowledgement. Recent progress trace:\n${formatProgressTrace(progressEvents)}`,
     );
-    assert.equal(response.status, 200, `Chef Thread chat request failed: ${JSON.stringify(body)}`);
-    assert.equal(body.ok, true, body.error ?? body.data?.report ?? "Chef reported failure");
-    assert.equal(body.data?.ok, true, body.data?.report ?? "Mission did not complete successfully");
-    assert.ok((body.data?.taskIds?.length ?? 0) > 0, "Mission must create at least one task");
-    assert.ok(body.data!.taskIds!.includes(startedSession.taskId), "Observed fresh CLI Session must belong to the completed Mission");
+
+    await waitForMissionCompletion(chef, missionId, timeoutMs);
+    const report = await waitForAssistantResult(origin, threadId, missionId);
 
     const snapshot = await chef.inspectState();
-    const taskIds = new Set(body.data!.taskIds!);
-    const missionTasks = snapshot.tasks.filter((task) => taskIds.has(task.id));
+    const missionTasks = snapshot.tasks.filter((task) => task.missionId === missionId);
+    const taskIds = new Set(missionTasks.map((task) => task.id));
     const missionSessions = snapshot.sessions.filter((session) => taskIds.has(session.taskId));
     const singleWorkerRoutingEvent = snapshot.events.find((event) => {
       if (event.type !== "orchestrator.plan.proposed" || !event.payload || typeof event.payload !== "object") return false;
-      return (event.payload as { routingMode?: unknown }).routingMode === "single-worker";
+      return (event.payload as { routingMode?: unknown; missionId?: unknown }).routingMode === "single-worker"
+        && (event.payload as { missionId?: unknown }).missionId === missionId;
     });
 
     assert.ok(singleWorkerRoutingEvent, "Canonical todo request must durably record the single-worker route instead of paying a planner round-trip");
-    assert.equal(missionTasks.length, taskIds.size, "Every returned task must exist in durable state");
+    assert.ok(missionTasks.length > 0, "Canonical todo Mission must create at least one real Task");
+    assert.ok(taskIds.has(startedSession.taskId), "Observed fresh CLI Session must belong to the acknowledged Mission");
     assert.ok(missionTasks.every((task) => task.status === "completed"), "Every Mission task must complete");
     assert.ok(missionSessions.some((session) => session.id === startedSession.id), "The bounded startup Session must remain in durable Mission state");
     assert.ok(missionSessions.every((session) => session.status === "completed"), "Every Mission worker session must terminate successfully");
-    assert.ok(snapshot.events.some((event) => event.type === "task.completed"), "Runtime must record task completion");
+    assert.ok(snapshot.events.some((event) => event.type === "task.completed" && taskIds.has(event.taskId ?? "")), "Runtime must record Mission task completion");
 
     await stat(join(projectDir, "package.json"));
     const packageJson = JSON.parse(await readFile(join(projectDir, "package.json"), "utf8")) as { scripts?: { start?: string } };
@@ -221,14 +246,13 @@ async function main(): Promise<void> {
 
     passed = true;
     console.log(`live-todo-acceptance: ok (${chef.llmStatus.provider}/${chef.llmStatus.model}; worker: ${startedSession.agentId}; candidates: ${workers.map((worker) => worker.id).join(", ")})`);
-    console.log(`Thread: ${threadId}`);
+    console.log(`Thread: ${threadId}; Mission: ${missionId}`);
     console.log(`Worker startup: session=${startedSession.id} task=${startedSession.taskId} within ${startupBudgetMs}ms budget.`);
     console.log("Routing: single-worker (durable orchestrator.plan.proposed evidence).");
-    console.log(`Observed ${inFlightProgressEvents.length} in-flight Mission/Task/Session progress events.`);
-    console.log(`Chef summary: ${body.data?.report ?? "(no report)"}`);
+    console.log(`Observed ${postAckProgressEvents.length} post-ack Mission/Task/Session progress events.`);
+    console.log(`Chef summary: ${report}`);
   } finally {
-    requestCompleted = true;
-    chatAbort?.abort();
+    acknowledged = true;
     unsubscribeEvents?.();
     if (!passed) console.error(`Recent Chef progress trace:\n${formatProgressTrace(progressEvents)}`);
     await stopProcessTree(app);
