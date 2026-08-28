@@ -4,7 +4,8 @@ import { loadSelectedThreadId, SELECTED_THREAD_EVENT } from "./threadApi";
 import { artifactHandoff } from "./artifactHandoff";
 import { visibleArtifactsForCurrentMission } from "./artifactProjection";
 import { copyRunCommand } from "./resultActions";
-import type { UiMission } from "./types";
+import { missionTaskIdsFromEvents } from "./threadScope";
+import type { UiMission, UiRuntimeEvent } from "./types";
 
 type HomeArtifact = {
   id: string;
@@ -16,7 +17,7 @@ type HomeArtifact = {
   metadata: Record<string, unknown>;
 };
 
-type StateSnapshot = { missions?: UiMission[] };
+type StateSnapshot = { missions?: UiMission[]; events?: UiRuntimeEvent[] };
 type RunCopyState = "copied" | "error";
 
 const MAX_HOME_ARTIFACTS = 4;
@@ -55,8 +56,14 @@ export function HomeMissionArtifacts() {
       const currentMission = [...(state.missions ?? [])]
         .filter((candidate) => candidate.metadata?.threadId === selectedThreadId)
         .sort((a, b) => b.createdAt - a.createdAt)[0] ?? null;
+      const scopedMission = currentMission
+        ? {
+            ...currentMission,
+            taskIds: [...missionTaskIdsFromEvents(state.events ?? [], [currentMission.id], currentMission.taskIds)],
+          }
+        : null;
 
-      setMission(currentMission);
+      setMission(scopedMission);
       setArtifacts(artifactBody.ok && Array.isArray(artifactBody.data) ? artifactBody.data : []);
       setError(null);
     } catch (cause) {
