@@ -29,6 +29,17 @@ export function resolveHomeThreadSelection(
   };
 }
 
+export function latestAssistantThreadNote(
+  messages: readonly ChatMessage[],
+  missionId?: string,
+): ChatMessage | null {
+  return [...messages].reverse().find((message) => {
+    if (message.role !== "assistant" || !message.content.trim()) return false;
+    if (!missionId) return true;
+    return message.metadata?.missionId === missionId;
+  }) ?? null;
+}
+
 export function createThreadHistoryLoader(
   loadThreadMessages: (threadId: string) => Promise<ChatMessage[]>,
 ) {
