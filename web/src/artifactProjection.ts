@@ -22,6 +22,7 @@ export type ArtifactHandoff = {
 export type MissionArtifactScope = {
   missionId: string;
   taskIds: Iterable<string>;
+  threadId?: string;
 };
 
 type MissionLinkedArtifact = {
@@ -68,6 +69,16 @@ export function visibleArtifactsForCurrentMission<T extends MissionLinkedArtifac
   limit = MAX_VISIBLE_RESULTS,
 ): T[] {
   return recentArtifacts(artifactsForCurrentMission(artifacts, scope), limit);
+}
+
+export function visibleArtifactsForSelectedThreadMission<T extends MissionLinkedArtifact>(
+  artifacts: T[],
+  scope: MissionArtifactScope | null | undefined,
+  selectedThreadId: string | null | undefined,
+  limit = MAX_VISIBLE_RESULTS,
+): T[] {
+  if (!scope || !selectedThreadId || scope.threadId !== selectedThreadId) return [];
+  return visibleArtifactsForCurrentMission(artifacts, scope, limit);
 }
 
 export function missingResultHandoffNotice(missionStatus: string | undefined, resultCount: number): string | null {
