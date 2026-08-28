@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { createThreadHistoryLoader, resolveHomeThreadSelection } from "../web/src/threadSelection.ts";
+import { createThreadHistoryLoader, latestAssistantThreadNote, resolveHomeThreadSelection } from "../web/src/threadSelection.ts";
 import type { UiThread } from "../web/src/threadApi.ts";
 import type { ChatMessage } from "../web/src/types.ts";
 
@@ -51,6 +51,28 @@ notePending.get("thread-old")?.resolve(oldAssistant);
 assert.deepEqual(await selectedThreadNote, { current: true, messages: selectedAssistant }, "the selected Thread assistant note should stay authoritative");
 assert.deepEqual(await oldThreadNote, { current: false }, "a late assistant note from the previous Thread must be ignored");
 
+const missionResults = [
+  { role: "user", content: "Create a todo app", timestamp: 7 },
+  { role: "assistant", content: "Older Mission finished", timestamp: 8, metadata: { missionId: "mission-old", ok: true } },
+  { role: "assistant", content: "Todo app created. Run npm start. Smoke test passed.", timestamp: 9, metadata: { missionId: "mission-todo", ok: true } },
+  { role: "assistant", content: "Unrelated newer reply", timestamp: 10, metadata: { missionId: "mission-newer", ok: true } },
+] as ChatMessage[];
+assert.equal(
+  latestAssistantThreadNote(missionResults, "mission-todo")?.content,
+  "Todo app created. Run npm start. Smoke test passed.",
+  "terminal Simple Mode handoff must select the persisted assistant result for the exact Mission instead of a newer unrelated reply",
+);
+assert.equal(
+  latestAssistantThreadNote(missionResults)?.content,
+  "Unrelated newer reply",
+  "normal Thread note loading should still use the newest assistant reply when no Mission is requested",
+);
+assert.equal(
+  latestAssistantThreadNote(missionResults, "mission-missing"),
+  null,
+  "a terminal Mission without a persisted assistant turn yet must not borrow another Mission's summary",
+);
+
 const snapshot = history.snapshot();
 history.invalidate();
 assert.equal(history.isCurrent(snapshot), false, "selection changes outside history loading should invalidate older requests");
@@ -73,4 +95,4 @@ assert.equal(defaultSelection.readOnly, false);
 const missingSelection = resolveHomeThreadSelection(threads, "missing");
 assert.equal(missingSelection.selectedThread?.id, "active-a", "a stale remembered id should recover to an active Thread");
 
-console.log("thread-selection-race: ok");
+console.log("thread-selection-race: ok — Thread switching and Mission-specific terminal summaries stay isolated");
