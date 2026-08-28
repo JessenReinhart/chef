@@ -96,32 +96,46 @@ for (const goal of ["Create a todo app", "Implement a todo app"]) {
     const startedAt = Date.now();
     const chatResponse = await fetch(`${baseUrl}/api/threads/${encodeURIComponent(threadId)}/chat`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ message: "Analyze the existing app architecture" }) });
     assert.ok(Date.now() - startedAt < 500);
-    assert.equal(chatResponse.status, 200);
-    const chatBody = await chatResponse.json() as { ok?: boolean; data?: { ok?: boolean; report?: string; missionId?: string; taskIds?: string[] } };
-    assert.equal(chatBody.ok, false);
-    assert.equal(chatBody.data?.ok, false);
-    assert.match(chatBody.data?.report ?? "", /Planner timed out after 25ms before any worker could start/);
-    assert.deepEqual(chatBody.data?.taskIds ?? [], []);
-    const snapshot = chef.repository.getWorkspaceSnapshot(chef.workspaceId);
-    const mission = snapshot.missions.find((candidate) => candidate.id === chatBody.data?.missionId) ?? snapshot.missions.at(-1);
+    assert.equal(chatResponse.status, 202);
+    const chatBody = await chatResponse.json() as { ok?: boolean; data?: { ok?: boolean; accepted?: boolean; missionId?: string; threadId?: string } };
+    assert.equal(chatBody.ok, true);
+    assert.equal(chatBody.data?.ok, true);
+    assert.equal(chatBody.data?.accepted, true);
+    assert.equal(chatBody.data?.threadId, threadId);
+    assert.ok(chatBody.data?.missionId);
+
+    const deadline = Date.now() + 500;
+    let mission = chef.repository.getMission(chatBody.data.missionId!);
+    while (mission?.status !== "failed" && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      mission = chef.repository.getMission(chatBody.data.missionId!);
+    }
     assert.ok(mission);
     assert.equal(mission.status, "failed");
     assert.equal(mission.taskIds.length, 0);
+    const snapshot = chef.repository.getWorkspaceSnapshot(chef.workspaceId);
     assert.equal(snapshot.sessions.length, 0);
 
     const planningStarted = snapshot.events.find((event) => {
       if (event.type !== "orchestrator.plan.started") return false;
-      return (event.payload as { missionId?: unknown }).missionId === mission.id;
+      return (event.payload as { missionId?: unknown }).missionId === mission!.id;
     });
     assert.ok(planningStarted, "pre-worker planning must be durable and correlated to its Mission before the provider call resolves");
 
     const planningFailure = snapshot.events.find((event) => {
       if (event.type !== "orchestrator.plan.error") return false;
       const payload = event.payload as { missionId?: unknown; error?: unknown };
-      return payload.missionId === mission.id && String(payload.error ?? "").includes("Planner timed out after 25ms");
+      return payload.missionId === mission!.id && String(payload.error ?? "").includes("Planner timed out after 25ms");
     });
     assert.ok(planningFailure, "planner timeout must remain durable and correlated to the same Mission");
     assert.ok(planningStarted.seq < planningFailure.seq, "planning-start evidence must precede the terminal planner failure");
+
+    const threadMessagesResponse = await fetch(`${baseUrl}/api/threads/${encodeURIComponent(threadId)}/messages`);
+    const threadMessages = await threadMessagesResponse.json() as { data?: Array<{ role?: string; content?: string; metadata?: { missionId?: string; ok?: boolean } }> };
+    const failureReply = threadMessages.data?.find((message) => message.role === "assistant" && message.metadata?.missionId === mission!.id);
+    assert.ok(failureReply, "background planner failure must become visible in the selected Thread");
+    assert.equal(failureReply.metadata?.ok, false);
+    assert.match(failureReply.content ?? "", /Planner timed out after 25ms before any worker could start/);
 
     const planningEvent = planningStarted as unknown as UiRuntimeEvent;
     const planningHeartbeat = deriveMissionHeartbeat(
@@ -165,4 +179,4 @@ for (const goal of ["Create a todo app", "Implement a todo app"]) {
   }
 }
 
-console.log("preworker-planning-hotfix: ok — straightforward work skips planning and hung planning is bounded, Mission-correlated, and visible through Thread chat");
+console.log("preworker-planning-hotfix: ok — straightforward work skips planning and hung planning stays bounded, Mission-correlated, and visible after Thread acknowledgement");

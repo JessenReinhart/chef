@@ -41,8 +41,10 @@ try {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ message }),
     });
-    assert.equal(response.status, 200);
-    return await response.json() as { data: { missionId?: string; threadId: string } };
+    assert.equal(response.status, 202);
+    const body = await response.json() as { data: { accepted?: boolean; missionId?: string; threadId: string } };
+    assert.equal(body.data.accepted, true);
+    return body;
   };
 
   const first = await send("Implement sign-in");
@@ -61,6 +63,7 @@ try {
     assert.equal(mission.metadata.threadId, thread.id, "each chat-created Mission must keep the originating Thread lineage");
   }
 
+  await new Promise((resolve) => setTimeout(resolve, 2));
   const history = await fetch(`${origin}/api/threads/${thread.id}/messages`);
   assert.equal(history.status, 200);
   const historyBody = await history.json() as { data: Array<{ role: string; content: string }> };
@@ -72,10 +75,10 @@ try {
       ["user", "Add forgot-password flow"],
       ["assistant", "Completed: Add forgot-password flow"],
     ],
-    "follow-up Missions must remain in the same Thread conversation history",
+    "follow-up Missions must remain in the same Thread conversation history after background results settle",
   );
 
-  console.log("thread-multiple-missions: ok — one Thread retains multiple Mission lineages");
+  console.log("thread-multiple-missions: ok — one Thread retains multiple acknowledged Mission lineages and background results");
 } finally {
   await new Promise<void>((resolve) => server.close(() => resolve()));
   repository.close();

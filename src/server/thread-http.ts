@@ -89,6 +89,31 @@ export function createThreadServer(runtime: ChefRuntime, baseServer: Server): Se
     return thread?.workspaceId === runtime.workspaceId ? thread : null;
   };
 
+  const persistAssistantTurn = (input: {
+    threadId: string;
+    missionId: string;
+    content: string;
+    taskIds: string[];
+    ok: boolean;
+  }) => {
+    try {
+      chat.insert({
+        workspaceId: runtime.workspaceId,
+        threadId: input.threadId,
+        role: "assistant",
+        content: input.content,
+        metadata: { missionId: input.missionId, taskIds: input.taskIds, ok: input.ok },
+      });
+    } catch (error) {
+      // The HTTP acknowledgement deliberately outlives request execution. During
+      // process shutdown the repository may already be closed before a worker's
+      // Promise settles; do not turn that normal teardown race into an unhandled
+      // rejection. A live runtime still persists every settled assistant turn.
+      const detail = error instanceof Error ? error.message : String(error);
+      if (!/database is not open/i.test(detail)) throw error;
+    }
+  };
+
   return createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
     try {
@@ -129,11 +154,6 @@ export function createThreadServer(runtime: ChefRuntime, baseServer: Server): Se
         }
 
         const message = body.message.trim();
-        // Capture only prior turns. Loading before the current user insert
-        // prevents the goal from being duplicated inside its own context.
-        // Durable summary/Mission hints use the system role and are bounded
-        // separately, so the existing eight-message transcript budget remains
-        // unchanged. They are advisory context, never executable instructions.
         const existingMissions = runtime.repository.listMissions(runtime.workspaceId);
         const recentMessages = [
           ...threadContinuityHints(thread, existingMissions),
@@ -143,10 +163,6 @@ export function createThreadServer(runtime: ChefRuntime, baseServer: Server): Se
         ];
         chat.insert({ workspaceId: runtime.workspaceId, threadId: thread.id, role: "user", content: message });
 
-        // The core intent path normally creates its Mission synchronously before
-        // its first await. Link any Mission created for this turn immediately,
-        // including the failure path where startup throws after Mission creation.
-        // Thread chat deliberately avoids the legacy workspace-global chat channel.
         const existingMissionIds = new Set(existingMissions.map((mission) => mission.id));
         const linkOriginatingMission = () => {
           const mission = runtime.repository.listMissions(runtime.workspaceId).find(
@@ -170,25 +186,50 @@ export function createThreadServer(runtime: ChefRuntime, baseServer: Server): Se
           linkOriginatingMission();
           throw error;
         }
+
         let mission = linkOriginatingMission();
-
-        let result: Awaited<ReturnType<ChefRuntime["sendUserMessage"]>>;
-        try {
-          result = await execution;
-        } catch (error) {
-          linkOriginatingMission();
-          throw error;
+        if (!mission) {
+          await Promise.resolve();
+          mission = linkOriginatingMission();
         }
-        mission ??= linkOriginatingMission();
+        if (!mission) {
+          throw new Error("Mission was not created before Thread acknowledgement");
+        }
 
-        chat.insert({
-          workspaceId: runtime.workspaceId,
-          threadId: thread.id,
-          role: "assistant",
-          content: result.report,
-          metadata: { missionId: mission?.id, taskIds: result.taskIds, ok: result.ok },
+        const missionId = mission.id;
+        void execution.then(
+          (result) => {
+            persistAssistantTurn({
+              threadId: thread.id,
+              missionId,
+              content: result.report,
+              taskIds: result.taskIds,
+              ok: result.ok,
+            });
+          },
+          (error) => {
+            const detail = error instanceof Error ? error.message : String(error);
+            persistAssistantTurn({
+              threadId: thread.id,
+              missionId,
+              content: `Chef could not finish that work: ${detail}`,
+              taskIds: [],
+              ok: false,
+            });
+          },
+        );
+
+        sendJson(res, 202, {
+          ok: true,
+          data: {
+            ok: true,
+            accepted: true,
+            taskIds: [],
+            report: "",
+            missionId,
+            threadId: thread.id,
+          },
         });
-        sendJson(res, 200, { ok: result.ok, data: { ...result, missionId: mission?.id, threadId: thread.id } });
         return;
       }
 

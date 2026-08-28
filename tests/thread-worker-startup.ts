@@ -3,11 +3,12 @@ import { once } from "node:events";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createChef } from "../src/main.ts";
+import { createChef, type ChefRuntime } from "../src/main.ts";
 import { createHttpServer } from "../src/server/http-server.ts";
 import { createThreadServer } from "../src/server/thread-http.ts";
 
 const WORKER_STARTUP_BUDGET_MS = 1_500;
+const FIXTURE_SETTLE_BUDGET_MS = 5_000;
 const POLL_MS = 20;
 
 async function waitForWorkerStartup(
@@ -31,6 +32,20 @@ async function waitForWorkerStartup(
   );
 }
 
+async function allowFixtureToSettle(chef: ChefRuntime, missionId: string): Promise<void> {
+  const deadline = Date.now() + FIXTURE_SETTLE_BUDGET_MS;
+  while (Date.now() < deadline) {
+    const mission = chef.repository.getMission(missionId);
+    if (!mission || ["completed", "failed", "cancelled"].includes(mission.status)) return;
+    await new Promise((resolve) => setTimeout(resolve, POLL_MS));
+  }
+
+  const mission = chef.repository.getMission(missionId);
+  if (mission && !["completed", "failed", "cancelled"].includes(mission.status)) {
+    await chef.cancelMission(missionId);
+  }
+}
+
 const dir = await mkdtemp(join(tmpdir(), "chef-thread-worker-startup-"));
 const chef = createChef({ dbPath: join(dir, "chef.sqlite"), projectDir: dir });
 await chef.start();
@@ -40,6 +55,7 @@ await once(server, "listening");
 const address = server.address();
 if (!address || typeof address === "string") throw new Error("worker-startup HTTP server did not bind");
 const baseUrl = `http://127.0.0.1:${address.port}`;
+let acknowledgedMissionId: string | undefined;
 
 try {
   const createThreadResponse = await fetch(`${baseUrl}/api/threads`, {
@@ -52,29 +68,38 @@ try {
   const threadId = created.data?.id;
   assert.ok(threadId);
 
-  const request = fetch(`${baseUrl}/api/threads/${encodeURIComponent(threadId)}/chat`, {
+  const response = await fetch(`${baseUrl}/api/threads/${encodeURIComponent(threadId)}/chat`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ message: "Investigate the selected project" }),
   });
+  assert.equal(response.status, 202, "selected-Thread chat must acknowledge durable work without waiting for completion");
+  const body = await response.json() as { ok?: boolean; data?: { ok?: boolean; accepted?: boolean; missionId?: string; threadId?: string } };
+  assert.equal(body.ok, true);
+  assert.equal(body.data?.ok, true);
+  assert.equal(body.data?.accepted, true);
+  assert.equal(body.data?.threadId, threadId);
+  const missionId = body.data?.missionId;
+  assert.ok(missionId, "Thread acknowledgement must expose its durable Mission lineage");
+  acknowledgedMissionId = missionId;
 
   await waitForWorkerStartup(async () => {
     const snapshot = await chef.inspectState();
-    return { tasks: snapshot.tasks, sessions: snapshot.sessions };
+    const missionTasks = snapshot.tasks.filter((task) => task.missionId === missionId);
+    const taskIds = new Set(missionTasks.map((task) => task.id));
+    return {
+      tasks: missionTasks,
+      sessions: snapshot.sessions.filter((session) => taskIds.has(session.taskId)),
+    };
   });
 
-  const response = await request;
-  assert.equal(response.status, 200);
-  const body = await response.json() as { ok?: boolean; data?: { ok?: boolean; missionId?: string; taskIds?: string[] } };
-  assert.equal(body.ok, true);
-  assert.equal(body.data?.ok, true);
-  const missionId = body.data?.missionId;
-  assert.ok(missionId, "completed Thread request must expose its Mission lineage");
-  assert.ok((body.data?.taskIds?.length ?? 0) > 0, "completed Thread request must retain worker Task lineage");
-
   const finalSnapshot = await chef.inspectState();
-  assert.ok(finalSnapshot.sessions.length > 0, "Thread request must persist its real worker Session");
-  assert.ok(finalSnapshot.sessions.every((session) => session.command.length > 0), "worker Session command must be observable");
+  const missionTasks = finalSnapshot.tasks.filter((task) => task.missionId === missionId);
+  const missionTaskIds = new Set(missionTasks.map((task) => task.id));
+  const missionSessions = finalSnapshot.sessions.filter((session) => missionTaskIds.has(session.taskId));
+  assert.ok(missionTasks.length > 0, "acknowledged Mission must create a real worker Task");
+  assert.ok(missionSessions.length > 0, "acknowledged Mission must persist its real worker Session");
+  assert.ok(missionSessions.every((session) => session.command.length > 0), "worker Session command must be observable");
 
   const planningStarted = finalSnapshot.events.find((event) =>
     event.type === "orchestrator.plan.started"
@@ -89,16 +114,17 @@ try {
   assert.ok(planningSucceeded, "successful planning must remain correlated to the Mission before Task creation");
   assert.ok(planningStarted.seq < planningSucceeded.seq, "planning-start evidence must precede the accepted plan");
 
-  const firstTaskId = body.data?.taskIds?.[0];
+  const firstTaskId = missionTasks[0]?.id;
   const taskCreated = firstTaskId
     ? finalSnapshot.events.find((event) => event.type === "orchestrator.task.created" && event.taskId === firstTaskId)
     : undefined;
   assert.ok(taskCreated, "worker startup must retain durable Task creation evidence");
   assert.ok(planningSucceeded.seq < taskCreated.seq, "accepted plan evidence must precede real worker Task creation");
 } finally {
+  if (acknowledgedMissionId) await allowFixtureToSettle(chef, acknowledgedMissionId);
   await new Promise<void>((resolve) => server.close(() => resolve()));
   await chef.close();
   await rm(dir, { recursive: true, force: true });
 }
 
-console.log("thread-worker-startup: ok — Thread chat durably shows planning before reaching a real worker Session within its startup budget");
+console.log("thread-worker-startup: ok — Thread chat acknowledges first and durably reaches a real worker Session within its startup budget");
