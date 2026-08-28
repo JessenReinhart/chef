@@ -9,8 +9,6 @@ import { createLLMDecisionProvider } from "./llm-decision-provider.ts";
 
 const MAX_FAST_PATH_GOAL_LENGTH = 240;
 const MAX_TRACKED_FAST_PATH_TASKS = 1_024;
-const SIMPLE_QUALIFIER = /\b(simple|small|basic|minimal|tiny)\b/i;
-const IMPLEMENTATION_ACTION = /\b(create|build|make|implement|add|fix|update|change|rename|remove)\b/i;
 const DIRECT_SINGLE_STAGE_ACTION = /\b(create|build|make|implement|add|fix|update|change|rename|remove|write|draft|generate)\b/i;
 const INFORMATION_ACTION = /\b(research|explain|summari[sz]e)\b/i;
 const COMPLEXITY_MARKER = /\b(compare|evaluate|analy[sz]e|audit|investigate|architecture|architect|migrate|migration|benchmark|parallel|multiple|multi[- ]agent|across)\b|\b(and then|then verify|then test|after that)\b|\b(and|then)\s+(create|build|implement|fix|update|change|remove|write|draft|document|prepare|produce)\b/i;
@@ -55,12 +53,7 @@ export function shouldUseSingleWorkerFastPath(goal: string): boolean {
   if (normalized.includes("\n") || normalized.includes(";")) return false;
   if (COMPLEXITY_MARKER.test(normalized)) return false;
 
-  const qualifiedImplementation = SIMPLE_QUALIFIER.test(normalized)
-    && IMPLEMENTATION_ACTION.test(normalized);
-  const straightforwardSingleStageWork = DIRECT_SINGLE_STAGE_ACTION.test(normalized);
-  const straightforwardInformationRequest = INFORMATION_ACTION.test(normalized);
-
-  return qualifiedImplementation || straightforwardSingleStageWork || straightforwardInformationRequest;
+  return DIRECT_SINGLE_STAGE_ACTION.test(normalized) || INFORMATION_ACTION.test(normalized);
 }
 
 export class SingleWorkerFastPathDecisionProvider implements DecisionProvider {
