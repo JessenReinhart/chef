@@ -16,21 +16,12 @@ export function missionProgressEventStreamUrl(): string {
   return `/api/events?types=${MISSION_PROGRESS_EVENT_TYPES.join(",")}`;
 }
 
-/**
- * Refresh a mounted progress projection whenever authoritative runtime evidence arrives.
- * Keep at most one refresh in flight and collapse a burst into one trailing refresh so
- * high-frequency worker output cannot create an unbounded /api/state request storm.
- */
-export function subscribeMissionProgressRefresh(
-  onRefresh: MissionProgressRefresh,
-  createStream: MissionProgressEventStreamFactory = (url) => new EventSource(url),
-): () => void {
-  const stream = createStream(missionProgressEventStreamUrl());
+function coalescedRefresh(onRefresh: MissionProgressRefresh): { trigger: () => void; close: () => void } {
   let closed = false;
   let refreshing = false;
   let queued = false;
 
-  const refresh = () => {
+  const trigger = () => {
     if (closed) return;
     if (refreshing) {
       queued = true;
@@ -45,15 +36,64 @@ export function subscribeMissionProgressRefresh(
         refreshing = false;
         if (!closed && queued) {
           queued = false;
-          refresh();
+          trigger();
         }
       });
   };
 
-  stream.onmessage = refresh;
-  return () => {
-    closed = true;
-    queued = false;
-    stream.close();
+  return {
+    trigger,
+    close: () => {
+      closed = true;
+      queued = false;
+    },
   };
+}
+
+export function createMissionProgressRefreshHub(
+  createStream: MissionProgressEventStreamFactory,
+): (onRefresh: MissionProgressRefresh) => () => void {
+  let stream: MissionProgressEventStream | null = null;
+  const listeners = new Set<() => void>();
+
+  const ensureStream = () => {
+    if (stream) return;
+    stream = createStream(missionProgressEventStreamUrl());
+    stream.onmessage = () => {
+      for (const listener of [...listeners]) listener();
+    };
+  };
+
+  return (onRefresh) => {
+    const refresh = coalescedRefresh(onRefresh);
+    listeners.add(refresh.trigger);
+    ensureStream();
+
+    return () => {
+      refresh.close();
+      listeners.delete(refresh.trigger);
+      if (listeners.size === 0 && stream) {
+        stream.close();
+        stream = null;
+      }
+    };
+  };
+}
+
+const subscribeSharedMissionProgressRefresh = createMissionProgressRefreshHub(
+  (url) => new EventSource(url),
+);
+
+/**
+ * Refresh a mounted progress projection whenever authoritative runtime evidence arrives.
+ * Browser consumers share one ref-counted EventSource, while each projection keeps its
+ * own one-in-flight + one-trailing refresh budget. Supplying a factory creates an
+ * isolated hub for deterministic tests.
+ */
+export function subscribeMissionProgressRefresh(
+  onRefresh: MissionProgressRefresh,
+  createStream?: MissionProgressEventStreamFactory,
+): () => void {
+  if (createStream) return createMissionProgressRefreshHub(createStream)(onRefresh);
+  return subscribeSharedMissionProgressRefresh(onRefresh);
 }
