@@ -10,6 +10,7 @@ import { createHttpServer } from "../src/server/http-server.ts";
 import { createImmediateChatServer } from "../src/server/immediate-chat-http.ts";
 
 const ACK_BUDGET_MS = 1_000;
+const TRANSPORT_TIMEOUT_MS = 5_000;
 const WORKER_STARTUP_BUDGET_MS = 1_500;
 const MISSION_COMPLETION_BUDGET_MS = 5_000;
 const POLL_MS = 20;
@@ -79,12 +80,11 @@ async function runHeldPlannerAcceptance(): Promise<void> {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ message: "Research the project performance" }),
-      signal: AbortSignal.timeout(ACK_BUDGET_MS),
+      signal: AbortSignal.timeout(TRANSPORT_TIMEOUT_MS),
     });
     const elapsed = Date.now() - startedAt;
 
     assert.equal(response.status, 202, "Living Workspace send should acknowledge accepted work immediately");
-    assert.ok(elapsed < ACK_BUDGET_MS, `chat acknowledgement exceeded its 1s test budget (${elapsed}ms)`);
     const body = await response.json() as { data?: { accepted?: boolean; missionId?: string } };
     assert.equal(body.data?.accepted, true);
     assert.ok(body.data?.missionId, "immediate acknowledgement should expose the persisted Mission id");
@@ -106,6 +106,7 @@ async function runHeldPlannerAcceptance(): Promise<void> {
       await new Promise((resolve) => setTimeout(resolve, POLL_MS));
     }
     assert.equal(chef.repository.getMission(mission!.id)?.status, "failed", "background orchestration should continue after acknowledgement");
+    assert.ok(elapsed < ACK_BUDGET_MS, `chat acknowledgement exceeded its 1s test budget (${elapsed}ms)`);
   } finally {
     releasePlanner();
     await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -131,12 +132,11 @@ async function runCanonicalWorkerStartupAcceptance(): Promise<void> {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ message: "Create a todo app" }),
-      signal: AbortSignal.timeout(ACK_BUDGET_MS),
+      signal: AbortSignal.timeout(TRANSPORT_TIMEOUT_MS),
     });
     const elapsed = Date.now() - startedAt;
 
     assert.equal(response.status, 202, "canonical todo request should be acknowledged before execution completes");
-    assert.ok(elapsed < ACK_BUDGET_MS, `canonical todo acknowledgement exceeded its 1s budget (${elapsed}ms)`);
     const body = await response.json() as { data?: { accepted?: boolean; missionId?: string } };
     assert.equal(body.data?.accepted, true);
     assert.ok(body.data?.missionId, "canonical acknowledgement must expose durable Mission lineage");
@@ -171,6 +171,7 @@ async function runCanonicalWorkerStartupAcceptance(): Promise<void> {
       "completed",
       "canonical background work should finish before the runtime is closed",
     );
+    assert.ok(elapsed < ACK_BUDGET_MS, `canonical todo acknowledgement exceeded its 1s budget (${elapsed}ms)`);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
     await chef.close();
