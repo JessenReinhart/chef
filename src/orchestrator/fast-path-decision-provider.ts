@@ -12,6 +12,7 @@ const MAX_TRACKED_FAST_PATH_TASKS = 1_024;
 const DIRECT_SINGLE_STAGE_ACTION = /\b(create|build|make|implement|add|fix|update|change|rename|remove|write|draft|generate)\b/i;
 const INFORMATION_ACTION = /\b(research|explain|summari[sz]e)\b/i;
 const SIMPLE_INTENT_REQUEST = /\b(i\s+(?:need|want|would like)|please\s+(?:give|make|build|create)|can you\s+(?:make|build|create|give me))\b/i;
+const EXPLANATORY_QUESTION = /^(?:what\s+(?:is|are|does)|how\s+(?:does|do|is|are|can)|why\s+(?:does|do|is|are)|tell\s+me\s+about)\b/i;
 const COMPLEXITY_MARKER = /\b(compare|evaluate|analy[sz]e|audit|investigate|architecture|architect|migrate|migration|benchmark|parallel|multiple|multi[- ]agent|across)\b|\b(and then|then verify|then test|after that)\b|\b(and|then)\s+(create|build|implement|fix|update|change|remove|write|draft|document|prepare|produce)\b/i;
 
 export const DEFAULT_PLANNER_TIMEOUT_MS = 20_000;
@@ -45,9 +46,9 @@ function deterministicTaskEvaluation(taskResult: PlanTaskOutcome, madeBy: string
 
 /**
  * Short, single-stage work should not pay a planner round-trip just because the
- * user omitted a magic qualifier or phrased the request as an intent. Keep
- * explicit complexity markers on the planner path so decomposition remains
- * available when useful.
+ * user omitted a magic qualifier, phrased the request as an intent, or asked a
+ * normal explanatory question. Keep explicit complexity markers on the planner
+ * path so decomposition remains available when useful.
  */
 export function shouldUseSingleWorkerFastPath(goal: string): boolean {
   const normalized = goal.trim();
@@ -55,7 +56,10 @@ export function shouldUseSingleWorkerFastPath(goal: string): boolean {
   if (normalized.includes("\n") || normalized.includes(";")) return false;
   if (COMPLEXITY_MARKER.test(normalized)) return false;
 
-  return DIRECT_SINGLE_STAGE_ACTION.test(normalized) || INFORMATION_ACTION.test(normalized) || SIMPLE_INTENT_REQUEST.test(normalized);
+  return DIRECT_SINGLE_STAGE_ACTION.test(normalized)
+    || INFORMATION_ACTION.test(normalized)
+    || SIMPLE_INTENT_REQUEST.test(normalized)
+    || EXPLANATORY_QUESTION.test(normalized);
 }
 
 export class SingleWorkerFastPathDecisionProvider implements DecisionProvider {
