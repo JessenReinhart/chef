@@ -80,6 +80,21 @@ async function within<T>(work: Promise<T>, timeoutMs: number, label: string): Pr
   }
 }
 
+async function waitForNoLiveTaskSessions(
+  chef: ReturnType<typeof createChef>,
+  taskId: string,
+  timeoutMs: number,
+): Promise<void> {
+  await within((async () => {
+    while (true) {
+      const sessions = chef.repository.getWorkspaceSnapshot(chef.workspaceId).sessions.filter((session) => session.taskId === taskId);
+      const live = sessions.find((session) => session.status === "running" || session.status === "spawning");
+      if (!live) return;
+      await new Promise<void>((resolve) => setTimeout(resolve, 25));
+    }
+  })(), timeoutMs, `task ${taskId} still had a live session after timeout cleanup budget`);
+}
+
 // Default policy is a constructor contract, not a wall-clock behavior test.
 // Keep this assertion deterministic: a successful real worker can legitimately
 // run for an arbitrary duration when no Mission deadline is configured.
@@ -122,13 +137,16 @@ if (!orchestratorSource.includes("class MissionTimeoutError extends Error")) {
     throw new Error(`expected timeout error in report, got: ${result.report}`);
   }
 
-  // The plan session must be gone: terminate()/forget() ran in the finally
-  // cleanup path. Probe by snapshotting; a live session is a leak.
+  // The timeout response is deliberately no longer coupled to arbitrary
+  // downstream settlement. Cancellation continues asynchronously, but a real
+  // PTY still has to converge out of its live state within a bounded budget.
+  await waitForNoLiveTaskSessions(chef, "t1", 1_500);
+
   const snapshot = chef.repository.getWorkspaceSnapshot(chef.workspaceId);
   const sessions = snapshot.sessions.filter((s) => s.taskId === "t1");
   for (const session of sessions) {
     if (session.status === "running" || session.status === "spawning") {
-      throw new Error(`session ${session.id} still live after plan timeout (${session.status})`);
+      throw new Error(`session ${session.id} still live after bounded timeout cleanup (${session.status})`);
     }
   }
 
