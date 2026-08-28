@@ -69,6 +69,7 @@ const unsubscribeLiveProgress = subscribeMissionProgressRefresh(
 assert.equal(requestedProgressStream, missionProgressEventStreamUrl(), "the mounted progress projection must open the worker-aware runtime stream");
 assert.ok(fakeProgressStream.onmessage, "the mounted progress projection must attach a live event handler");
 fakeProgressStream.onmessage?.({} as MessageEvent);
+await Promise.resolve();
 fakeProgressStream.onmessage?.({} as MessageEvent);
 fakeProgressStream.onmessage?.({} as MessageEvent);
 assert.equal(liveRefreshCount, 1, "bursty worker output must not start concurrent state refreshes while one refresh is still in flight");
