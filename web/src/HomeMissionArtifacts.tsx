@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { loadSelectedThreadId, SELECTED_THREAD_EVENT } from "./threadApi";
 import { artifactHandoff } from "./artifactHandoff";
-import { visibleArtifactsForCurrentMission } from "./artifactProjection";
+import { visibleArtifactsForSelectedThreadMission } from "./artifactProjection";
 import { copyRunCommand } from "./resultActions";
 import { missionTaskIdsFromEvents } from "./threadScope";
 import type { UiMission, UiRuntimeEvent } from "./types";
@@ -87,9 +87,12 @@ export function HomeMissionArtifacts() {
 
   const missionArtifacts = useMemo(() => {
     if (!mission) return [];
-    return visibleArtifactsForCurrentMission(
+    const selectedThreadId = loadSelectedThreadId();
+    const missionThreadId = typeof mission.metadata?.threadId === "string" ? mission.metadata.threadId : undefined;
+    return visibleArtifactsForSelectedThreadMission(
       artifacts,
-      { missionId: mission.id, taskIds: mission.taskIds },
+      { missionId: mission.id, taskIds: mission.taskIds, threadId: missionThreadId },
+      selectedThreadId,
       MAX_HOME_ARTIFACTS,
     );
   }, [artifacts, mission]);
