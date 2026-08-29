@@ -112,4 +112,44 @@ assert.ok(
   "promoting the heartbeat must still retain the newest concrete worker update",
 );
 
-console.log("mission-activity-fallback: ok — attention, verification, and stale-silence heartbeat states remain explicit in Simple Mode");
+const verifyingMission: UiMission = {
+  ...activeMission,
+  id: "mission-verifying-silent",
+  status: "verifying",
+  taskIds: ["task-verify"],
+};
+const verifyingTask: UiTask = {
+  ...activeTask,
+  id: "task-verify",
+  title: "Verify the todo app",
+};
+const staleWorkerActivity: UiRuntimeEvent[] = [
+  {
+    id: "evt-verifying-task-running",
+    seq: 1,
+    timestamp: 10_000,
+    source: { type: "task", id: verifyingTask.id },
+    type: "task.running",
+    payload: { missionId: verifyingMission.id, taskId: verifyingTask.id },
+    taskId: verifyingTask.id,
+    correlationId: verifyingMission.id,
+  },
+];
+const verifyingSilentProjection = projectMissionActivity(
+  { missions: [verifyingMission], tasks: [verifyingTask], events: staleWorkerActivity },
+  [],
+  30_000,
+);
+assert.ok(verifyingSilentProjection, "a verifying Mission with stale worker activity should remain visible");
+assert.equal(
+  verifyingSilentProjection.missionState,
+  "Verifying",
+  "the prominent Mission state must reflect the current Mission snapshot",
+);
+assert.equal(
+  verifyingSilentProjection.feed[0],
+  "Chef is still verifying. Last runtime activity was 20 seconds ago.",
+  "the promoted heartbeat must agree with the authoritative current Mission stage even when older events only imply working",
+);
+
+console.log("mission-activity-fallback: ok — attention, verification, and stale-silence heartbeat states remain explicit and stage-consistent in Simple Mode");
