@@ -188,6 +188,10 @@ export function createArtifactServer(runtime: ChefRuntime, baseServer: Server, o
 
       const revealMatch = url.pathname.match(/^\/api\/artifacts\/([^/]+)\/reveal$/);
       if (req.method === "POST" && revealMatch) {
+        if (req.headers["x-chef-action"] !== "reveal-artifact") {
+          sendJson(res, 403, { error: "explicit Chef reveal action is required" });
+          return;
+        }
         const artifactId = decodeURIComponent(revealMatch[1]);
         try {
           const location = await resolveArtifactLocation(runtime, artifactId);
