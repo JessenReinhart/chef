@@ -104,6 +104,32 @@ assert.deepEqual(explicit, {
   verification: "Smoke test passed",
 }, "worker-supplied handoff prose must remain more specific than the named-result fallback");
 
+const explicitLocationWithoutSummary = artifactHandoff({
+  uri: "sideband://result",
+  metadata: {
+    resultLocation: "dist/todo-app",
+    runCommand: "npm start",
+    verification: "Smoke test passed",
+  },
+});
+assert.deepEqual(explicitLocationWithoutSummary, {
+  summary: "Chef produced todo-app.",
+  location: "dist/todo-app",
+  runCommand: "npm start",
+  verification: "Smoke test passed",
+}, "an opaque artifact with an explicit durable result location should still explain what Chef produced");
+
+const windowsExplicitLocationWithoutSummary = artifactHandoff({
+  uri: "sideband://result",
+  metadata: { path: "C:\\Work\\chef\\todo-app" },
+});
+assert.deepEqual(windowsExplicitLocationWithoutSummary, {
+  summary: "Chef produced todo-app.",
+  location: "C:\\Work\\chef\\todo-app",
+  runCommand: null,
+  verification: null,
+}, "Windows explicit durable locations should produce the same self-describing fallback");
+
 const booleanVerified = artifactHandoff({
   uri: "file:///tmp/chef-project/todo-app.mjs",
   metadata: { verified: true },
@@ -130,6 +156,6 @@ const noisy = artifactHandoff({
 assert.equal(noisy.summary, "Created the todo app with the requested form and list.", "worker summaries should be compact and readable in the result card");
 
 const remote = artifactHandoff({ uri: "https://example.com/result", metadata: {} });
-assert.deepEqual(remote, { summary: null, location: null, runCommand: null, verification: null }, "unnamed remote results should not invent a description when there is no durable file evidence");
+assert.deepEqual(remote, { summary: null, location: null, runCommand: null, verification: null }, "unnamed remote results should not invent a description when there is no durable result location");
 
 console.log("artifact handoff behavior passed");
