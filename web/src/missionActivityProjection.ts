@@ -45,17 +45,23 @@ function payloadStrings(payload: EventPayload, key: string): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 }
 
-function simpleModeFailureReason(payload: EventPayload): string | undefined {
-  const raw = payloadString(payload, "error") ?? payloadString(payload, "reason");
-  if (!raw) return undefined;
-
-  const firstMeaningfulLine = raw
+function simpleModeActivityText(raw: string): string | undefined {
+  const meaningfulLines = raw
     .split(/\r?\n/)
     .map((line) => line.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "").replace(/\s+/g, " ").trim())
-    .find(Boolean);
-  if (!firstMeaningfulLine) return undefined;
+    .filter(Boolean);
+  if (meaningfulLines.length === 0) return undefined;
 
-  return firstMeaningfulLine.length > 180 ? `${firstMeaningfulLine.slice(0, 177)}...` : firstMeaningfulLine;
+  const firstLine = meaningfulLines[0]!;
+  const text = firstLine.endsWith(":") && meaningfulLines[1]
+    ? `${firstLine} ${meaningfulLines[1]}`
+    : firstLine;
+  return text.length > 220 ? `${text.slice(0, 217)}...` : text;
+}
+
+function simpleModeFailureReason(payload: EventPayload): string | undefined {
+  const raw = payloadString(payload, "error") ?? payloadString(payload, "reason");
+  return raw ? simpleModeActivityText(raw) : undefined;
 }
 
 function directlyBelongsToMission(event: UiRuntimeEvent, missionId: string): boolean {
@@ -188,9 +194,10 @@ export function projectMissionActivity(
       text = summarizeMissionProgressEvent(event)?.text ?? null;
     }
 
-    if (!text || seen.has(text)) continue;
-    seen.add(text);
-    feed.push(text);
+    const safeText = text ? simpleModeActivityText(text) : undefined;
+    if (!safeText || seen.has(safeText)) continue;
+    seen.add(safeText);
+    feed.push(safeText);
     if (feed.length === 3) break;
   }
 

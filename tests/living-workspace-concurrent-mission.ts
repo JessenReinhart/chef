@@ -123,6 +123,26 @@ assert.equal(
   "terminal-only lines must be discarded after ANSI cleanup so the next real failure reason remains visible",
 );
 
+const noisyPlannerFailureProjection = projectMissionActivity({
+  missions: [recoveryMission],
+  tasks: [buildTask],
+  events: [{
+    id: "event-planner-error",
+    seq: 3,
+    timestamp: 3_000,
+    source: { type: "orchestrator", id: "orchestrator" },
+    type: "orchestrator.plan.error",
+    payload: { error: "\u001b[31m\u001b[0m\nProvider timeout\n    at requestPlan (orchestrator/provider.ts:42:7)\n    at async proposePlan (orchestrator/provider.ts:88:3)" },
+    correlationId: recoveryMission.id,
+  }],
+}, [{ id: "codex", name: "Codex", type: "cli", available: true }], 3_000);
+assert.ok(noisyPlannerFailureProjection);
+assert.equal(
+  noisyPlannerFailureProjection.feed[0],
+  "Planning failed: Provider timeout",
+  "non-Task runtime failures must skip terminal-only preludes and keep the next useful reason without leaking stack detail",
+);
+
 const retryEvent: UiRuntimeEvent = {
   id: "event-retry",
   seq: 2,
@@ -160,4 +180,4 @@ assert.equal(
   "failure without a durable error must stay truthful without inventing a reason",
 );
 
-console.log("living-workspace-concurrent-mission: ok — Mission selection and visible failure-to-retry recovery stay truthful and bounded in Simple Mode");
+console.log("living-workspace-concurrent-mission: ok — Mission selection and visible failure-to-retry recovery stay truthful, bounded, and free of raw runtime noise in Simple Mode");
