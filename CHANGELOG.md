@@ -2,6 +2,7 @@
 
 ## 2026-08-29
 
+- **Simple Mode keeps durable results self-describing even when worker prose is missing (#271):** When Chef has a durable file or result location but no optional summary text, the result handoff now names what was produced from the artifact name or filename while preserving richer worker-written summaries when they exist.
 - **Simple Mode keeps a fresh heartbeat visible when work goes quiet (#270):** When an active or verifying Mission has no runtime update for 10 seconds, the newest activity line now says Chef is still working or verifying instead of letting older progress hide the silence. Recent concrete worker context remains visible, and the heartbeat always matches the Mission’s current stage.
 - **Simple Mode keeps result handoff visible when work ends without a durable result (#269):** Completed, failed, blocked, approval-waiting, paused, or stopped Missions now keep the results area visible with a clear recovery message. Partial results stay visible without being mistaken for a successful handoff, and results from another Thread stay hidden.
 - **Simple Mode now acknowledges requests without guessing the execution route (#267):** New requests immediately confirm that work has started without claiming Chef chose a team, planner, worker, or routing shape before durable runtime evidence exists.
