@@ -44,7 +44,10 @@ export async function revealArtifact(
   if (!artifactId.trim()) return { ok: false, error: "No result is available to reveal" };
 
   try {
-    const response = await requester(`/api/artifacts/${encodeURIComponent(artifactId)}/reveal`, { method: "POST" });
+    const response = await requester(`/api/artifacts/${encodeURIComponent(artifactId)}/reveal`, {
+      method: "POST",
+      headers: { "x-chef-action": "reveal-artifact" },
+    });
     if (response.ok) return { ok: true };
 
     let message = "Could not show this result in its folder";
