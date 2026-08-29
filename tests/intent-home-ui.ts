@@ -184,8 +184,8 @@ assert.ok(failedWithoutFeed, "a failed Mission should remain actionable when no 
 assert.equal(failedWithoutFeed.missionState, "Needs attention");
 assert.equal(
   failedWithoutFeed.fallback,
-  "Work needs attention. Review the latest Mission update before continuing.",
-  "failure fallback must not claim work is still active",
+  "Work failed before a useful recovery update was available.",
+  "failure fallback must distinguish terminal failure without inventing a nonexistent latest update",
 );
 
 const startupMission: UiMission = {
