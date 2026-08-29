@@ -58,29 +58,11 @@ assert.deepEqual(
   ["current-task", "current-mission-metadata"],
   "the primary result projection should follow the authoritative current Mission scope",
 );
-assert.deepEqual(
-  artifactsForCurrentMission(mixedMissionResults, null),
-  [],
-  "without an authoritative current Mission, workspace history must not masquerade as current-task results",
-);
-assert.deepEqual(
-  artifactsForCurrentMission(mixedMissionResults, undefined),
-  [],
-  "while Mission scope is loading, Chef should show no current-result claim rather than stale workspace history",
-);
-assert.deepEqual(
-  recentArtifacts(currentMissionResults, MAX_VISIBLE_RESULTS).map((item) => item.id),
-  ["current-mission-metadata", "current-task"],
-  "current Mission results should still be newest-first after lineage scoping",
-);
+assert.deepEqual(artifactsForCurrentMission(mixedMissionResults, null), [], "without an authoritative current Mission, workspace history must not masquerade as current-task results");
+assert.deepEqual(artifactsForCurrentMission(mixedMissionResults, undefined), [], "while Mission scope is loading, Chef should show no current-result claim rather than stale workspace history");
+assert.deepEqual(recentArtifacts(currentMissionResults, MAX_VISIBLE_RESULTS).map((item) => item.id), ["current-mission-metadata", "current-task"], "current Mission results should still be newest-first after lineage scoping");
 
-const earlyMissionResult = artifact(
-  "early-current-result",
-  11,
-  "task-not-yet-in-mission-snapshot",
-  "chef:early-result",
-  { missionId: "mission-current", summary: "First durable result is ready" },
-);
+const earlyMissionResult = artifact("early-current-result", 11, "task-not-yet-in-mission-snapshot", "chef:early-result", { missionId: "mission-current", summary: "First durable result is ready" });
 assert.deepEqual(
   visibleArtifactsForCurrentMission(
     [artifact("other-thread-result", 12, "task-other-thread", "chef:other", { missionId: "mission-other" }), earlyMissionResult],
@@ -90,24 +72,8 @@ assert.deepEqual(
   "a durable current-Mission result should become visible immediately even while the Mission taskIds snapshot is still catching up",
 );
 
-assert.deepEqual(
-  visibleArtifactsForSelectedThreadMission(
-    [earlyMissionResult],
-    { missionId: "mission-current", taskIds: [], threadId: "thread-a" },
-    "thread-b",
-  ),
-  [],
-  "switching Threads must suppress the previous Thread's Mission results immediately while the new Thread state is loading",
-);
-assert.deepEqual(
-  visibleArtifactsForSelectedThreadMission(
-    [earlyMissionResult],
-    { missionId: "mission-current", taskIds: [], threadId: "thread-a" },
-    "thread-a",
-  ).map((item) => item.id),
-  ["early-current-result"],
-  "the selected Thread should still surface its own current Mission result",
-);
+assert.deepEqual(visibleArtifactsForSelectedThreadMission([earlyMissionResult], { missionId: "mission-current", taskIds: [], threadId: "thread-a" }, "thread-b"), [], "switching Threads must suppress the previous Thread's Mission results immediately while the new Thread state is loading");
+assert.deepEqual(visibleArtifactsForSelectedThreadMission([earlyMissionResult], { missionId: "mission-current", taskIds: [], threadId: "thread-a" }, "thread-a").map((item) => item.id), ["early-current-result"], "the selected Thread should still surface its own current Mission result");
 
 const durableTaskLineageEvent: UiRuntimeEvent = {
   id: "mission-current-plan",
@@ -118,76 +84,33 @@ const durableTaskLineageEvent: UiRuntimeEvent = {
   correlationId: "mission-current",
   payload: { taskId: "task-event-linked" },
 };
-const recoveredTaskIds = missionTaskIdsFromEvents(
-  [durableTaskLineageEvent],
-  ["mission-current"],
-  [],
-);
+const recoveredTaskIds = missionTaskIdsFromEvents([durableTaskLineageEvent], ["mission-current"], []);
 assert.deepEqual(
-  visibleArtifactsForCurrentMission(
-    [
-      artifact("other-task-only-result", 14, "task-other-thread"),
-      artifact("early-task-only-result", 15, "task-event-linked", "chef:task-only-result", { summary: "Task-linked result is ready" }),
-    ],
-    { missionId: "mission-current", taskIds: recoveredTaskIds },
-  ).map((item) => item.id),
+  visibleArtifactsForCurrentMission([
+    artifact("other-task-only-result", 14, "task-other-thread"),
+    artifact("early-task-only-result", 15, "task-event-linked", "chef:task-only-result", { summary: "Task-linked result is ready" }),
+  ], { missionId: "mission-current", taskIds: recoveredTaskIds }).map((item) => item.id),
   ["early-task-only-result"],
   "durable Mission-correlated Task lineage should surface a current result even before Mission.taskIds converges, without leaking another Task's artifact",
 );
 
-assert.equal(
-  missingResultHandoffNotice("completed", 0),
-  "Work is marked complete, but Chef did not publish a durable result for this Mission.",
-  "a completed Mission without an artifact must expose the missing result handoff instead of silently rendering no Results surface",
-);
-assert.equal(
-  missingResultHandoffNotice("active", 0),
-  null,
-  "active work should not be mislabeled as a missing result before completion",
-);
-assert.equal(
-  missingResultHandoffNotice("completed", 1),
-  null,
-  "a completed Mission with a durable result should not show a false handoff warning",
-);
-assert.equal(
-  missingResultHandoffNotice("failed", 0),
-  "No durable result is available because this Mission needs attention.",
-  "failed work should explain why no result is available without pretending completion succeeded",
-);
+assert.equal(missingResultHandoffNotice("completed", 0), "Work is marked complete, but Chef did not publish a durable result for this Mission.", "a completed Mission without an artifact must expose the missing result handoff instead of silently rendering no Results surface");
+assert.equal(missingResultHandoffNotice("active", 0), null, "active work should not be mislabeled as a missing result before completion");
+assert.equal(missingResultHandoffNotice("completed", 1), null, "a completed Mission with a durable result should not show a false handoff warning");
+assert.equal(missingResultHandoffNotice("failed", 0), "No durable result is available because this Mission needs attention.", "failed work should explain why no result is available without pretending completion succeeded");
 
 const goldenTodoResult = artifact("golden-todo", 16, "task-todo", "file:///tmp/todo-app.mjs", {
   content: "Created runnable todo app at /tmp/todo-app.mjs",
   run: "node /tmp/todo-app.mjs",
   verifiedBy: "golden-path",
 });
-assert.deepEqual(
-  artifactHandoff(goldenTodoResult),
-  {
-    summary: "Created runnable todo app at /tmp/todo-app.mjs",
-    runCommand: "node /tmp/todo-app.mjs",
-    verifiedBy: "golden-path",
-  },
-  "the Living Workspace must preserve the canonical artifact contract for what changed, how to run it, and what verified it",
-);
+assert.deepEqual(artifactHandoff(goldenTodoResult), { summary: "Created runnable todo app at /tmp/todo-app.mjs", runCommand: "node /tmp/todo-app.mjs", verifiedBy: "golden-path" }, "the Living Workspace must preserve the canonical artifact contract for what changed, how to run it, and what verified it");
 
 let copiedCommand = "";
-assert.equal(
-  await copyRunCommand("node /tmp/todo-app.mjs", async (command) => { copiedCommand = command; }),
-  "copied",
-  "a durable run command should be directly actionable from the result handoff",
-);
+assert.equal(await copyRunCommand("node /tmp/todo-app.mjs", async (command) => { copiedCommand = command; }), "copied", "a durable run command should be directly actionable from the result handoff");
 assert.equal(copiedCommand, "node /tmp/todo-app.mjs", "copy action must preserve the exact worker-provided run command");
-assert.equal(
-  await copyRunCommand("npm start"),
-  "unavailable",
-  "the result handoff must report when clipboard support is unavailable instead of pretending the action succeeded",
-);
-assert.equal(
-  await copyRunCommand("npm start", async () => { throw new Error("clipboard denied"); }),
-  "failed",
-  "clipboard rejection must remain a visible failure state rather than a false success",
-);
+assert.equal(await copyRunCommand("npm start"), "unavailable", "the result handoff must report when clipboard support is unavailable instead of pretending the action succeeded");
+assert.equal(await copyRunCommand("npm start", async () => { throw new Error("clipboard denied"); }), "failed", "clipboard rejection must remain a visible failure state rather than a false success");
 
 let revealUrl = "";
 let revealMethod = "";
@@ -200,27 +123,17 @@ assert.deepEqual(revealSuccess, { ok: true }, "a file-backed durable result shou
 assert.equal(revealUrl, "/api/artifacts/golden%20todo%2Fresult/reveal", "the browser must send only the encoded durable artifact id, never a filesystem path");
 assert.equal(revealMethod, "POST", "revealing a local result is an explicit action rather than a passive GET");
 
-const revealRejected = await requestArtifactReveal("outside-result", async () => ({
-  ok: false,
-  json: async () => ({ error: "artifact file is outside the project root" }),
-}) as Pick<Response, "ok" | "json">);
-assert.deepEqual(
-  revealRejected,
-  { ok: false, error: "artifact file is outside the project root" },
-  "Simple Mode must surface the server's safe reveal rejection instead of pretending the folder opened",
-);
+const revealRejected = await requestArtifactReveal("outside-result", async () => ({ ok: false, json: async () => ({ error: "artifact file is outside the project root" }) }) as Pick<Response, "ok" | "json">);
+assert.deepEqual(revealRejected, { ok: false, error: "artifact file is outside the project root" }, "Simple Mode must surface the server's safe reveal rejection instead of pretending the folder opened");
 
 const revealUnavailable = await requestArtifactReveal("missing-result", async () => { throw new Error("connection lost"); });
-assert.deepEqual(
-  revealUnavailable,
-  { ok: false, error: "connection lost" },
-  "transport failure must remain visible in the result handoff",
-);
+assert.deepEqual(revealUnavailable, { ok: false, error: "connection lost" }, "transport failure must remain visible in the result handoff");
 
 let releaseReveal!: (result: { ok: true }) => void;
 let revealCalls = 0;
 const singleFlightReveal = createSingleFlightArtifactRevealer(async () => {
   revealCalls += 1;
+  if (revealCalls > 1) return { ok: true };
   return new Promise<{ ok: true }>((resolve) => { releaseReveal = resolve; });
 });
 const firstReveal = singleFlightReveal("golden-todo");
@@ -233,11 +146,7 @@ await Promise.all([firstReveal, duplicateReveal]);
 await singleFlightReveal("golden-todo");
 assert.equal(revealCalls, 2, "after the prior reveal settles, a later user retry must be allowed to open the result again");
 
-assert.deepEqual(
-  artifactHandoff(artifact("legacy-result", 17, "task-legacy", "chef:legacy", { description: "Generated report", runCommand: "npm start", verification: "runtime smoke" })),
-  { summary: "Generated report", runCommand: "npm start", verifiedBy: "runtime smoke" },
-  "result handoff should remain useful for older/custom artifact metadata aliases",
-);
+assert.deepEqual(artifactHandoff(artifact("legacy-result", 17, "task-legacy", "chef:legacy", { description: "Generated report", runCommand: "npm start", verification: "runtime smoke" })), { summary: "Generated report", runCommand: "npm start", verifiedBy: "runtime smoke" }, "result handoff should remain useful for older/custom artifact metadata aliases");
 
 let requestedLiveResultStream = "";
 let liveResultRefreshCount = 0;
@@ -253,11 +162,7 @@ const unsubscribeLiveResults = subscribeMissionProgressRefresh(
     return fakeLiveResultStream;
   },
 );
-assert.equal(
-  requestedLiveResultStream,
-  missionProgressEventStreamUrl(),
-  "the Simple Mode result handoff should reuse the authoritative worker-aware Mission event stream instead of waiting only for polling",
-);
+assert.equal(requestedLiveResultStream, missionProgressEventStreamUrl(), "the Simple Mode result handoff should reuse the authoritative worker-aware Mission event stream instead of waiting only for polling");
 assert.ok(fakeLiveResultStream.onmessage, "the live result handoff must attach an event-driven refresh callback");
 fakeLiveResultStream.onmessage?.({} as MessageEvent);
 await new Promise<void>((resolve) => setImmediate(resolve));
