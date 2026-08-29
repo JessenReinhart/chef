@@ -131,6 +131,18 @@ function missionCanHeartbeat(mission: UiMission): boolean {
   return mission.status === "planning" || mission.status === "active" || mission.status === "verifying";
 }
 
+function heartbeatTextForMissionState(text: string, status: UiMission["status"]): string {
+  const label = status === "planning"
+    ? "Chef is still planning"
+    : status === "verifying"
+      ? "Chef is still verifying"
+      : status === "active"
+        ? "Chef is still working"
+        : null;
+  if (!label) return text;
+  return text.replace(/^Chef is still (?:planning|working|verifying)/, label);
+}
+
 function missionActivityFallback(mission: UiMission): string {
   if (mission.status === "planning") return "Chef is deciding who and what this work needs.";
   if (mission.status === "completed") return "Work is complete. Results are available in this workspace.";
@@ -203,7 +215,8 @@ export function projectMissionActivity(
   if (missionCanHeartbeat(mission)) {
     const heartbeat = deriveMissionHeartbeat(snapshot.events, mission.id, scoped.ownedTaskIds, now);
     if (heartbeat && !seen.has(heartbeat.text)) {
-      feed.unshift(heartbeat.text);
+      const heartbeatText = heartbeatTextForMissionState(heartbeat.text, mission.status);
+      feed.unshift(heartbeatText);
       if (feed.length > 3) feed.length = 3;
     }
   }
