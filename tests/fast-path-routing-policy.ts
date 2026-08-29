@@ -17,6 +17,20 @@ for (const goal of simpleExplanations) {
   );
 }
 
+const simpleDetailedRequests = [
+  "Create a simple todo app\nUse React.",
+  "Create a simple todo app; React is fine.",
+  "Research the best way to create a system with AI\nKeep the answer concise.",
+];
+
+for (const goal of simpleDetailedRequests) {
+  assert.equal(
+    shouldUseSingleWorkerFastPath(goal),
+    true,
+    `${goal} should not pay planner latency only because the request contains formatting or a short detail`,
+  );
+}
+
 const comparisonQuestions = [
   "What is the difference between React and Vue?",
   "What are the pros and cons of React Server Components?",
@@ -30,6 +44,22 @@ for (const goal of comparisonQuestions) {
     shouldUseSingleWorkerFastPath(goal),
     false,
     `${goal} should retain planner routing because it asks for comparison/evaluation`,
+  );
+}
+
+const separatedMultiStageRequests = [
+  "Create a todo app\nThen test it.",
+  "Create a todo app\nand test it.",
+  "Create a todo app; add end-to-end tests.",
+  "Create a todo app; and verify it runs.",
+  "Research the options\nPrepare a migration plan.",
+];
+
+for (const goal of separatedMultiStageRequests) {
+  assert.equal(
+    shouldUseSingleWorkerFastPath(goal),
+    false,
+    `${goal} should retain planner routing because the separator introduces another executable stage`,
   );
 }
 
