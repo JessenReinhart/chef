@@ -30,6 +30,11 @@ type MissionLinkedArtifact = {
   metadata: Record<string, unknown>;
 };
 
+export type MissionResultHandoffProjection<T> = {
+  artifacts: T[];
+  notice: string | null;
+};
+
 export type RunCommandCopyResult = "copied" | "unavailable" | "failed";
 
 export const MAX_VISIBLE_RESULTS = 4;
@@ -82,17 +87,43 @@ export function visibleArtifactsForSelectedThreadMission<T extends MissionLinked
 }
 
 export function missingResultHandoffNotice(missionStatus: string | undefined, resultCount: number): string | null {
-  if (resultCount > 0 || !missionStatus) return null;
-  if (missionStatus === "completed") {
+  if (!missionStatus) return null;
+  if (missionStatus === "completed" && resultCount === 0) {
     return "Work is marked complete, but Chef did not publish a durable result for this Mission.";
   }
   if (missionStatus === "failed" || missionStatus === "blocked" || missionStatus === "waiting_for_approval") {
-    return "No durable result is available because this Mission needs attention.";
+    return resultCount > 0
+      ? "Chef saved a partial result, but this Mission still needs attention before the handoff is complete."
+      : "No durable result is available because this Mission needs attention.";
+  }
+  if (missionStatus === "paused") {
+    return resultCount > 0
+      ? "Chef saved a partial result, but this Mission is paused before the handoff is complete."
+      : "No durable result is available because this Mission is paused.";
   }
   if (missionStatus === "cancelled") {
-    return "No durable result is available because this Mission was stopped.";
+    return resultCount > 0
+      ? "Chef saved a partial result, but this Mission was stopped before the handoff was complete."
+      : "No durable result is available because this Mission was stopped.";
   }
   return null;
+}
+
+export function missionResultHandoffProjection<T extends MissionLinkedArtifact>(
+  artifacts: T[],
+  scope: MissionArtifactScope | null | undefined,
+  selectedThreadId: string | null | undefined,
+  missionStatus: string | undefined,
+  limit = MAX_VISIBLE_RESULTS,
+): MissionResultHandoffProjection<T> {
+  if (!scope || !selectedThreadId || scope.threadId !== selectedThreadId) {
+    return { artifacts: [], notice: null };
+  }
+  const visibleArtifacts = visibleArtifactsForCurrentMission(artifacts, scope, limit);
+  return {
+    artifacts: visibleArtifacts,
+    notice: missingResultHandoffNotice(missionStatus, visibleArtifacts.length),
+  };
 }
 
 export function canDownload(artifact: LivingArtifact): boolean {
