@@ -102,7 +102,7 @@ assert.deepEqual(activity.workers.map((worker) => [worker.name, worker.title, wo
 assert.deepEqual(activity.feed, [
   "A worker is actively producing output.",
   "Claude Code started Build the app.",
-  "Chef chose one worker for this Mission.",
+  "Chef chose one worker because this Mission fits one straightforward step.",
 ], "activity should preserve meaningful routing and worker progress in recent-first order");
 assert.equal(activity.feed.some((line) => line.includes("raw terminal output")), false, "normal activity must not expose raw CLI output");
 
@@ -225,7 +225,7 @@ assert.deepEqual(startupActivity.workers.map((worker) => [worker.name, worker.ti
 ], "the worker list should not disappear while the Mission snapshot catches up to its durable plan");
 assert.deepEqual(startupActivity.feed, [
   "Claude Code started Build the app.",
-  "Chef chose one worker for this Mission.",
+  "Chef chose one worker because this Mission fits one straightforward step.",
 ]);
 
 console.log("intent-home-ui: ok — canonical workspace and Mission activity are verified by executable behavior, not source shape");

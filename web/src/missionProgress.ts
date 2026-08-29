@@ -257,11 +257,13 @@ export function summarizeMissionProgressEvent(event: UiRuntimeEvent): MissionPro
       const routingMode = stringValue(payload, "routingMode");
       const count = stringArray(payload, "taskIds").length;
       if (routingMode === "single-worker") {
-        text = "Chef chose one worker for this Mission.";
+        text = "Chef chose one worker because this Mission fits one straightforward step.";
       } else if (routingMode === "planner") {
-        text = count > 0
-          ? `Chef chose a coordinated plan with ${count} step${count === 1 ? "" : "s"}.`
-          : "Chef chose a coordinated plan for this Mission.";
+        text = count > 1
+          ? `Chef used a coordinated plan because this Mission has ${count} steps.`
+          : count === 1
+            ? "Chef used planning because this Mission did not fit the bounded one-worker shortcut."
+            : "Chef is using planning for this Mission; accepted steps are not available yet.";
       } else {
         text = count > 0
           ? `Chef prepared a plan with ${count} step${count === 1 ? "" : "s"}.`
