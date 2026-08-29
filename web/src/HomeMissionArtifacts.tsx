@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { loadSelectedThreadId, SELECTED_THREAD_EVENT } from "./threadApi";
 import { artifactHandoff } from "./artifactHandoff";
 import { visibleArtifactsForSelectedThreadMission } from "./artifactProjection";
-import { copyRunCommand, revealArtifact } from "./resultActions";
+import { copyRunCommand, createSingleFlightArtifactRevealer } from "./resultActions";
 import { selectLivingWorkspaceMission } from "./missionActivityProjection";
 import { subscribeMissionProgressRefresh } from "./missionProgressStream";
 import { missionTaskIdsFromEvents } from "./threadScope";
@@ -21,7 +21,7 @@ type HomeArtifact = {
 
 type StateSnapshot = { missions?: UiMission[]; events?: UiRuntimeEvent[] };
 type RunCopyState = "copied" | "error";
-type RevealState = { status: "opened" | "error"; message?: string };
+type RevealState = { status: "opening" | "opened" | "error"; message?: string };
 
 const MAX_HOME_ARTIFACTS = 4;
 
@@ -33,6 +33,7 @@ export function HomeMissionArtifacts() {
   const [runCopyState, setRunCopyState] = useState<Record<string, RunCopyState>>({});
   const [revealState, setRevealState] = useState<Record<string, RevealState>>({});
   const refreshSequence = useRef(0);
+  const revealArtifactOnce = useRef(createSingleFlightArtifactRevealer()).current;
 
   const refresh = useCallback(async () => {
     const sequence = ++refreshSequence.current;
@@ -109,14 +110,15 @@ export function HomeMissionArtifacts() {
   }, []);
 
   const handleRevealArtifact = useCallback(async (artifactId: string) => {
-    const result = await revealArtifact(artifactId);
+    setRevealState((current) => ({ ...current, [artifactId]: { status: "opening" } }));
+    const result = await revealArtifactOnce(artifactId);
     setRevealState((current) => ({
       ...current,
       [artifactId]: result.ok
         ? { status: "opened" }
         : { status: "error", message: result.error },
     }));
-  }, []);
+  }, [revealArtifactOnce]);
 
   if (!target || (!error && missionArtifacts.length === 0)) return null;
 
@@ -151,9 +153,14 @@ export function HomeMissionArtifacts() {
                       <button
                         type="button"
                         onClick={() => void handleRevealArtifact(artifact.id)}
-                        className="rounded-lg border border-white/10 px-2.5 py-1 text-[10px] font-medium text-zinc-400 transition hover:border-white/20 hover:text-zinc-100"
+                        disabled={reveal?.status === "opening"}
+                        className="rounded-lg border border-white/10 px-2.5 py-1 text-[10px] font-medium text-zinc-400 transition hover:border-white/20 hover:text-zinc-100 disabled:cursor-wait disabled:opacity-60"
                       >
-                        {reveal?.status === "opened" ? "Opened folder" : "Show in folder"}
+                        {reveal?.status === "opening"
+                          ? "Opening…"
+                          : reveal?.status === "opened"
+                            ? "Opened folder"
+                            : "Show in folder"}
                       </button>
                       <a
                         href={`/api/artifacts/${encodeURIComponent(artifact.id)}/download`}
