@@ -107,6 +107,22 @@ assert.equal(
   "Simple Mode must keep the concrete failure reason while excluding ANSI noise and stack-trace detail from the normal-user surface",
 );
 
+const terminalPreludeProjection = projectMissionActivity({
+  missions: [recoveryMission],
+  tasks: [buildTask],
+  events: [{
+    ...failedEvent,
+    id: "event-terminal-prelude",
+    payload: { error: "\u001b[31m\u001b[0m\nENOENT: package.json missing\n    at spawnWorker (runtime/worker.ts:42:7)" },
+  }],
+}, [{ id: "codex", name: "Codex", type: "cli", available: true }], 1_000);
+assert.ok(terminalPreludeProjection);
+assert.equal(
+  terminalPreludeProjection.feed[0],
+  "Codex failed Build the todo app: ENOENT: package.json missing",
+  "terminal-only lines must be discarded after ANSI cleanup so the next real failure reason remains visible",
+);
+
 const retryEvent: UiRuntimeEvent = {
   id: "event-retry",
   seq: 2,
