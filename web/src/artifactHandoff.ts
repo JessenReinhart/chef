@@ -46,8 +46,9 @@ export function artifactHandoff(artifact: ArtifactHandoffInput): ArtifactHandoff
   const explicitLocation = firstText(artifact.metadata, ["resultLocation", "path", "location"]);
   const runCommand = firstText(artifact.metadata, ["run", "runCommand", "command"]);
   const verifiedBy = firstText(artifact.metadata, ["verifiedBy"]);
-  const verification = firstText(artifact.metadata, ["verification", "verified"])
-    ?? (verifiedBy ? `Verified by ${verifiedBy}` : null);
+  const explicitVerification = firstText(artifact.metadata, ["verification", "verified"]);
+  const verification = explicitVerification
+    ?? (verifiedBy ? `Verified by ${verifiedBy}` : artifact.metadata.verified === true ? "Verified" : null);
 
   return {
     summary: summaryText(artifact.metadata),
