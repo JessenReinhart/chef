@@ -119,8 +119,17 @@ const completedTask: UiTask = {
 const completedActivity: UiRuntimeEvent[] = [
   ...olderActivity,
   {
-    id: "evt-task-completed",
+    id: "evt-mission-active",
     seq: 4,
+    timestamp: 10_000,
+    source: { type: "mission", id: activeMission.id },
+    type: "mission.status",
+    payload: { missionId: activeMission.id, status: "active" },
+    correlationId: activeMission.id,
+  },
+  {
+    id: "evt-task-completed",
+    seq: 5,
     timestamp: 10_000,
     source: { type: "task", id: completedTask.id },
     type: "task.completed",
