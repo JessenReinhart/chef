@@ -2,6 +2,8 @@
 
 ## 2026-08-29
 
+- **Simple Mode now explains why Chef chose one worker or a coordinated plan (#263):** Routing feedback is grounded in the accepted Mission plan, so straightforward one-step work explains the direct worker path while multi-step work explains why coordination was used without inventing unsupported reasons.
+- **Generated results can be opened in their project folder safely (#262):** File-backed Simple Mode results now offer **Show in folder**. Chef resolves the durable artifact location server-side, keeps it inside the active project, and opens only the containing folder with the platform file manager.
 - **Simple Mode keeps terminal summaries attached to the selected Thread (#260):** When a Mission finishes, its persisted Chef summary now stays with the conversation that started it instead of being replaced by newer activity from another Thread. Live Mission, Task, and Session activity is scoped the same way.
 - **Boolean verification evidence is no longer hidden at completion (#259):** Results carrying `verified: true` now show a simple verification line in Simple Mode, while `verified: false` never becomes a success claim and more specific verification text still takes precedence.
 
