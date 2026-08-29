@@ -6,6 +6,8 @@ import {
 
 const completedNotice = "Work is marked complete, but Chef did not publish a durable result for this Mission.";
 const attentionPartialNotice = "Chef saved a partial result, but this Mission still needs attention before the handoff is complete.";
+const pausedPartialNotice = "Chef saved a partial result, but this Mission is paused before the handoff is complete.";
+const pausedEmptyNotice = "No durable result is available because this Mission is paused.";
 const stoppedPartialNotice = "Chef saved a partial result, but this Mission was stopped before the handoff was complete.";
 const scope = { missionId: "mission-current", taskIds: ["task-current"], threadId: "thread-current" };
 const result: LivingArtifact = {
@@ -56,6 +58,18 @@ assert.deepEqual(
 );
 
 assert.deepEqual(
+  missionResultHandoffProjection([result], scope, "thread-current", "paused"),
+  { artifacts: [result], notice: pausedPartialNotice },
+  "a paused Mission must identify an existing artifact as partial rather than implying a finished handoff",
+);
+
+assert.deepEqual(
+  missionResultHandoffProjection([], scope, "thread-current", "paused"),
+  { artifacts: [], notice: pausedEmptyNotice },
+  "a paused Mission with no durable output must keep its incomplete handoff visible",
+);
+
+assert.deepEqual(
   missionResultHandoffProjection([result], scope, "thread-current", "cancelled"),
   { artifacts: [result], notice: stoppedPartialNotice },
   "a stopped Mission must identify an existing artifact as partial rather than implying successful completion",
@@ -79,4 +93,4 @@ assert.deepEqual(
   "a stale previous-Thread partial result and its recovery warning must remain hidden after Thread selection changes",
 );
 
-console.log("result-handoff-projection: ok — terminal handoff stays truthful for missing and partial results and remains selected-Thread scoped");
+console.log("result-handoff-projection: ok — incomplete and terminal handoffs stay truthful for missing and partial results and remain selected-Thread scoped");
