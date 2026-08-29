@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-08-29
+
+- **Simple Mode keeps terminal summaries attached to the selected Thread (#260):** When a Mission finishes, its persisted Chef summary now stays with the conversation that started it instead of being replaced by newer activity from another Thread. Live Mission, Task, and Session activity is scoped the same way.
+- **Boolean verification evidence is no longer hidden at completion (#259):** Results carrying `verified: true` now show a simple verification line in Simple Mode, while `verified: false` never becomes a success claim and more specific verification text still takes precedence.
+
 ## 2026-08-28
 
 - **Selected-Thread requests now acknowledge immediately while work continues (#257):** Simple Mode no longer keeps the composer waiting for an entire Mission to finish. Once the Mission is durably created and linked to the selected Thread, Chef returns an accepted acknowledgement, continues execution in the background, and publishes the final result back into the same Thread.
