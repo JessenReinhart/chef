@@ -87,14 +87,16 @@ export function visibleArtifactsForSelectedThreadMission<T extends MissionLinked
 }
 
 export function missingResultHandoffNotice(missionStatus: string | undefined, resultCount: number): string | null {
-  if (resultCount > 0 || !missionStatus) return null;
-  if (missionStatus === "completed") {
+  if (!missionStatus) return null;
+  if (missionStatus === "completed" && resultCount === 0) {
     return "Work is marked complete, but Chef did not publish a durable result for this Mission.";
   }
   if (missionStatus === "failed" || missionStatus === "blocked" || missionStatus === "waiting_for_approval") {
-    return "No durable result is available because this Mission needs attention.";
+    return resultCount > 0
+      ? "Chef saved a partial result, but this Mission still needs attention before the handoff is complete."
+      : "No durable result is available because this Mission needs attention.";
   }
-  if (missionStatus === "cancelled") {
+  if (missionStatus === "cancelled" && resultCount === 0) {
     return "No durable result is available because this Mission was stopped.";
   }
   return null;
