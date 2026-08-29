@@ -51,14 +51,11 @@ function simpleModeFailureReason(payload: EventPayload): string | undefined {
 
   const firstMeaningfulLine = raw
     .split(/\r?\n/)
-    .map((line) => line.trim())
+    .map((line) => line.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "").replace(/\s+/g, " ").trim())
     .find(Boolean);
   if (!firstMeaningfulLine) return undefined;
 
-  const withoutAnsi = firstMeaningfulLine.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "");
-  const normalized = withoutAnsi.replace(/\s+/g, " ").trim();
-  if (!normalized) return undefined;
-  return normalized.length > 180 ? `${normalized.slice(0, 177)}...` : normalized;
+  return firstMeaningfulLine.length > 180 ? `${firstMeaningfulLine.slice(0, 177)}...` : firstMeaningfulLine;
 }
 
 function directlyBelongsToMission(event: UiRuntimeEvent, missionId: string): boolean {
