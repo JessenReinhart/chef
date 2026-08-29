@@ -123,6 +123,7 @@ export function missionActivityState(mission: UiMission | null): string {
   if (mission.status === "failed" || mission.status === "blocked" || mission.status === "waiting_for_approval") return "Needs attention";
   if (mission.status === "cancelled") return "Stopped";
   if (mission.status === "paused") return "Paused";
+  if (mission.status === "verifying") return "Verifying";
   return "Working";
 }
 
@@ -133,9 +134,9 @@ function missionCanHeartbeat(mission: UiMission): boolean {
 function missionActivityFallback(mission: UiMission): string {
   if (mission.status === "planning") return "Chef is deciding who and what this work needs.";
   if (mission.status === "completed") return "Work is complete. Results are available in this workspace.";
-  if (mission.status === "failed" || mission.status === "blocked" || mission.status === "waiting_for_approval") {
-    return "Work needs attention. Review the latest Mission update before continuing.";
-  }
+  if (mission.status === "waiting_for_approval") return "Chef needs your approval before work can continue.";
+  if (mission.status === "blocked") return "Work is blocked. Chef is waiting for a dependency or recovery action before it can continue.";
+  if (mission.status === "failed") return "Work failed before a useful recovery update was available.";
   if (mission.status === "cancelled") return "Work was stopped. Start a new request when you are ready.";
   if (mission.status === "paused") return "Work is paused. Resume it when you are ready.";
   if (mission.status === "verifying") return "Chef is verifying the completed work.";
