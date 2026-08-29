@@ -15,6 +15,8 @@ type RevealRequester = (
   init?: RequestInit,
 ) => Promise<Pick<Response, "ok" | "json">>;
 
+type ArtifactRevealer = (artifactId: string) => Promise<ArtifactRevealResult>;
+
 /** Copy the exact durable run instruction and report failure truthfully. */
 export async function copyRunCommand(
   command: string,
@@ -66,4 +68,31 @@ export async function revealArtifact(
         : "Could not show this result in its folder",
     };
   }
+}
+
+/**
+ * Keep one reveal action in flight per durable artifact.
+ *
+ * Opening a desktop file manager is an external side effect. Repeated clicks
+ * while the first request is still pending must share that request instead of
+ * spawning duplicate windows. A settled action is removed so a later retry is
+ * still possible after success or failure.
+ */
+export function createSingleFlightArtifactRevealer(
+  revealer: ArtifactRevealer = revealArtifact,
+): ArtifactRevealer {
+  const inFlight = new Map<string, Promise<ArtifactRevealResult>>();
+
+  return (artifactId) => {
+    const existing = inFlight.get(artifactId);
+    if (existing) return existing;
+
+    const request = Promise.resolve()
+      .then(() => revealer(artifactId))
+      .finally(() => {
+        if (inFlight.get(artifactId) === request) inFlight.delete(artifactId);
+      });
+    inFlight.set(artifactId, request);
+    return request;
+  };
 }
