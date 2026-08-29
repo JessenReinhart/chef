@@ -2,6 +2,7 @@
 
 ## 2026-08-29
 
+- **Simple Mode now keeps runtime failure text readable and bounded (#265):** Planner, node, task, and session activity is cleaned before it reaches the normal-user feed, so terminal formatting, stack traces, multiline noise, and excessively long runtime messages do not crowd out the useful failure reason.
 - **Simple Mode now explains worker failures and retries more clearly (#264):** When a worker fails, the activity feed keeps the concrete first-line failure reason when one is available, strips terminal noise, and then shows a real retry as recovery instead of leaving the workspace on a generic attention message.
 - **Simple Mode now explains why Chef chose one worker or a coordinated plan (#263):** Routing feedback is grounded in the accepted Mission plan, so straightforward one-step work explains the direct worker path while multi-step work explains why coordination was used without inventing unsupported reasons.
 - **Generated results can be opened in their project folder safely (#262):** File-backed Simple Mode results now offer **Show in folder**. Chef resolves the durable artifact location server-side, keeps it inside the active project, and opens only the containing folder with the platform file manager.
