@@ -89,7 +89,7 @@ assert.deepEqual(
 );
 assert.equal(scoped.events.find((item) => item.id === "session-a-data")?.taskId, "task-a", "payload-only Session lineage must be enriched with its selected-Thread Task before activity projection");
 
-const activity = projectMissionActivity({ missions: scoped.missions ?? [], tasks: scoped.tasks, events: scoped.events }, []);
+const activity = projectMissionActivity({ missions: scoped.missions ?? [], tasks: scoped.tasks, events: scoped.events }, [], 300);
 assert.ok(activity);
 assert.equal(activity.mission.id, "mission-a", "Living Workspace activity must stay on the selected Thread even when another Thread has newer active work");
 assert.equal(activity.mission.goal, "Goal for thread-a");
@@ -127,7 +127,7 @@ assert.deepEqual(
   ["mission-a-plan", "task-a-running", "session-a-data"],
   "payload-only recovered Task and Session lineage must preserve later worker activity while still excluding another Thread",
 );
-const laggingActivity = projectMissionActivity({ missions: laggingScoped.missions ?? [], tasks: laggingScoped.tasks, events: laggingScoped.events }, []);
+const laggingActivity = projectMissionActivity({ missions: laggingScoped.missions ?? [], tasks: laggingScoped.tasks, events: laggingScoped.events }, [], 300);
 assert.ok(laggingActivity?.feed.some((item) => item.includes("one worker")), "pre-worker routing feedback must remain visible while the Mission task list catches up");
 assert.ok(laggingActivity?.feed.some((item) => item.includes("actively producing output")), "worker activity must remain visible after payload-based ownership recovery");
 
