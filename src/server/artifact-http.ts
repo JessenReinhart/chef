@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { createReadStream } from "node:fs";
 import { realpath, stat } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { dirname, isAbsolute, relative, sep } from "node:path";
+import { dirname, isAbsolute, relative, sep, win32 } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
@@ -39,11 +39,7 @@ function isWithinRoot(rootPath: string, candidatePath: string): boolean {
   return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
 }
 
-async function resolveArtifactLocation(runtime: ChefRuntime, artifactId: string): Promise<{
-  artifact: NonNullable<ReturnType<ChefRuntime["repository"]["getArtifact"]>>;
-  filePath: string;
-  isDirectory: boolean;
-}> {
+async function resolveArtifactLocation(runtime: ChefRuntime, artifactId: string) {
   const artifact = runtime.repository.getArtifact(artifactId);
   if (!artifact || artifact.workspaceId !== runtime.workspaceId) {
     throw new ArtifactLocationError(404, "artifact not found");
@@ -90,7 +86,11 @@ export function artifactRevealCommand(
   isDirectory: boolean,
   platform: NodeJS.Platform = process.platform,
 ): ArtifactRevealCommand {
-  const target = isDirectory ? filePath : dirname(filePath);
+  const target = isDirectory
+    ? filePath
+    : platform === "win32"
+      ? win32.dirname(filePath)
+      : dirname(filePath);
   if (platform === "win32") return { command: "explorer.exe", args: [target] };
   if (platform === "linux") return { command: "xdg-open", args: [target] };
   throw new Error("showing artifact locations is not supported on this platform");
