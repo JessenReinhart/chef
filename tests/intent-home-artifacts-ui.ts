@@ -15,7 +15,7 @@ import {
 } from "../web/src/artifactProjection.ts";
 import { workspaceSurfacePlan } from "../web/src/canonicalWorkspaceModel.ts";
 import { missionProgressEventStreamUrl, subscribeMissionProgressRefresh } from "../web/src/missionProgressStream.ts";
-import { revealArtifact as requestArtifactReveal } from "../web/src/resultActions.ts";
+import { createSingleFlightArtifactRevealer, revealArtifact as requestArtifactReveal } from "../web/src/resultActions.ts";
 import { missionTaskIdsFromEvents } from "../web/src/threadScope.ts";
 import type { UiRuntimeEvent } from "../web/src/types.ts";
 
@@ -217,6 +217,22 @@ assert.deepEqual(
   "transport failure must remain visible in the result handoff",
 );
 
+let releaseReveal!: (result: { ok: true }) => void;
+let revealCalls = 0;
+const singleFlightReveal = createSingleFlightArtifactRevealer(async () => {
+  revealCalls += 1;
+  return new Promise<{ ok: true }>((resolve) => { releaseReveal = resolve; });
+});
+const firstReveal = singleFlightReveal("golden-todo");
+const duplicateReveal = singleFlightReveal("golden-todo");
+assert.equal(firstReveal, duplicateReveal, "repeated clicks for the same pending result must share one external reveal action");
+await new Promise<void>((resolve) => setImmediate(resolve));
+assert.equal(revealCalls, 1, "one pending result reveal must invoke the desktop opener path only once");
+releaseReveal({ ok: true });
+await Promise.all([firstReveal, duplicateReveal]);
+await singleFlightReveal("golden-todo");
+assert.equal(revealCalls, 2, "after the prior reveal settles, a later user retry must be allowed to open the result again");
+
 assert.deepEqual(
   artifactHandoff(artifact("legacy-result", 17, "task-legacy", "chef:legacy", { description: "Generated report", runCommand: "npm start", verification: "runtime smoke" })),
   { summary: "Generated report", runCommand: "npm start", verifiedBy: "runtime smoke" },
@@ -255,4 +271,4 @@ assert.equal(canDownload(artifact("file-result", 18, "task-file", "file:///tmp/r
 assert.equal(canDownload(artifact("runtime-result", 19)), false, "runtime-only artifacts must not invent a download action");
 assert.equal(provenanceLabel(artifact("artifact-20", 20)), "v20 · by claude-code · task task-20", "result handoff should preserve concise provenance");
 
-console.log("intent-home-artifacts-ui: ok — current Mission result handoff is lineage-scoped, thread-correct, actionable, live-refreshable, safely revealable, and can surface mission- or task-linked durable results before snapshot convergence");
+console.log("intent-home-artifacts-ui: ok — current Mission result handoff is lineage-scoped, thread-correct, actionable, live-refreshable, safely revealable, duplicate-safe, and can surface mission- or task-linked durable results before snapshot convergence");
