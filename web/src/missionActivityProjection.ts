@@ -35,9 +35,27 @@ function payloadString(payload: EventPayload, key: string): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
+function payloadNumber(payload: EventPayload, key: string): number | undefined {
+  const value = payload[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
 function payloadStrings(payload: EventPayload, key: string): string[] {
   const value = payload[key];
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function simpleModeFailureReason(payload: EventPayload): string | undefined {
+  const raw = payloadString(payload, "error") ?? payloadString(payload, "reason");
+  if (!raw) return undefined;
+
+  const firstMeaningfulLine = raw
+    .split(/\r?\n/)
+    .map((line) => line.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "").replace(/\s+/g, " ").trim())
+    .find(Boolean);
+  if (!firstMeaningfulLine) return undefined;
+
+  return firstMeaningfulLine.length > 180 ? `${firstMeaningfulLine.slice(0, 177)}...` : firstMeaningfulLine;
 }
 
 function directlyBelongsToMission(event: UiRuntimeEvent, missionId: string): boolean {
@@ -149,16 +167,23 @@ export function projectMissionActivity(
   for (const event of scoped.events) {
     const task = event.taskId ? tasksById.get(event.taskId) : undefined;
     const worker = task?.assignedTo ? (harnessNames.get(task.assignedTo) ?? task.assignedTo) : "Chef";
+    const payload = eventPayload(event);
     let text: string | null = null;
 
     if (event.type === "session.data") {
       text = summarizeMissionProgressEvent(event)?.text ?? "A worker is actively producing output.";
     } else if (event.type === "task.running") {
-      text = `${worker} started ${task?.title ?? "the task"}.`;
+      const retryCount = payloadNumber(payload, "retryCount") ?? 0;
+      text = retryCount > 0
+        ? `${worker} is retrying ${task?.title ?? "the task"} (retry ${retryCount}).`
+        : `${worker} started ${task?.title ?? "the task"}.`;
     } else if (event.type === "task.completed") {
       text = `${worker} finished ${task?.title ?? "the task"}.`;
     } else if (event.type === "task.failed") {
-      text = `${worker} needs attention.`;
+      const reason = simpleModeFailureReason(payload);
+      text = reason
+        ? `${worker} failed ${task?.title ?? "the task"}: ${reason}`
+        : `${worker} failed ${task?.title ?? "the task"} and needs recovery.`;
     } else {
       text = summarizeMissionProgressEvent(event)?.text ?? null;
     }
