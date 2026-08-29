@@ -1,21 +1,24 @@
 import { strict as assert } from "node:assert";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
 import { createChef } from "../src/main.ts";
 import { createHttpServer } from "../src/server/http-server.ts";
-import { createArtifactServer } from "../src/server/artifact-http.ts";
+import { artifactRevealCommand, createArtifactServer } from "../src/server/artifact-http.ts";
 
 const dir = await mkdtemp(join(tmpdir(), "chef-artifact-http-"));
 const outsideDir = await mkdtemp(join(tmpdir(), "chef-artifact-http-outside-"));
 const runtime = createChef({ dbPath: join(dir, "chef.sqlite"), projectDir: dir });
-const server = createArtifactServer(runtime, createHttpServer(runtime));
+const revealed: Array<{ path: string; isDirectory: boolean }> = [];
+const server = createArtifactServer(runtime, createHttpServer(runtime), {
+  revealPath: async (path, isDirectory) => { revealed.push({ path, isDirectory }); },
+});
 
-const request = async (path: string) => {
+const request = async (path: string, init?: RequestInit) => {
   const address = server.address();
   assert.ok(address && typeof address === "object");
-  const response = await fetch(`http://127.0.0.1:${address.port}${path}`);
+  const response = await fetch(`http://127.0.0.1:${address.port}${path}`, init);
   return { status: response.status, json: await response.json() as { ok?: boolean; data?: unknown; error?: string } };
 };
 
@@ -25,7 +28,28 @@ const requestRaw = async (path: string) => {
   return fetch(`http://127.0.0.1:${address.port}${path}`);
 };
 
+const revealInit: RequestInit = {
+  method: "POST",
+  headers: { "x-chef-action": "reveal-artifact" },
+};
+
 try {
+  assert.deepEqual(
+    artifactRevealCommand("C:\\work\\todo-app\\index.html", false, "win32"),
+    { command: "explorer.exe", args: ["C:\\work\\todo-app"] },
+    "Windows reveal must use explorer without shell interpolation and open the containing folder",
+  );
+  assert.deepEqual(
+    artifactRevealCommand("/work/todo-app/index.html", false, "linux"),
+    { command: "xdg-open", args: ["/work/todo-app"] },
+    "Linux reveal must use xdg-open without shell interpolation and open the containing folder",
+  );
+  assert.deepEqual(
+    artifactRevealCommand("/work/todo-app", true, "linux"),
+    { command: "xdg-open", args: ["/work/todo-app"] },
+    "directory-backed results should reveal the directory itself",
+  );
+
   const mission = runtime.repository.insertMission({
     id: "mission-monthly-close",
     workspaceId: runtime.workspaceId,
@@ -161,6 +185,37 @@ try {
   assert.equal(detail.status, 200);
   assert.deepEqual(detail.json.data, JSON.parse(JSON.stringify(report)));
 
+  const unguardedReveal = await request(`/api/artifacts/${encodeURIComponent(report.id)}/reveal`, { method: "POST" });
+  assert.equal(unguardedReveal.status, 403);
+  assert.match(unguardedReveal.json.error ?? "", /explicit Chef reveal action/);
+  assert.equal(revealed.length, 0, "a simple cross-origin-compatible POST must not be enough to invoke the OS opener");
+
+  const reveal = await request(`/api/artifacts/${encodeURIComponent(report.id)}/reveal`, revealInit);
+  assert.equal(reveal.status, 200);
+  assert.deepEqual(revealed, [{ path: reportPath, isDirectory: false }], "reveal must use the server-resolved durable artifact path");
+
+  const unsupportedReveal = await request(`/api/artifacts/${encodeURIComponent(result.id)}/reveal`, revealInit);
+  assert.equal(unsupportedReveal.status, 409);
+  assert.match(unsupportedReveal.json.error ?? "", /not backed by a local file/);
+
+  const outsideReveal = await request(`/api/artifacts/${encodeURIComponent(outsideArtifact.id)}/reveal`, revealInit);
+  assert.equal(outsideReveal.status, 403);
+  assert.match(outsideReveal.json.error ?? "", /outside the project root/);
+
+  const missingReveal = await request(`/api/artifacts/${encodeURIComponent(missingArtifact.id)}/reveal`, revealInit);
+  assert.equal(missingReveal.status, 404);
+  assert.match(missingReveal.json.error ?? "", /file not found/);
+
+  const foreignReveal = await request("/api/artifacts/artifact-private-to-other-workspace/reveal", revealInit);
+  assert.equal(foreignReveal.status, 404);
+  assert.match(foreignReveal.json.error ?? "", /artifact not found/);
+
+  const unknownReveal = await request("/api/artifacts/not-here/reveal", revealInit);
+  assert.equal(unknownReveal.status, 404);
+  assert.match(unknownReveal.json.error ?? "", /artifact not found/);
+  assert.equal(revealed.length, 1, "invalid reveal requests must never invoke the OS opener");
+  assert.equal(dirname(revealed[0]!.path), dir, "the accepted reveal must remain inside the active project");
+
   const download = await requestRaw(`/api/artifacts/${encodeURIComponent(report.id)}/download`);
   assert.equal(download.status, 200);
   assert.equal(download.headers.get("content-type"), "application/pdf");
@@ -198,7 +253,7 @@ try {
   assert.equal(state.status, 200);
   assert.ok(Array.isArray((state.json as Record<string, unknown>).artifacts));
 
-  console.log("artifact-http: ok");
+  console.log("artifact-http: ok — durable results can be revealed safely inside the active project without exposing arbitrary paths or commands");
 } finally {
   if (server.listening) await new Promise<void>((resolve) => server.close(() => resolve()));
   await runtime.close();
