@@ -15,6 +15,7 @@ import {
 } from "../web/src/artifactProjection.ts";
 import { workspaceSurfacePlan } from "../web/src/canonicalWorkspaceModel.ts";
 import { missionProgressEventStreamUrl, subscribeMissionProgressRefresh } from "../web/src/missionProgressStream.ts";
+import { revealArtifact as requestArtifactReveal } from "../web/src/resultActions.ts";
 import { missionTaskIdsFromEvents } from "../web/src/threadScope.ts";
 import type { UiRuntimeEvent } from "../web/src/types.ts";
 
@@ -188,6 +189,34 @@ assert.equal(
   "clipboard rejection must remain a visible failure state rather than a false success",
 );
 
+let revealUrl = "";
+let revealMethod = "";
+const revealSuccess = await requestArtifactReveal("golden todo/result", async (input, init) => {
+  revealUrl = String(input);
+  revealMethod = init?.method ?? "";
+  return { ok: true, json: async () => ({ ok: true }) } as Pick<Response, "ok" | "json">;
+});
+assert.deepEqual(revealSuccess, { ok: true }, "a file-backed durable result should expose a truthful successful reveal action");
+assert.equal(revealUrl, "/api/artifacts/golden%20todo%2Fresult/reveal", "the browser must send only the encoded durable artifact id, never a filesystem path");
+assert.equal(revealMethod, "POST", "revealing a local result is an explicit action rather than a passive GET");
+
+const revealRejected = await requestArtifactReveal("outside-result", async () => ({
+  ok: false,
+  json: async () => ({ error: "artifact file is outside the project root" }),
+}) as Pick<Response, "ok" | "json">);
+assert.deepEqual(
+  revealRejected,
+  { ok: false, error: "artifact file is outside the project root" },
+  "Simple Mode must surface the server's safe reveal rejection instead of pretending the folder opened",
+);
+
+const revealUnavailable = await requestArtifactReveal("missing-result", async () => { throw new Error("connection lost"); });
+assert.deepEqual(
+  revealUnavailable,
+  { ok: false, error: "connection lost" },
+  "transport failure must remain visible in the result handoff",
+);
+
 assert.deepEqual(
   artifactHandoff(artifact("legacy-result", 17, "task-legacy", "chef:legacy", { description: "Generated report", runCommand: "npm start", verification: "runtime smoke" })),
   { summary: "Generated report", runCommand: "npm start", verifiedBy: "runtime smoke" },
@@ -226,4 +255,4 @@ assert.equal(canDownload(artifact("file-result", 18, "task-file", "file:///tmp/r
 assert.equal(canDownload(artifact("runtime-result", 19)), false, "runtime-only artifacts must not invent a download action");
 assert.equal(provenanceLabel(artifact("artifact-20", 20)), "v20 · by claude-code · task task-20", "result handoff should preserve concise provenance");
 
-console.log("intent-home-artifacts-ui: ok — current Mission result handoff is lineage-scoped, thread-correct, actionable, live-refreshable, and can surface mission- or task-linked durable results before snapshot convergence");
+console.log("intent-home-artifacts-ui: ok — current Mission result handoff is lineage-scoped, thread-correct, actionable, live-refreshable, safely revealable, and can surface mission- or task-linked durable results before snapshot convergence");
