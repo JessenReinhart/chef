@@ -45,6 +45,22 @@ function payloadStrings(payload: EventPayload, key: string): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 }
 
+function simpleModeFailureReason(payload: EventPayload): string | undefined {
+  const raw = payloadString(payload, "error") ?? payloadString(payload, "reason");
+  if (!raw) return undefined;
+
+  const firstMeaningfulLine = raw
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find(Boolean);
+  if (!firstMeaningfulLine) return undefined;
+
+  const withoutAnsi = firstMeaningfulLine.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "");
+  const normalized = withoutAnsi.replace(/\s+/g, " ").trim();
+  if (!normalized) return undefined;
+  return normalized.length > 180 ? `${normalized.slice(0, 177)}...` : normalized;
+}
+
 function directlyBelongsToMission(event: UiRuntimeEvent, missionId: string): boolean {
   const payload = eventPayload(event);
   return (event.source.type === "mission" && event.source.id === missionId)
@@ -167,9 +183,9 @@ export function projectMissionActivity(
     } else if (event.type === "task.completed") {
       text = `${worker} finished ${task?.title ?? "the task"}.`;
     } else if (event.type === "task.failed") {
-      const error = payloadString(payload, "error");
-      text = error
-        ? `${worker} failed ${task?.title ?? "the task"}: ${error}`
+      const reason = simpleModeFailureReason(payload);
+      text = reason
+        ? `${worker} failed ${task?.title ?? "the task"}: ${reason}`
         : `${worker} failed ${task?.title ?? "the task"} and needs recovery.`;
     } else {
       text = summarizeMissionProgressEvent(event)?.text ?? null;
