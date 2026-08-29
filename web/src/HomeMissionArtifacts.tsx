@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { loadSelectedThreadId, SELECTED_THREAD_EVENT } from "./threadApi";
 import { artifactHandoff } from "./artifactHandoff";
 import { visibleArtifactsForSelectedThreadMission } from "./artifactProjection";
-import { copyRunCommand } from "./resultActions";
+import { copyRunCommand, revealArtifact } from "./resultActions";
 import { selectLivingWorkspaceMission } from "./missionActivityProjection";
 import { subscribeMissionProgressRefresh } from "./missionProgressStream";
 import { missionTaskIdsFromEvents } from "./threadScope";
@@ -21,6 +21,7 @@ type HomeArtifact = {
 
 type StateSnapshot = { missions?: UiMission[]; events?: UiRuntimeEvent[] };
 type RunCopyState = "copied" | "error";
+type RevealState = { status: "opened" | "error"; message?: string };
 
 const MAX_HOME_ARTIFACTS = 4;
 
@@ -30,6 +31,7 @@ export function HomeMissionArtifacts() {
   const [artifacts, setArtifacts] = useState<HomeArtifact[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [runCopyState, setRunCopyState] = useState<Record<string, RunCopyState>>({});
+  const [revealState, setRevealState] = useState<Record<string, RevealState>>({});
   const refreshSequence = useRef(0);
 
   const refresh = useCallback(async () => {
@@ -106,6 +108,16 @@ export function HomeMissionArtifacts() {
     setRunCopyState((current) => ({ ...current, [artifactId]: result.ok ? "copied" : "error" }));
   }, []);
 
+  const handleRevealArtifact = useCallback(async (artifactId: string) => {
+    const result = await revealArtifact(artifactId);
+    setRevealState((current) => ({
+      ...current,
+      [artifactId]: result.ok
+        ? { status: "opened" }
+        : { status: "error", message: result.error },
+    }));
+  }, []);
+
   if (!target || (!error && missionArtifacts.length === 0)) return null;
 
   return createPortal(
@@ -125,6 +137,8 @@ export function HomeMissionArtifacts() {
           {missionArtifacts.map((artifact) => {
             const handoff = artifactHandoff(artifact);
             const copyState = runCopyState[artifact.id];
+            const reveal = revealState[artifact.id];
+            const fileBacked = artifact.uri.startsWith("file:");
             return (
               <article key={`${artifact.id}:${artifact.version}`} className="rounded-xl border border-white/[0.07] bg-black/20 p-3">
                 <div className="flex items-start justify-between gap-3">
@@ -132,16 +146,30 @@ export function HomeMissionArtifacts() {
                     <div className="truncate text-xs font-medium text-zinc-200" title={artifact.name}>{artifact.name}</div>
                     <div className="mt-1 text-[10px] capitalize text-zinc-600">{artifact.type}</div>
                   </div>
-                  {artifact.uri.startsWith("file:") && (
-                    <a
-                      href={`/api/artifacts/${encodeURIComponent(artifact.id)}/download`}
-                      download
-                      className="shrink-0 rounded-lg border border-white/10 px-2.5 py-1 text-[10px] font-medium text-zinc-400 transition hover:border-white/20 hover:text-zinc-100"
-                    >
-                      Save copy
-                    </a>
+                  {fileBacked && (
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => void handleRevealArtifact(artifact.id)}
+                        className="rounded-lg border border-white/10 px-2.5 py-1 text-[10px] font-medium text-zinc-400 transition hover:border-white/20 hover:text-zinc-100"
+                      >
+                        {reveal?.status === "opened" ? "Opened folder" : "Show in folder"}
+                      </button>
+                      <a
+                        href={`/api/artifacts/${encodeURIComponent(artifact.id)}/download`}
+                        download
+                        className="rounded-lg border border-white/10 px-2.5 py-1 text-[10px] font-medium text-zinc-400 transition hover:border-white/20 hover:text-zinc-100"
+                      >
+                        Save copy
+                      </a>
+                    </div>
                   )}
                 </div>
+                {reveal?.status === "error" && (
+                  <p role="status" className="mt-2 text-[10px] leading-4 text-amber-300">
+                    {reveal.message ?? "Could not show this result in its folder."}
+                  </p>
+                )}
                 {handoff.summary && <p className="mt-2 line-clamp-3 text-[11px] leading-4 text-zinc-500">{handoff.summary}</p>}
                 {(handoff.location || handoff.runCommand || handoff.verification) && (
                   <dl className="mt-3 space-y-2 border-t border-white/[0.06] pt-3 text-[10px] leading-4">
