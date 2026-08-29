@@ -28,6 +28,11 @@ const requestRaw = async (path: string) => {
   return fetch(`http://127.0.0.1:${address.port}${path}`);
 };
 
+const revealInit: RequestInit = {
+  method: "POST",
+  headers: { "x-chef-action": "reveal-artifact" },
+};
+
 try {
   assert.deepEqual(
     artifactRevealCommand("C:\\work\\todo-app\\index.html", false, "win32"),
@@ -180,27 +185,32 @@ try {
   assert.equal(detail.status, 200);
   assert.deepEqual(detail.json.data, JSON.parse(JSON.stringify(report)));
 
-  const reveal = await request(`/api/artifacts/${encodeURIComponent(report.id)}/reveal`, { method: "POST" });
+  const unguardedReveal = await request(`/api/artifacts/${encodeURIComponent(report.id)}/reveal`, { method: "POST" });
+  assert.equal(unguardedReveal.status, 403);
+  assert.match(unguardedReveal.json.error ?? "", /explicit Chef reveal action/);
+  assert.equal(revealed.length, 0, "a simple cross-origin-compatible POST must not be enough to invoke the OS opener");
+
+  const reveal = await request(`/api/artifacts/${encodeURIComponent(report.id)}/reveal`, revealInit);
   assert.equal(reveal.status, 200);
   assert.deepEqual(revealed, [{ path: reportPath, isDirectory: false }], "reveal must use the server-resolved durable artifact path");
 
-  const unsupportedReveal = await request(`/api/artifacts/${encodeURIComponent(result.id)}/reveal`, { method: "POST" });
+  const unsupportedReveal = await request(`/api/artifacts/${encodeURIComponent(result.id)}/reveal`, revealInit);
   assert.equal(unsupportedReveal.status, 409);
   assert.match(unsupportedReveal.json.error ?? "", /not backed by a local file/);
 
-  const outsideReveal = await request(`/api/artifacts/${encodeURIComponent(outsideArtifact.id)}/reveal`, { method: "POST" });
+  const outsideReveal = await request(`/api/artifacts/${encodeURIComponent(outsideArtifact.id)}/reveal`, revealInit);
   assert.equal(outsideReveal.status, 403);
   assert.match(outsideReveal.json.error ?? "", /outside the project root/);
 
-  const missingReveal = await request(`/api/artifacts/${encodeURIComponent(missingArtifact.id)}/reveal`, { method: "POST" });
+  const missingReveal = await request(`/api/artifacts/${encodeURIComponent(missingArtifact.id)}/reveal`, revealInit);
   assert.equal(missingReveal.status, 404);
   assert.match(missingReveal.json.error ?? "", /file not found/);
 
-  const foreignReveal = await request("/api/artifacts/artifact-private-to-other-workspace/reveal", { method: "POST" });
+  const foreignReveal = await request("/api/artifacts/artifact-private-to-other-workspace/reveal", revealInit);
   assert.equal(foreignReveal.status, 404);
   assert.match(foreignReveal.json.error ?? "", /artifact not found/);
 
-  const unknownReveal = await request("/api/artifacts/not-here/reveal", { method: "POST" });
+  const unknownReveal = await request("/api/artifacts/not-here/reveal", revealInit);
   assert.equal(unknownReveal.status, 404);
   assert.match(unknownReveal.json.error ?? "", /artifact not found/);
   assert.equal(revealed.length, 1, "invalid reveal requests must never invoke the OS opener");
