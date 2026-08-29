@@ -107,12 +107,10 @@ export function missionResultHandoffProjection<T extends MissionLinkedArtifact>(
   missionStatus: string | undefined,
   limit = MAX_VISIBLE_RESULTS,
 ): MissionResultHandoffProjection<T> {
-  const visibleArtifacts = visibleArtifactsForSelectedThreadMission(
-    artifacts,
-    scope,
-    selectedThreadId,
-    limit,
-  );
+  if (!scope || !selectedThreadId || scope.threadId !== selectedThreadId) {
+    return { artifacts: [], notice: null };
+  }
+  const visibleArtifacts = visibleArtifactsForCurrentMission(artifacts, scope, limit);
   return {
     artifacts: visibleArtifacts,
     notice: missingResultHandoffNotice(missionStatus, visibleArtifacts.length),
