@@ -1,4 +1,5 @@
 export type ArtifactHandoffInput = {
+  name?: string;
   uri: string;
   metadata: Record<string, unknown>;
 };
@@ -18,11 +19,17 @@ function firstText(metadata: Record<string, unknown>, keys: string[]): string | 
   return null;
 }
 
-function summaryText(metadata: Record<string, unknown>): string | null {
-  const value = firstText(metadata, ["summary", "preview", "description", "content"]);
-  if (!value) return null;
+function compactSummary(value: string): string {
   const normalized = value.replace(/\s+/g, " ").trim();
   return normalized.length <= 140 ? normalized : `${normalized.slice(0, 137)}…`;
+}
+
+function summaryText(artifact: ArtifactHandoffInput): string | null {
+  const supplied = firstText(artifact.metadata, ["summary", "preview", "description", "content"]);
+  if (supplied) return compactSummary(supplied);
+
+  const name = artifact.name?.trim();
+  return name ? compactSummary(`Chef produced ${name}.`) : null;
 }
 
 function fileUriLocation(uri: string): string | null {
@@ -40,7 +47,8 @@ function fileUriLocation(uri: string): string | null {
 
 /**
  * Project result metadata is optional, so Simple Mode degrades gracefully while
- * still exposing a file URI when that is the only durable location available.
+ * still exposing a named durable result and file URI when richer handoff data
+ * is unavailable.
  */
 export function artifactHandoff(artifact: ArtifactHandoffInput): ArtifactHandoff {
   const explicitLocation = firstText(artifact.metadata, ["resultLocation", "path", "location"]);
@@ -51,7 +59,7 @@ export function artifactHandoff(artifact: ArtifactHandoffInput): ArtifactHandoff
     ?? (verifiedBy ? `Verified by ${verifiedBy}` : artifact.metadata.verified === true ? "Verified" : null);
 
   return {
-    summary: summaryText(artifact.metadata),
+    summary: summaryText(artifact),
     location: explicitLocation ?? fileUriLocation(artifact.uri),
     runCommand,
     verification,
