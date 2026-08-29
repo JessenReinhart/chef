@@ -13,6 +13,7 @@ import "@xyflow/react/dist/style.css";
 import { api } from "./api";
 import { loadSelectedThreadId, SELECTED_THREAD_EVENT, threadMessages } from "./threadApi";
 import { createThreadHistoryLoader } from "./threadSelection";
+import { missionSubmissionAcknowledgement } from "./missionSubmissionFeedback";
 import type {
   HarnessInfo,
   MissionStatus,
@@ -535,7 +536,7 @@ export function LivingWorkspaceFeature() {
     const submittedThreadId = loadSelectedThreadId();
     setInput("");
     setOptimisticGoal(text);
-    setChefNote("Okay. Give me a sec to put the right little team together…");
+    setChefNote(missionSubmissionAcknowledgement());
     setSending(true);
     setToolsOpen(false);
     try {
