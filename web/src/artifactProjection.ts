@@ -96,8 +96,10 @@ export function missingResultHandoffNotice(missionStatus: string | undefined, re
       ? "Chef saved a partial result, but this Mission still needs attention before the handoff is complete."
       : "No durable result is available because this Mission needs attention.";
   }
-  if (missionStatus === "cancelled" && resultCount === 0) {
-    return "No durable result is available because this Mission was stopped.";
+  if (missionStatus === "cancelled") {
+    return resultCount > 0
+      ? "Chef saved a partial result, but this Mission was stopped before the handoff was complete."
+      : "No durable result is available because this Mission was stopped.";
   }
   return null;
 }
