@@ -1,5 +1,5 @@
 import type { UiThread } from "./threadApi";
-import type { ChatMessage } from "./types";
+import type { ChatMessage, UiMission } from "./types";
 
 export type ThreadHistoryLoad =
   | { current: true; messages: ChatMessage[] }
@@ -27,6 +27,14 @@ export function resolveHomeThreadSelection(
     selectedThread,
     readOnly: selectedThread?.status === "archived",
   };
+}
+
+export function missionsForSelectedThread(
+  missions: readonly UiMission[],
+  threadId: string | null,
+): UiMission[] {
+  if (!threadId) return [...missions];
+  return missions.filter((mission) => mission.metadata?.threadId === threadId);
 }
 
 export function latestAssistantThreadNote(
