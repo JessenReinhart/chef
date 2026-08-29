@@ -46,13 +46,17 @@ function payloadStrings(payload: EventPayload, key: string): string[] {
 }
 
 function simpleModeActivityText(raw: string): string | undefined {
-  const firstMeaningfulLine = raw
+  const meaningfulLines = raw
     .split(/\r?\n/)
     .map((line) => line.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "").replace(/\s+/g, " ").trim())
-    .find(Boolean);
-  if (!firstMeaningfulLine) return undefined;
+    .filter(Boolean);
+  if (meaningfulLines.length === 0) return undefined;
 
-  return firstMeaningfulLine.length > 220 ? `${firstMeaningfulLine.slice(0, 217)}...` : firstMeaningfulLine;
+  const firstLine = meaningfulLines[0]!;
+  const text = firstLine.endsWith(":") && meaningfulLines[1]
+    ? `${firstLine} ${meaningfulLines[1]}`
+    : firstLine;
+  return text.length > 220 ? `${text.slice(0, 217)}...` : text;
 }
 
 function simpleModeFailureReason(payload: EventPayload): string | undefined {
