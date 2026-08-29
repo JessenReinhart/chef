@@ -60,5 +60,10 @@ assert.equal(
   "Chef used planning because this Mission did not fit the bounded one-worker shortcut.",
   "a one-step planner result should explain that the request was outside the deterministic shortcut without inventing a more specific reason",
 );
+assert.equal(
+  summarizeMissionProgressEvent(proposedPlanEvent("planner", []))?.text,
+  "Chef is using planning for this Mission; accepted steps are not available yet.",
+  "planner routing without accepted task evidence must stay explicit about the missing reason instead of inventing a need for coordination",
+);
 
 console.log("fast-path-routing-policy: ok — routing policy stays bounded and Simple Mode explains the chosen path from runtime evidence");
