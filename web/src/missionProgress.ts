@@ -263,7 +263,7 @@ export function summarizeMissionProgressEvent(event: UiRuntimeEvent): MissionPro
           ? `Chef used a coordinated plan because this Mission has ${count} steps.`
           : count === 1
             ? "Chef used planning because this Mission did not fit the bounded one-worker shortcut."
-            : "Chef used planning because this Mission needs coordination before work can start.";
+            : "Chef is using planning for this Mission; accepted steps are not available yet.";
       } else {
         text = count > 0
           ? `Chef prepared a plan with ${count} step${count === 1 ? "" : "s"}.`
