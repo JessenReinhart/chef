@@ -112,6 +112,45 @@ assert.ok(
   "promoting the heartbeat must still retain the newest concrete worker update",
 );
 
+const completedTask: UiTask = {
+  ...activeTask,
+  status: "completed",
+};
+const completedActivity: UiRuntimeEvent[] = [
+  ...olderActivity,
+  {
+    id: "evt-task-completed",
+    seq: 4,
+    timestamp: 10_000,
+    source: { type: "task", id: completedTask.id },
+    type: "task.completed",
+    payload: { missionId: activeMission.id, taskId: completedTask.id, resultSummary: "Todo app created" },
+    taskId: completedTask.id,
+    correlationId: activeMission.id,
+  },
+];
+const convergingVerificationProjection = projectMissionActivity(
+  { missions: [activeMission], tasks: [completedTask], events: completedActivity },
+  [],
+  30_000,
+);
+assert.ok(convergingVerificationProjection, "completed task evidence should remain visible while Mission status catches up");
+assert.equal(
+  convergingVerificationProjection.missionState,
+  "Verifying",
+  "an active Mission whose owned work is durably completed must project the real verification phase instead of stale Working",
+);
+assert.equal(
+  convergingVerificationProjection.fallback,
+  "Chef is verifying the completed work.",
+  "the fallback must agree with durable completed-task verification evidence while Mission status converges",
+);
+assert.equal(
+  convergingVerificationProjection.feed[0],
+  "Chef is still verifying. Last runtime activity was 20 seconds ago.",
+  "a stale-silence heartbeat must preserve inferred verification rather than rewriting it back to Working",
+);
+
 const verifyingMission: UiMission = {
   ...activeMission,
   id: "mission-verifying-silent",
@@ -152,4 +191,4 @@ assert.equal(
   "the promoted heartbeat must agree with the authoritative current Mission stage even when older events only imply working",
 );
 
-console.log("mission-activity-fallback: ok — attention, verification, and stale-silence heartbeat states remain explicit and stage-consistent in Simple Mode");
+console.log("mission-activity-fallback: ok — attention, durable verification evidence, and stale-silence heartbeat states remain explicit and stage-consistent in Simple Mode");
