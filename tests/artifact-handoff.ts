@@ -62,6 +62,31 @@ assert.deepEqual(linuxWithoutSummary, {
   verification: "Verified by golden-path",
 }, "a named canonical result must still say what Chef produced when the worker only publishes run and verification metadata");
 
+const unnamedLinuxFile = artifactHandoff({
+  uri: "file:///tmp/chef-project/todo-app.mjs",
+  metadata: {
+    run: "node /tmp/chef-project/todo-app.mjs",
+    verifiedBy: "golden-path",
+  },
+});
+assert.deepEqual(unnamedLinuxFile, {
+  summary: "Chef produced todo-app.mjs.",
+  location: "/tmp/chef-project/todo-app.mjs",
+  runCommand: "node /tmp/chef-project/todo-app.mjs",
+  verification: "Verified by golden-path",
+}, "a canonical file result should use its durable filename when an explicit artifact name is absent");
+
+const unnamedWindowsFile = artifactHandoff({
+  uri: "file:///C:/Work/chef/todo-app.mjs",
+  metadata: {},
+});
+assert.deepEqual(unnamedWindowsFile, {
+  summary: "Chef produced todo-app.mjs.",
+  location: "C:/Work/chef/todo-app.mjs",
+  runCommand: null,
+  verification: null,
+}, "Windows file results should derive the same self-describing fallback from their durable URI");
+
 const explicit = artifactHandoff({
   name: "todo-app",
   uri: "file:///tmp/internal-name.bin",
@@ -105,6 +130,6 @@ const noisy = artifactHandoff({
 assert.equal(noisy.summary, "Created the todo app with the requested form and list.", "worker summaries should be compact and readable in the result card");
 
 const remote = artifactHandoff({ uri: "https://example.com/result", metadata: {} });
-assert.deepEqual(remote, { summary: null, location: null, runCommand: null, verification: null }, "unnamed results should not invent a description when there is no durable summary evidence");
+assert.deepEqual(remote, { summary: null, location: null, runCommand: null, verification: null }, "unnamed remote results should not invent a description when there is no durable file evidence");
 
 console.log("artifact handoff behavior passed");
