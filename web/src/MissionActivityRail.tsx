@@ -1,23 +1,47 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "./api";
-import { projectMissionActivity, type MissionActivitySnapshot } from "./missionActivityProjection";
+import { projectMissionActivity, selectLivingWorkspaceMission, type MissionActivitySnapshot } from "./missionActivityProjection";
 import { subscribeMissionProgressRefresh } from "./missionProgressStream";
+import { loadSelectedThreadId, threadMessages } from "./threadApi";
+import { latestAssistantThreadNote, missionsForSelectedThread } from "./threadSelection";
 import type { HarnessInfo } from "./types";
 
 const EMPTY: MissionActivitySnapshot = { missions: [], tasks: [], events: [] };
+const TERMINAL_MISSION_STATES = new Set(["completed", "failed", "cancelled"]);
 
 export function MissionActivityRail() {
   const [snapshot, setSnapshot] = useState<MissionActivitySnapshot>(EMPTY);
   const [harnesses, setHarnesses] = useState<HarnessInfo[]>([]);
+  const [resultNote, setResultNote] = useState<string | null>(null);
+  const summarizedMissionKey = useRef<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
+      const selectedThreadId = loadSelectedThreadId();
       const state = await api.stateRaw();
-      setSnapshot({
-        missions: state.missions ?? [],
+      const nextSnapshot = {
+        missions: missionsForSelectedThread(state.missions ?? [], selectedThreadId),
         tasks: state.tasks,
         events: state.events,
-      });
+      };
+      setSnapshot(nextSnapshot);
+
+      const mission = selectLivingWorkspaceMission(nextSnapshot.missions);
+      if (!selectedThreadId || !mission || !TERMINAL_MISSION_STATES.has(mission.status)) {
+        summarizedMissionKey.current = null;
+        setResultNote(null);
+        return;
+      }
+
+      const missionKey = `${selectedThreadId}:${mission.id}`;
+      if (summarizedMissionKey.current === missionKey) return;
+
+      setResultNote(null);
+      const messages = await threadMessages(selectedThreadId);
+      if (loadSelectedThreadId() !== selectedThreadId) return;
+      const summary = latestAssistantThreadNote(messages, mission.id)?.content ?? null;
+      setResultNote(summary);
+      if (summary) summarizedMissionKey.current = missionKey;
     } catch {
       // The Living Workspace owns the primary error surface. Keep this rail quiet.
     }
@@ -71,6 +95,13 @@ export function MissionActivityRail() {
           ? activity.feed.map((line) => <p key={line}>{line}</p>)
           : <p>{activity.fallback}</p>}
       </div>
+
+      {resultNote && (
+        <div className="chef-live-activity__feed">
+          <span>Chef's summary</span>
+          <p>{resultNote}</p>
+        </div>
+      )}
     </aside>
   );
 }
