@@ -155,6 +155,17 @@ function missionActivityFallback(mission: UiMission): string {
   return "Work is active. Waiting for the next useful update.";
 }
 
+function projectedMissionStatus(
+  mission: UiMission,
+  ownedTaskIds: Set<string>,
+  tasksById: Map<string, UiTask>,
+): UiMission["status"] {
+  if (mission.status !== "active" || ownedTaskIds.size === 0) return mission.status;
+  const ownedTasks = [...ownedTaskIds].map((taskId) => tasksById.get(taskId));
+  if (ownedTasks.some((task) => task === undefined)) return mission.status;
+  return ownedTasks.every((task) => task?.status === "completed") ? "verifying" : mission.status;
+}
+
 export function projectMissionActivity(
   snapshot: MissionActivitySnapshot,
   harnesses: HarnessInfo[],
@@ -166,6 +177,8 @@ export function projectMissionActivity(
   const tasksById = new Map(snapshot.tasks.map((task) => [task.id, task]));
   const harnessNames = new Map(harnesses.map((harness) => [harness.id, harness.name]));
   const scoped = scopeMissionActivity(snapshot.events, mission);
+  const visibleStatus = projectedMissionStatus(mission, scoped.ownedTaskIds, tasksById);
+  const visibleMission = visibleStatus === mission.status ? mission : { ...mission, status: visibleStatus };
   const workers = [...scoped.ownedTaskIds]
     .map((id) => tasksById.get(id))
     .filter((task): task is UiTask => Boolean(task))
@@ -212,10 +225,10 @@ export function projectMissionActivity(
     if (feed.length === 3) break;
   }
 
-  if (missionCanHeartbeat(mission)) {
+  if (missionCanHeartbeat(visibleMission)) {
     const heartbeat = deriveMissionHeartbeat(snapshot.events, mission.id, scoped.ownedTaskIds, now);
     if (heartbeat && !seen.has(heartbeat.text)) {
-      const heartbeatText = heartbeatTextForMissionState(heartbeat.text, mission.status);
+      const heartbeatText = heartbeatTextForMissionState(heartbeat.text, visibleMission.status);
       feed.unshift(heartbeatText);
       if (feed.length > 3) feed.length = 3;
     }
@@ -224,9 +237,9 @@ export function projectMissionActivity(
   return {
     mission,
     taskIds: [...scoped.ownedTaskIds],
-    missionState: missionActivityState(mission),
+    missionState: missionActivityState(visibleMission),
     workers,
     feed,
-    fallback: missionActivityFallback(mission),
+    fallback: missionActivityFallback(visibleMission),
   };
 }
