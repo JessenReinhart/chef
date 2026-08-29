@@ -3,7 +3,7 @@ import { api } from "./api";
 import { projectMissionActivity, selectLivingWorkspaceMission, type MissionActivitySnapshot } from "./missionActivityProjection";
 import { subscribeMissionProgressRefresh } from "./missionProgressStream";
 import { loadSelectedThreadId, threadMessages } from "./threadApi";
-import { latestAssistantThreadNote } from "./threadSelection";
+import { latestAssistantThreadNote, missionsForSelectedThread } from "./threadSelection";
 import type { HarnessInfo } from "./types";
 
 const EMPTY: MissionActivitySnapshot = { missions: [], tasks: [], events: [] };
@@ -20,7 +20,7 @@ export function MissionActivityRail() {
       const selectedThreadId = loadSelectedThreadId();
       const state = await api.stateRaw();
       const nextSnapshot = {
-        missions: state.missions ?? [],
+        missions: missionsForSelectedThread(state.missions ?? [], selectedThreadId),
         tasks: state.tasks,
         events: state.events,
       };
