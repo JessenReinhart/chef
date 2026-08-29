@@ -2,6 +2,7 @@
 
 ## 2026-08-29
 
+- **Simple Mode keeps result handoff visible when work ends without a durable result (#269):** Completed, failed, blocked, approval-waiting, paused, or stopped Missions now keep the results area visible with a clear recovery message. Partial results stay visible without being mistaken for a successful handoff, and results from another Thread stay hidden.
 - **Simple Mode now acknowledges requests without guessing the execution route (#267):** New requests immediately confirm that work has started without claiming Chef chose a team, planner, worker, or routing shape before durable runtime evidence exists.
 - **Simple Mode now distinguishes verification, approval waits, blocks, and failures (#268):** The activity rail uses truthful fallback text when no useful runtime update exists and shows verification as its own state instead of collapsing it into generic work.
 - **Simple multiline requests can stay on the fast path (#266):** Adding a short detail line such as `Use React.` no longer forces an otherwise simple request through planner latency. Requests that actually introduce another executable step, such as testing or verification, still use planning.
