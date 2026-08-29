@@ -49,7 +49,9 @@ for (const goal of comparisonQuestions) {
 
 const separatedMultiStageRequests = [
   "Create a todo app\nThen test it.",
+  "Create a todo app\nand test it.",
   "Create a todo app; add end-to-end tests.",
+  "Create a todo app; and verify it runs.",
   "Research the options\nPrepare a migration plan.",
 ];
 
