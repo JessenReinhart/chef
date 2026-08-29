@@ -91,6 +91,22 @@ assert.equal(
   "Simple Mode must preserve the durable failure reason instead of collapsing worker failure into a generic attention state",
 );
 
+const noisyFailureProjection = projectMissionActivity({
+  missions: [recoveryMission],
+  tasks: [buildTask],
+  events: [{
+    ...failedEvent,
+    id: "event-noisy-failure",
+    payload: { error: "\u001b[31mENOENT\u001b[0m: package.json missing\n    at spawnWorker (runtime/worker.ts:42:7)\n    at async runTask (runtime/task.ts:88:3)" },
+  }],
+}, [{ id: "codex", name: "Codex", type: "cli", available: true }], 1_000);
+assert.ok(noisyFailureProjection);
+assert.equal(
+  noisyFailureProjection.feed[0],
+  "Codex failed Build the todo app: ENOENT: package.json missing",
+  "Simple Mode must keep the concrete failure reason while excluding ANSI noise and stack-trace detail from the normal-user surface",
+);
+
 const retryEvent: UiRuntimeEvent = {
   id: "event-retry",
   seq: 2,
@@ -128,4 +144,4 @@ assert.equal(
   "failure without a durable error must stay truthful without inventing a reason",
 );
 
-console.log("living-workspace-concurrent-mission: ok — Mission selection and visible failure-to-retry recovery stay truthful in Simple Mode");
+console.log("living-workspace-concurrent-mission: ok — Mission selection and visible failure-to-retry recovery stay truthful and bounded in Simple Mode");
