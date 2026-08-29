@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
-import { createThreadHistoryLoader, latestAssistantThreadNote, resolveHomeThreadSelection } from "../web/src/threadSelection.ts";
+import { createThreadHistoryLoader, latestAssistantThreadNote, missionsForSelectedThread, resolveHomeThreadSelection } from "../web/src/threadSelection.ts";
 import type { UiThread } from "../web/src/threadApi.ts";
-import type { ChatMessage } from "../web/src/types.ts";
+import type { ChatMessage, UiMission } from "../web/src/types.ts";
 
 type PendingLoad = {
   resolve: (messages: ChatMessage[]) => void;
@@ -73,6 +73,27 @@ assert.equal(
   "a terminal Mission without a persisted assistant turn yet must not borrow another Mission's summary",
 );
 
+const workspaceMissions = [
+  { id: "mission-selected-old", goal: "Older selected work", status: "completed", taskIds: [], metadata: { threadId: "thread-selected" }, createdAt: 11, updatedAt: 11 },
+  { id: "mission-other-new", goal: "Other Thread work", status: "active", taskIds: [], metadata: { threadId: "thread-other" }, createdAt: 13, updatedAt: 13 },
+  { id: "mission-selected-new", goal: "Selected todo app", status: "active", taskIds: [], metadata: { threadId: "thread-selected" }, createdAt: 12, updatedAt: 12 },
+] as UiMission[];
+assert.deepEqual(
+  missionsForSelectedThread(workspaceMissions, "thread-selected").map((mission) => mission.id),
+  ["mission-selected-old", "mission-selected-new"],
+  "Simple Mode activity must exclude a newer Mission that belongs to another Thread",
+);
+assert.deepEqual(
+  missionsForSelectedThread(workspaceMissions, "thread-missing"),
+  [],
+  "a selected Thread with no Mission must not fall back to workspace-global activity",
+);
+assert.deepEqual(
+  missionsForSelectedThread(workspaceMissions, null).map((mission) => mission.id),
+  workspaceMissions.map((mission) => mission.id),
+  "workspace-level activity remains available when no Thread is selected",
+);
+
 const snapshot = history.snapshot();
 history.invalidate();
 assert.equal(history.isCurrent(snapshot), false, "selection changes outside history loading should invalidate older requests");
@@ -95,4 +116,4 @@ assert.equal(defaultSelection.readOnly, false);
 const missingSelection = resolveHomeThreadSelection(threads, "missing");
 assert.equal(missingSelection.selectedThread?.id, "active-a", "a stale remembered id should recover to an active Thread");
 
-console.log("thread-selection-race: ok — Thread switching and Mission-specific terminal summaries stay isolated");
+console.log("thread-selection-race: ok — Thread switching, Mission activity, and terminal summaries stay isolated");
