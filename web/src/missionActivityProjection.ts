@@ -35,6 +35,11 @@ function payloadString(payload: EventPayload, key: string): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
+function payloadNumber(payload: EventPayload, key: string): number | undefined {
+  const value = payload[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
 function payloadStrings(payload: EventPayload, key: string): string[] {
   const value = payload[key];
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
@@ -149,16 +154,23 @@ export function projectMissionActivity(
   for (const event of scoped.events) {
     const task = event.taskId ? tasksById.get(event.taskId) : undefined;
     const worker = task?.assignedTo ? (harnessNames.get(task.assignedTo) ?? task.assignedTo) : "Chef";
+    const payload = eventPayload(event);
     let text: string | null = null;
 
     if (event.type === "session.data") {
       text = summarizeMissionProgressEvent(event)?.text ?? "A worker is actively producing output.";
     } else if (event.type === "task.running") {
-      text = `${worker} started ${task?.title ?? "the task"}.`;
+      const retryCount = payloadNumber(payload, "retryCount") ?? 0;
+      text = retryCount > 0
+        ? `${worker} is retrying ${task?.title ?? "the task"} (retry ${retryCount}).`
+        : `${worker} started ${task?.title ?? "the task"}.`;
     } else if (event.type === "task.completed") {
       text = `${worker} finished ${task?.title ?? "the task"}.`;
     } else if (event.type === "task.failed") {
-      text = `${worker} needs attention.`;
+      const error = payloadString(payload, "error");
+      text = error
+        ? `${worker} failed ${task?.title ?? "the task"}: ${error}`
+        : `${worker} failed ${task?.title ?? "the task"} and needs recovery.`;
     } else {
       text = summarizeMissionProgressEvent(event)?.text ?? null;
     }
