@@ -5,6 +5,8 @@ import {
 } from "../web/src/artifactProjection.ts";
 
 const completedNotice = "Work is marked complete, but Chef did not publish a durable result for this Mission.";
+const attentionPartialNotice = "Chef saved a partial result, but this Mission still needs attention before the handoff is complete.";
+const stoppedPartialNotice = "Chef saved a partial result, but this Mission was stopped before the handoff was complete.";
 const scope = { missionId: "mission-current", taskIds: ["task-current"], threadId: "thread-current" };
 const result: LivingArtifact = {
   id: "todo-result",
@@ -36,6 +38,30 @@ assert.deepEqual(
 );
 
 assert.deepEqual(
+  missionResultHandoffProjection([result], scope, "thread-current", "failed"),
+  { artifacts: [result], notice: attentionPartialNotice },
+  "a failed Mission must keep its partial durable result visible without hiding that recovery is still required",
+);
+
+assert.deepEqual(
+  missionResultHandoffProjection([result], scope, "thread-current", "blocked"),
+  { artifacts: [result], notice: attentionPartialNotice },
+  "a blocked Mission must not let a partial result masquerade as a completed handoff",
+);
+
+assert.deepEqual(
+  missionResultHandoffProjection([result], scope, "thread-current", "waiting_for_approval"),
+  { artifacts: [result], notice: attentionPartialNotice },
+  "approval-wait Missions may expose partial results but must still tell the user the handoff needs attention",
+);
+
+assert.deepEqual(
+  missionResultHandoffProjection([result], scope, "thread-current", "cancelled"),
+  { artifacts: [result], notice: stoppedPartialNotice },
+  "a stopped Mission must identify an existing artifact as partial rather than implying successful completion",
+);
+
+assert.deepEqual(
   missionResultHandoffProjection([], scope, "thread-current", "active"),
   { artifacts: [], notice: null },
   "active work must not claim a missing result before completion",
@@ -48,9 +74,9 @@ assert.deepEqual(
 );
 
 assert.deepEqual(
-  missionResultHandoffProjection([result], scope, "thread-other", "completed"),
+  missionResultHandoffProjection([result], scope, "thread-other", "failed"),
   { artifacts: [], notice: null },
-  "a stale previous-Thread result must remain hidden together with its completion handoff",
+  "a stale previous-Thread partial result and its recovery warning must remain hidden after Thread selection changes",
 );
 
-console.log("result-handoff-projection: ok — completion handoff stays visible when missing and remains selected-Thread scoped");
+console.log("result-handoff-projection: ok — terminal handoff stays truthful for missing and partial results and remains selected-Thread scoped");
