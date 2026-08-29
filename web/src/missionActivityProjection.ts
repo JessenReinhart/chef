@@ -131,6 +131,18 @@ function missionCanHeartbeat(mission: UiMission): boolean {
   return mission.status === "planning" || mission.status === "active" || mission.status === "verifying";
 }
 
+function heartbeatTextForMissionState(text: string, status: UiMission["status"]): string {
+  const label = status === "planning"
+    ? "Chef is still planning"
+    : status === "verifying"
+      ? "Chef is still verifying"
+      : status === "active"
+        ? "Chef is still working"
+        : null;
+  if (!label) return text;
+  return text.replace(/^Chef is still (?:planning|working|verifying)/, label);
+}
+
 function missionActivityFallback(mission: UiMission): string {
   if (mission.status === "planning") return "Chef is deciding who and what this work needs.";
   if (mission.status === "completed") return "Work is complete. Results are available in this workspace.";
@@ -169,8 +181,6 @@ export function projectMissionActivity(
   const feed: string[] = [];
   const seen = new Set<string>();
 
-  // Prefer concrete recent progress. A heartbeat is useful only when there are
-  // not already enough meaningful runtime updates to explain what is happening.
   for (const event of scoped.events) {
     const task = event.taskId ? tasksById.get(event.taskId) : undefined;
     const worker = task?.assignedTo ? (harnessNames.get(task.assignedTo) ?? task.assignedTo) : "Chef";
@@ -202,9 +212,13 @@ export function projectMissionActivity(
     if (feed.length === 3) break;
   }
 
-  if (feed.length < 3 && missionCanHeartbeat(mission)) {
+  if (missionCanHeartbeat(mission)) {
     const heartbeat = deriveMissionHeartbeat(snapshot.events, mission.id, scoped.ownedTaskIds, now);
-    if (heartbeat && !seen.has(heartbeat.text)) feed.unshift(heartbeat.text);
+    if (heartbeat && !seen.has(heartbeat.text)) {
+      const heartbeatText = heartbeatTextForMissionState(heartbeat.text, mission.status);
+      feed.unshift(heartbeatText);
+      if (feed.length > 3) feed.length = 3;
+    }
   }
 
   return {
