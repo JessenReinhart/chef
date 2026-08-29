@@ -132,7 +132,7 @@ const noisyPlannerFailureProjection = projectMissionActivity({
     timestamp: 3_000,
     source: { type: "orchestrator", id: "orchestrator" },
     type: "orchestrator.plan.error",
-    payload: { error: "\u001b[31mProvider timeout\u001b[0m\n    at requestPlan (orchestrator/provider.ts:42:7)\n    at async proposePlan (orchestrator/provider.ts:88:3)" },
+    payload: { error: "\u001b[31m\u001b[0m\nProvider timeout\n    at requestPlan (orchestrator/provider.ts:42:7)\n    at async proposePlan (orchestrator/provider.ts:88:3)" },
     correlationId: recoveryMission.id,
   }],
 }, [{ id: "codex", name: "Codex", type: "cli", available: true }], 3_000);
@@ -140,7 +140,7 @@ assert.ok(noisyPlannerFailureProjection);
 assert.equal(
   noisyPlannerFailureProjection.feed[0],
   "Planning failed: Provider timeout",
-  "non-Task runtime failures must use the same bounded human-readable boundary instead of leaking terminal formatting or stack detail",
+  "non-Task runtime failures must skip terminal-only preludes and keep the next useful reason without leaking stack detail",
 );
 
 const retryEvent: UiRuntimeEvent = {
