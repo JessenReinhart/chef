@@ -30,6 +30,11 @@ type MissionLinkedArtifact = {
   metadata: Record<string, unknown>;
 };
 
+export type MissionResultHandoffProjection<T> = {
+  artifacts: T[];
+  notice: string | null;
+};
+
 export type RunCommandCopyResult = "copied" | "unavailable" | "failed";
 
 export const MAX_VISIBLE_RESULTS = 4;
@@ -93,6 +98,25 @@ export function missingResultHandoffNotice(missionStatus: string | undefined, re
     return "No durable result is available because this Mission was stopped.";
   }
   return null;
+}
+
+export function missionResultHandoffProjection<T extends MissionLinkedArtifact>(
+  artifacts: T[],
+  scope: MissionArtifactScope | null | undefined,
+  selectedThreadId: string | null | undefined,
+  missionStatus: string | undefined,
+  limit = MAX_VISIBLE_RESULTS,
+): MissionResultHandoffProjection<T> {
+  const visibleArtifacts = visibleArtifactsForSelectedThreadMission(
+    artifacts,
+    scope,
+    selectedThreadId,
+    limit,
+  );
+  return {
+    artifacts: visibleArtifacts,
+    notice: missingResultHandoffNotice(missionStatus, visibleArtifacts.length),
+  };
 }
 
 export function canDownload(artifact: LivingArtifact): boolean {
