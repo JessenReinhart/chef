@@ -2,6 +2,7 @@
 
 ## 2026-08-29
 
+- **Simple Mode keeps a fresh heartbeat visible when work goes quiet (#270):** When an active or verifying Mission has no runtime update for 10 seconds, the newest activity line now says Chef is still working or verifying instead of letting older progress hide the silence. Recent concrete worker context remains visible, and the heartbeat always matches the Mission’s current stage.
 - **Simple Mode keeps result handoff visible when work ends without a durable result (#269):** Completed, failed, blocked, approval-waiting, paused, or stopped Missions now keep the results area visible with a clear recovery message. Partial results stay visible without being mistaken for a successful handoff, and results from another Thread stay hidden.
 - **Simple Mode now acknowledges requests without guessing the execution route (#267):** New requests immediately confirm that work has started without claiming Chef chose a team, planner, worker, or routing shape before durable runtime evidence exists.
 - **Simple Mode now distinguishes verification, approval waits, blocks, and failures (#268):** The activity rail uses truthful fallback text when no useful runtime update exists and shows verification as its own state instead of collapsing it into generic work.
