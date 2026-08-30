@@ -6,7 +6,7 @@ import { pathToFileURL } from "node:url";
 import { createChef } from "../src/main.ts";
 import { createHttpServer } from "../src/server/http-server.ts";
 import { createArtifactServer } from "../src/server/artifact-http.ts";
-import { canRevealArtifact } from "../web/src/artifactHandoff.ts";
+import { canRevealArtifact, isFileUriArtifact } from "../web/src/artifactHandoff.ts";
 
 const projectDir = await mkdtemp(join(tmpdir(), "chef-local-result-reveal-"));
 const outsideDir = await mkdtemp(join(tmpdir(), "chef-local-result-reveal-outside-"));
@@ -48,9 +48,9 @@ try {
     workspaceId: runtime.workspaceId,
     type: "code",
     name: "todo-app-file-uri",
-    uri: "sideband://worker/file-uri-result",
+    uri: pathToFileURL(resultPath).href.replace(/^file:/, "FILE:"),
     createdBy: "todo-builder",
-    metadata: { resultLocation: pathToFileURL(resultPath).href.replace(/^file:/, "FILE:") },
+    metadata: {},
   });
   const unsupported = runtime.repository.insertArtifact({
     id: "opaque-without-location",
@@ -82,6 +82,8 @@ try {
 
   assert.equal(canRevealArtifact(local), true, "Simple Mode should keep reveal available for an explicit durable local result path");
   assert.equal(canRevealArtifact(mixedCaseFileUri), true, "file URI schemes are case-insensitive and must remain revealable");
+  assert.equal(isFileUriArtifact(mixedCaseFileUri), true, "mixed-case file URIs must remain file-backed for download/save actions");
+  assert.equal(isFileUriArtifact(local), false, "opaque artifacts with only local metadata must not masquerade as downloadable file-URI artifacts");
   assert.equal(canRevealArtifact(unsupported), false, "opaque results without a durable local location must not advertise reveal");
   assert.equal(canRevealArtifact(remote), false, "remote result URLs must not advertise a local filesystem reveal action");
 
@@ -109,7 +111,7 @@ try {
   assert.match(outsideReveal.body.error ?? "", /outside the project root/);
   assert.equal(revealed.length, 2, "rejected result locations must never invoke the OS opener");
 
-  console.log("artifact-local-result-reveal: ok — opaque artifacts retain safe project-scoped reveal when workers persist a local result path");
+  console.log("artifact-local-result-reveal: ok — opaque artifacts retain safe project-scoped reveal and file-URI actions stay scheme-case invariant");
 } finally {
   if (server.listening) await new Promise<void>((resolve) => server.close(() => resolve()));
   await runtime.close();
