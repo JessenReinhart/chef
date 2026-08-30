@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { loadSelectedThreadId, SELECTED_THREAD_EVENT } from "./threadApi";
-import { artifactHandoff, canRevealArtifact } from "./artifactHandoff";
+import { artifactHandoff, canRevealArtifact, isFileUriArtifact } from "./artifactHandoff";
 import { missionResultHandoffProjection } from "./artifactProjection";
 import { copyRunCommand, createSingleFlightArtifactRevealer } from "./resultActions";
 import { selectLivingWorkspaceMission } from "./missionActivityProjection";
@@ -172,7 +172,7 @@ export function HomeMissionArtifacts() {
                                 ? "Opened folder"
                                 : "Show in folder"}
                           </button>
-                          {artifact.uri.startsWith("file:") && (
+                          {isFileUriArtifact(artifact) && (
                             <a
                               href={`/api/artifacts/${encodeURIComponent(artifact.id)}/download`}
                               download
