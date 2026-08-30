@@ -50,6 +50,10 @@ function metadataLocation(metadata: Record<string, unknown>): string | null {
   return null;
 }
 
+function hasFileScheme(value: string): boolean {
+  return /^file:/i.test(value);
+}
+
 function fileUriPath(value: string): string | null {
   try {
     const url = new URL(value);
@@ -68,12 +72,12 @@ function artifactPathCandidate(runtime: ChefRuntime, artifact: { uri: string; me
 
   const isWindowsDrivePath = /^[A-Za-z]:[\\/]/.test(persistedLocation);
   const hasUriScheme = /^[A-Za-z][A-Za-z0-9+.-]*:/.test(persistedLocation);
-  if (hasUriScheme && !persistedLocation.startsWith("file:") && !isWindowsDrivePath) {
+  if (hasUriScheme && !hasFileScheme(persistedLocation) && !isWindowsDrivePath) {
     throw new ArtifactLocationError(409, "artifact location is not a local file");
   }
 
-  const persistedFileUriPath = persistedLocation.startsWith("file:") ? fileUriPath(persistedLocation) : null;
-  if (persistedLocation.startsWith("file:") && !persistedFileUriPath) {
+  const persistedFileUriPath = hasFileScheme(persistedLocation) ? fileUriPath(persistedLocation) : null;
+  if (hasFileScheme(persistedLocation) && !persistedFileUriPath) {
     throw new ArtifactLocationError(409, "artifact has an invalid file URI");
   }
   const path = persistedFileUriPath ?? persistedLocation;
