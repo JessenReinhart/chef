@@ -59,6 +59,8 @@ const separatedMultiStageRequests = [
   "Create a todo app; add end-to-end tests.",
   "Create a todo app; and verify it runs.",
   "Research the options\nPrepare a migration plan.",
+  "Should I use Vite and test it?",
+  "Can React handle this and verify it?",
 ];
 
 for (const goal of separatedMultiStageRequests) {
