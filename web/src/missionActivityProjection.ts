@@ -71,30 +71,44 @@ function directlyBelongsToMission(event: UiRuntimeEvent, missionId: string): boo
     || payloadString(payload, "missionId") === missionId;
 }
 
+function eventTaskIds(event: UiRuntimeEvent): string[] {
+  const payload = eventPayload(event);
+  return [...new Set([
+    ...(event.taskId ? [event.taskId] : []),
+    ...(payloadString(payload, "taskId") ? [payloadString(payload, "taskId")!] : []),
+    ...payloadStrings(payload, "taskIds"),
+  ])];
+}
+
 function scopeMissionActivity(events: UiRuntimeEvent[], mission: UiMission): {
   ownedTaskIds: Set<string>;
   events: UiRuntimeEvent[];
 } {
   const ownedTaskIds = new Set(mission.taskIds);
+  const hasAuthoritativeTaskIds = mission.taskIds.length > 0;
 
-  for (const event of events) {
-    if (!directlyBelongsToMission(event, mission.id)) continue;
-    const payload = eventPayload(event);
-    const taskId = payloadString(payload, "taskId");
-    if (taskId) ownedTaskIds.add(taskId);
-    for (const payloadTaskId of payloadStrings(payload, "taskIds")) ownedTaskIds.add(payloadTaskId);
+  // While planning, the Mission may not have persisted taskIds yet, so runtime
+  // events are the best available discovery source. Once taskIds exist they
+  // are authoritative for the current attempt. Redirect/replan keeps the same
+  // Mission id, so blindly re-adding older correlated task ids would mix stale
+  // worker activity into the new attempt.
+  if (!hasAuthoritativeTaskIds) {
+    for (const event of events) {
+      if (!directlyBelongsToMission(event, mission.id)) continue;
+      for (const taskId of eventTaskIds(event)) ownedTaskIds.add(taskId);
+    }
   }
 
   return {
     ownedTaskIds,
     events: events
       .filter((event) => {
+        const taskIds = eventTaskIds(event);
+        if (hasAuthoritativeTaskIds && taskIds.length > 0) {
+          return taskIds.some((taskId) => ownedTaskIds.has(taskId));
+        }
         if (directlyBelongsToMission(event, mission.id)) return true;
-        if (event.taskId && ownedTaskIds.has(event.taskId)) return true;
-        const payload = eventPayload(event);
-        const taskId = payloadString(payload, "taskId");
-        if (taskId && ownedTaskIds.has(taskId)) return true;
-        return payloadStrings(payload, "taskIds").some((payloadTaskId) => ownedTaskIds.has(payloadTaskId));
+        return taskIds.some((taskId) => ownedTaskIds.has(taskId));
       })
       .sort((a, b) => b.seq - a.seq),
   };
