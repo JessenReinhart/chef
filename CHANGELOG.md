@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-08-30
+
+- **Simple Mode shows verification as soon as durable work is complete (#272):** When every authoritative task has finished but the Mission snapshot has not caught up yet, Chef now shows a consistent Verifying state instead of briefly falling back to Working. Planning is also shown explicitly, and stale activity from a superseded redirect/replan attempt no longer replaces the current attempt’s progress.
+
 ## 2026-08-29
 
 - **Simple Mode keeps durable results self-describing even when worker prose is missing (#271):** When Chef has a durable file or result location but no optional summary text, the result handoff now names what was produced from the artifact name or filename while preserving richer worker-written summaries when they exist.
