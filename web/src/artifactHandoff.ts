@@ -28,6 +28,10 @@ function hasFileScheme(value: string): boolean {
   return /^file:/i.test(value);
 }
 
+export function isFileUriArtifact(artifact: Pick<ArtifactHandoffInput, "uri">): boolean {
+  return hasFileScheme(artifact.uri);
+}
+
 function fileUriLocation(uri: string): string | null {
   if (!hasFileScheme(uri)) return null;
   try {
@@ -63,7 +67,7 @@ function isLocalLocation(location: string): boolean {
 }
 
 export function canRevealArtifact(artifact: ArtifactHandoffInput): boolean {
-  if (hasFileScheme(artifact.uri)) return true;
+  if (isFileUriArtifact(artifact)) return true;
   const location = firstText(artifact.metadata, ["resultLocation", "path", "location"]);
   return location !== null && isLocalLocation(location);
 }
