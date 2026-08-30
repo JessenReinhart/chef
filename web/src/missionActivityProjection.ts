@@ -123,6 +123,7 @@ export function missionActivityState(mission: UiMission | null): string {
   if (mission.status === "failed" || mission.status === "blocked" || mission.status === "waiting_for_approval") return "Needs attention";
   if (mission.status === "cancelled") return "Stopped";
   if (mission.status === "paused") return "Paused";
+  if (mission.status === "planning") return "Planning";
   if (mission.status === "verifying") return "Verifying";
   return "Working";
 }
