@@ -290,7 +290,20 @@ export class Orchestrator {
     const tasks = snapshot.tasks.filter((t) => plan.taskIds.includes(t.id));
     const artifacts = snapshot.artifacts.filter((a) => a.taskId !== undefined && plan.taskIds.includes(a.taskId));
     const failed = tasks.some((t) => t.status === "failed" || t.status === "cancelled");
-    const ok = !executionError && !failed;
+    const ok = !executionError && !failed && tasks.length === plan.taskIds.length && tasks.every((task) => task.status === "completed");
+    if (ok && !this.#beginVerification(workspaceId, mission.id, plan.id, plan.taskIds)) {
+      const owner = this.#repository.getMission(mission.id);
+      const report = `Mission attempt ${plan.id} was interrupted by ${owner?.status ?? "mission removal"}.`;
+      this.#appendEvent(workspaceId, { type: "orchestrator.plan.interrupted", payload: { missionId: mission.id, planId: plan.id, status: owner?.status } });
+      return { workspaceId, taskIds: plan.taskIds, report, ok: false };
+    }
+    const finalOwner = this.#repository.getMission(mission.id);
+    const expectedStatus = ok ? "verifying" : "active";
+    if (finalOwner?.status !== expectedStatus || finalOwner.planId !== plan.id) {
+      const report = `Mission attempt ${plan.id} was interrupted by ${finalOwner?.status ?? "mission removal"}.`;
+      this.#appendEvent(workspaceId, { type: "orchestrator.plan.interrupted", payload: { missionId: mission.id, planId: plan.id, status: finalOwner?.status } });
+      return { workspaceId, taskIds: plan.taskIds, report, ok: false };
+    }
     this.#repository.updateMission(mission.id, { status: ok ? "completed" : "failed", taskIds: plan.taskIds });
     this.#appendEvent(workspaceId, { type: "mission.status", payload: { missionId: mission.id, status: ok ? "completed" : "failed" } });
     const report = this.#buildReport(plan, tasks, artifacts, executionError);
@@ -310,6 +323,7 @@ export class Orchestrator {
     });
     return { workspaceId, taskIds: plan.taskIds, report, ok };
   }
+
   /** Chat-specific entry: same plan pipeline as handleUserMessage, but with
    *  chat.* SSE events for the Console chat tab. */
   async handleChatMessage(workspaceId: WorkspaceId, message: string): Promise<OrchestratorResult> {
@@ -401,6 +415,15 @@ export class Orchestrator {
       return { workspaceId, taskIds: plan.taskIds, report, ok: false };
     }
 
+    const executionTasks = plan.taskIds.map((id) => this.#repository.getTask(id)).filter((task) => task !== null);
+    const executionSucceeded = !executionError && executionTasks.length === plan.taskIds.length && executionTasks.every((task) => task.status === "completed");
+    if (executionSucceeded && !this.#beginVerification(workspaceId, mission.id, plan.id, plan.taskIds)) {
+      const owner = this.#repository.getMission(mission.id);
+      const report = `Mission attempt ${plan.id} was interrupted by ${owner?.status ?? "mission removal"}.`;
+      this.#appendEvent(workspaceId, { type: "chat.plan.interrupted", payload: { missionId: mission.id, planId: plan.id, status: owner?.status } });
+      return { workspaceId, taskIds: plan.taskIds, report, ok: false };
+    }
+
     // Materialize the plan as a durable canvas graph (spawn + connect + arrange).
     // Canvas failure is non-fatal: the plan already executed; the canvas
     // simply stays as-is. patchCanvasGraph already emits canvas.patched /
@@ -427,7 +450,14 @@ export class Orchestrator {
     const tasks = snapshot.tasks.filter((t) => plan.taskIds.includes(t.id));
     const artifacts = snapshot.artifacts.filter((a) => a.taskId !== undefined && plan.taskIds.includes(a.taskId));
     const failed = tasks.some((t) => t.status === "failed" || t.status === "cancelled");
-    const ok = !executionError && !failed;
+    const ok = !executionError && !failed && tasks.length === plan.taskIds.length && tasks.every((task) => task.status === "completed");
+    const finalOwner = this.#repository.getMission(mission.id);
+    const expectedStatus = ok ? "verifying" : "active";
+    if (finalOwner?.status !== expectedStatus || finalOwner.planId !== plan.id) {
+      const report = `Mission attempt ${plan.id} was interrupted by ${finalOwner?.status ?? "mission removal"}.`;
+      this.#appendEvent(workspaceId, { type: "chat.plan.interrupted", payload: { missionId: mission.id, planId: plan.id, status: finalOwner?.status } });
+      return { workspaceId, taskIds: plan.taskIds, report, ok: false };
+    }
     this.#repository.updateMission(mission.id, { status: ok ? "completed" : "failed", taskIds: plan.taskIds });
     this.#appendEvent(workspaceId, { type: "mission.status", payload: { missionId: mission.id, status: ok ? "completed" : "failed" } });
     const report = this.#buildReport(plan, tasks, artifacts, executionError);
@@ -667,6 +697,21 @@ export class Orchestrator {
     return this.#missionEpochs.get(missionId) === missionEpoch && mission?.status === "active" && mission.planId === planId;
   }
 
+  #ownsVerifyingAttempt(missionId: string, missionEpoch: number, planId: string): boolean {
+    const mission = this.#repository.getMission(missionId);
+    return this.#missionEpochs.get(missionId) === missionEpoch && mission?.status === "verifying" && mission.planId === planId;
+  }
+
+  #beginVerification(workspaceId: WorkspaceId, missionId: string, planId: string, taskIds: readonly TaskId[]): boolean {
+    const mission = this.#repository.getMission(missionId);
+    if (mission?.status !== "active" || mission.planId !== planId) return false;
+    const tasks = taskIds.map((taskId) => this.#repository.getTask(taskId));
+    if (tasks.some((task) => task === null || task.status !== "completed")) return false;
+    this.#repository.updateMission(missionId, { status: "verifying", taskIds: [...taskIds] });
+    this.#appendEvent(workspaceId, { type: "mission.status", payload: { missionId, status: "verifying", planId } });
+    return true;
+  }
+
   async #cancelMissionTasks(workspaceId: WorkspaceId, taskIds: TaskId[]): Promise<void> {
     const cancellable = taskIds.filter((taskId) => {
       const task = this.#repository.getTask(taskId);
@@ -713,12 +758,18 @@ export class Orchestrator {
       this.#repository.updatePlanStatus(plan.id, plan.status);
       if (!this.#ownsActiveAttempt(missionId, missionEpoch, plan.id)) return;
       const tasks = plan.taskIds.map((id) => this.#repository.getTask(id)).filter((task) => task !== null);
-      const ok = !executionError && tasks.every((task) => task.status === "completed");
+      const ok = !executionError && tasks.length === plan.taskIds.length && tasks.every((task) => task.status === "completed");
+      if (ok) {
+        if (!this.#beginVerification(workspaceId, missionId, plan.id, plan.taskIds)) return;
+        if (!this.#ownsVerifyingAttempt(missionId, missionEpoch, plan.id)) return;
+      } else if (!this.#ownsActiveAttempt(missionId, missionEpoch, plan.id)) {
+        return;
+      }
       this.#repository.updateMission(missionId, { status: ok ? "completed" : "failed", taskIds: plan.taskIds });
       this.#appendEvent(workspaceId, { type: "mission.status", payload: { missionId, status: ok ? "completed" : "failed" } });
     } catch (error) {
       const sameAttempt = plan
-        ? this.#ownsActiveAttempt(missionId, missionEpoch, plan.id)
+        ? this.#ownsActiveAttempt(missionId, missionEpoch, plan.id) || this.#ownsVerifyingAttempt(missionId, missionEpoch, plan.id)
         : this.#ownsPlanningAttempt(missionId, missionEpoch);
       if (sameAttempt) {
         const err = error instanceof Error ? error.message : String(error);
@@ -955,6 +1006,7 @@ export class Orchestrator {
       task = this.#repository.getTask(taskId)!;
     }
   }
+
   async #consumeSessions(workspaceId: WorkspaceId, taskIds: TaskId[], signal: AbortSignal): Promise<void> {
     const mine = new Set(taskIds);
     const deadline = Date.now() + SESSION_ACTIVE_WAIT_MS;
@@ -1174,7 +1226,6 @@ const findings = [
   { file: "src/orchestrator/orchestrator.ts", line: 1, note: "audited during smoke test" },
   { file: "src/runtime/scheduler.ts", line: 1, note: "audited during smoke test" },
 ];
-
 
 const envelope = {
   version: 1,
