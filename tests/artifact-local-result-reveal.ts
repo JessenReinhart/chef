@@ -84,6 +84,11 @@ try {
   assert.equal(unsupportedReveal.status, 409);
   assert.match(unsupportedReveal.body.error ?? "", /not backed by a local file/);
 
+  const remoteReveal = await requestReveal(remote.id);
+  assert.equal(remoteReveal.status, 409);
+  assert.match(remoteReveal.body.error ?? "", /not a local file/);
+  assert.equal(revealed.length, 1, "remote result locations must never be reinterpreted as project-relative filesystem paths");
+
   const outsideReveal = await requestReveal(outside.id);
   assert.equal(outsideReveal.status, 403);
   assert.match(outsideReveal.body.error ?? "", /outside the project root/);
