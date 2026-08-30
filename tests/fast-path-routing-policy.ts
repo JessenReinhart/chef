@@ -27,6 +27,7 @@ const simpleDetailedRequests = [
   "Create a simple todo app\nUse React.",
   "Create a simple todo app; React is fine.",
   "Create a simple todo app, React is fine.",
+  "Create a simple todo app and make it responsive.",
   "Research the best way to create a system with AI\nKeep the answer concise.",
 ];
 
@@ -67,13 +68,16 @@ const separatedMultiStageRequests = [
   "Research the options\nPrepare a migration plan.",
   "Should I use Vite and test it?",
   "Can React handle this and verify it?",
+  "Create a todo app and add end-to-end tests.",
+  "Fix this bug then generate a regression report.",
+  "Rename the API and document the migration.",
 ];
 
 for (const goal of separatedMultiStageRequests) {
   assert.equal(
     shouldUseSingleWorkerFastPath(goal),
     false,
-    `${goal} should retain planner routing because the separator introduces another executable stage`,
+    `${goal} should retain planner routing because the request introduces another executable stage`,
   );
 }
 
