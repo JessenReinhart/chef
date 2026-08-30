@@ -51,6 +51,15 @@ try {
     createdBy: "todo-builder",
     metadata: {},
   });
+  const remote = runtime.repository.insertArtifact({
+    id: "opaque-remote-result",
+    workspaceId: runtime.workspaceId,
+    type: "result",
+    name: "remote result",
+    uri: "sideband://worker/remote",
+    createdBy: "todo-builder",
+    metadata: { location: "https://example.com/results/todo-app" },
+  });
   const outside = runtime.repository.insertArtifact({
     id: "opaque-outside-project",
     workspaceId: runtime.workspaceId,
@@ -63,6 +72,7 @@ try {
 
   assert.equal(canRevealArtifact(local), true, "Simple Mode should keep reveal available for an explicit durable local result path");
   assert.equal(canRevealArtifact(unsupported), false, "opaque results without a durable local location must not advertise reveal");
+  assert.equal(canRevealArtifact(remote), false, "remote result URLs must not advertise a local filesystem reveal action");
 
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
 
