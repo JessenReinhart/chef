@@ -2,6 +2,7 @@
 
 ## 2026-08-30
 
+- **The permanent todo-app check now requires a complete user handoff (#276):** Chef’s golden-path acceptance now proves one Mission visibly moves through Planning, active worker activity, Verifying, and Completed, then keeps a durable result summary, run command, and verification evidence after reopen while the generated todo app still starts over HTTP.
 - **Local generated results stay revealable even with opaque artifact IDs (#275):** Simple Mode can now keep **Show in folder** available when a worker records a trusted local result path instead of a `file:` artifact URI. Chef still resolves the durable artifact server-side, rejects remote locations, realpaths the result, and enforces the active project boundary before opening anything.
 - **Mission verification is now a real durable lifecycle stage (#273):** After all authoritative work is complete, Chef now persists Verifying before final completion. Pause, cancel, redirect, and stale completion paths can no longer overwrite a newer authoritative Mission state during that handoff.
 - **Simple Mode shows verification as soon as durable work is complete (#272):** When every authoritative task has finished but the Mission snapshot has not caught up yet, Chef now shows a consistent Verifying state instead of briefly falling back to Working. Planning is also shown explicitly, and stale activity from a superseded redirect/replan attempt no longer replaces the current attempt’s progress.
