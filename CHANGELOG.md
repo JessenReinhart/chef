@@ -2,6 +2,7 @@
 
 ## 2026-08-30
 
+- **Ordinary yes/no questions avoid unnecessary planner latency (#277):** Simple questions such as “Is this normal?”, “Should I use Vite?”, or polite variants now stay on Chef’s bounded single-worker fast path, while requests that add real follow-up work such as testing or verification still use the planner.
 - **The permanent todo-app check now requires a complete user handoff (#276):** Chef’s golden-path acceptance now proves one Mission visibly moves through Planning, active worker activity, Verifying, and Completed, then keeps a durable result summary, run command, and verification evidence after reopen while the generated todo app still starts over HTTP.
 - **Local generated results stay revealable even with opaque artifact IDs (#275):** Simple Mode can now keep **Show in folder** available when a worker records a trusted local result path instead of a `file:` artifact URI. Chef still resolves the durable artifact server-side, rejects remote locations, realpaths the result, and enforces the active project boundary before opening anything.
 - **Mission verification is now a real durable lifecycle stage (#273):** After all authoritative work is complete, Chef now persists Verifying before final completion. Pause, cancel, redirect, and stale completion paths can no longer overwrite a newer authoritative Mission state during that handoff.
