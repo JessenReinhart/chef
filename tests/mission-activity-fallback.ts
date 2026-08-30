@@ -145,6 +145,11 @@ const convergingVerificationProjection = projectMissionActivity(
 );
 assert.ok(convergingVerificationProjection, "completed task evidence should remain visible while Mission status catches up");
 assert.equal(
+  convergingVerificationProjection.mission.status,
+  "verifying",
+  "the projected Mission object must agree with the visible Verifying state so downstream Simple Mode consumers cannot regress to Active",
+);
+assert.equal(
   convergingVerificationProjection.missionState,
   "Verifying",
   "an active Mission whose authoritative owned work is durably completed must project the real verification phase instead of stale Working",
