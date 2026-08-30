@@ -32,6 +32,8 @@ const simpleDetailedRequests = [
   "Create a simple todo app; React is fine.",
   "Create a simple todo app, React is fine.",
   "Create a simple todo app with React and TypeScript.",
+  "Can you create a simple todo app?",
+  "Could you fix this button?",
   "Research the best way to create a system with AI\nKeep the answer concise.",
 ];
 
@@ -76,6 +78,21 @@ for (const goal of scopedComplexRequests) {
     shouldUseSingleWorkerFastPath(goal),
     false,
     `${goal} should retain planner routing because scope words describe real work rather than an informational question`,
+  );
+}
+
+const unrecognizedExecutableQuestions = [
+  "Can you refactor the authentication flow?",
+  "Could you deploy this app to production?",
+  "Would you redesign the settings experience?",
+  "Please, will you reorganize this repository?",
+];
+
+for (const goal of unrecognizedExecutableQuestions) {
+  assert.equal(
+    shouldUseSingleWorkerFastPath(goal),
+    false,
+    `${goal} should retain planner routing because request-question grammar alone must not widen the bounded fast path`,
   );
 }
 
