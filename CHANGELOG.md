@@ -2,6 +2,7 @@
 
 ## 2026-08-30
 
+- **Multi-step and genuinely scoped requests stay on the planner path (#278):** Chef now keeps follow-up work such as “Create a todo app and add end-to-end tests” on the planner route, while ordinary explanatory questions that merely mention words such as “multiple”, “parallel”, or “across” can still use the faster single-worker path.
 - **Ordinary yes/no questions avoid unnecessary planner latency (#277):** Simple questions such as “Is this normal?”, “Should I use Vite?”, or polite variants now stay on Chef’s bounded single-worker fast path, while requests that add real follow-up work such as testing or verification still use the planner.
 - **The permanent todo-app check now requires a complete user handoff (#276):** Chef’s golden-path acceptance now proves one Mission visibly moves through Planning, active worker activity, Verifying, and Completed, then keeps a durable result summary, run command, and verification evidence after reopen while the generated todo app still starts over HTTP.
 - **Local generated results stay revealable even with opaque artifact IDs (#275):** Simple Mode can now keep **Show in folder** available when a worker records a trusted local result path instead of a `file:` artifact URI. Chef still resolves the durable artifact server-side, rejects remote locations, realpaths the result, and enforces the active project boundary before opening anything.
