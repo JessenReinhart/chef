@@ -13,6 +13,9 @@ const simpleExplanations = [
   "Can React handle this?",
   "Please, is this normal?",
   "Please should I use Vite?",
+  "How does React share state across components?",
+  "Can React render multiple roots?",
+  "What is parallel rendering?",
 ];
 
 for (const goal of simpleExplanations) {
@@ -55,6 +58,20 @@ for (const goal of comparisonQuestions) {
     shouldUseSingleWorkerFastPath(goal),
     false,
     `${goal} should retain planner routing because it asks for comparison/evaluation`,
+  );
+}
+
+const scopedComplexRequests = [
+  "Update auth across multiple packages.",
+  "Research multiple providers for deployment.",
+  "Create tests in parallel.",
+];
+
+for (const goal of scopedComplexRequests) {
+  assert.equal(
+    shouldUseSingleWorkerFastPath(goal),
+    false,
+    `${goal} should retain planner routing because scope words describe real work rather than an informational question`,
   );
 }
 
