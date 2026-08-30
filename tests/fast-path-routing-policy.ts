@@ -11,6 +11,8 @@ const simpleExplanations = [
   "Does this code leak memory?",
   "Should I use Vite?",
   "Can React handle this?",
+  "Please, is this normal?",
+  "Please should I use Vite?",
 ];
 
 for (const goal of simpleExplanations) {
@@ -43,6 +45,7 @@ const comparisonQuestions = [
   "What is React vs. Vue?",
   "Should I migrate from React to Vue?",
   "Can you compare React and Vue?",
+  "Please, should I migrate from React to Vue?",
 ];
 
 for (const goal of comparisonQuestions) {
