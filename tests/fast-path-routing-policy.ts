@@ -113,6 +113,10 @@ const separatedMultiStageRequests = [
   "Create a todo app and add end-to-end tests.",
   "Fix this bug then generate a regression report.",
   "Rename the API and document the migration.",
+  "Can you create a todo app and deploy it?",
+  "Create the settings page, then redesign the navigation.",
+  "Fix the auth bug; refactor the session flow.",
+  "Update this component and reorganize the module.",
 ];
 
 for (const goal of separatedMultiStageRequests) {
