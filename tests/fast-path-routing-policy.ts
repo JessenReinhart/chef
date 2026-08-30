@@ -7,6 +7,10 @@ const simpleExplanations = [
   "What is React?",
   "How does React reconciliation work?",
   "Tell me about Vite",
+  "Is this normal?",
+  "Does this code leak memory?",
+  "Should I use Vite?",
+  "Can React handle this?",
 ];
 
 for (const goal of simpleExplanations) {
@@ -37,6 +41,8 @@ const comparisonQuestions = [
   "Tell me about Vite versus Webpack",
   "How does React compare to Vue?",
   "What is React vs. Vue?",
+  "Should I migrate from React to Vue?",
+  "Can you compare React and Vue?",
 ];
 
 for (const goal of comparisonQuestions) {
