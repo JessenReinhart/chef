@@ -66,10 +66,16 @@ export function shouldUseSingleWorkerFastPath(goal: string): boolean {
     && (!EXPLANATORY_QUESTION.test(normalized) || EXECUTABLE_REQUEST_QUESTION.test(normalized))
   ) return false;
 
-  return DIRECT_SINGLE_STAGE_ACTION.test(normalized)
+  const hasBoundedIntent = DIRECT_SINGLE_STAGE_ACTION.test(normalized)
     || INFORMATION_ACTION.test(normalized)
-    || SIMPLE_INTENT_REQUEST.test(normalized)
-    || EXPLANATORY_QUESTION.test(normalized);
+    || SIMPLE_INTENT_REQUEST.test(normalized);
+
+  // "Can you ...?" is syntactically a question but semantically an execution
+  // request. Only let it skip planning when the requested work is inside the
+  // explicit bounded fast-path vocabulary above.
+  if (EXECUTABLE_REQUEST_QUESTION.test(normalized)) return hasBoundedIntent;
+
+  return hasBoundedIntent || EXPLANATORY_QUESTION.test(normalized);
 }
 
 export class SingleWorkerFastPathDecisionProvider implements DecisionProvider {
