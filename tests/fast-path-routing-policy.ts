@@ -26,6 +26,7 @@ for (const goal of simpleExplanations) {
 const simpleDetailedRequests = [
   "Create a simple todo app\nUse React.",
   "Create a simple todo app; React is fine.",
+  "Create a simple todo app, React is fine.",
   "Research the best way to create a system with AI\nKeep the answer concise.",
 ];
 
@@ -61,6 +62,8 @@ const separatedMultiStageRequests = [
   "Create a todo app\nand test it.",
   "Create a todo app; add end-to-end tests.",
   "Create a todo app; and verify it runs.",
+  "Create a todo app, test it.",
+  "Can you fix this, verify it?",
   "Research the options\nPrepare a migration plan.",
   "Should I use Vite and test it?",
   "Can React handle this and verify it?",
