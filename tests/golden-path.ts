@@ -226,6 +226,9 @@ function assertObservableMissionLifecycle(events: readonly RuntimeEvent[]): void
     event.type === "mission.status" && eventStatus(event) === "active"
   );
   const workerActivity = events.findIndex((event) => event.type.startsWith("task."));
+  const missionVerifying = events.findIndex((event) =>
+    event.type === "mission.status" && eventStatus(event) === "verifying"
+  );
   const missionCompleted = events.findIndex((event) =>
     event.type === "mission.status" && eventStatus(event) === "completed"
   );
@@ -233,7 +236,8 @@ function assertObservableMissionLifecycle(events: readonly RuntimeEvent[]): void
   assert.ok(missionCreated >= 0, "golden path must visibly enter planning");
   assert.ok(missionActive > missionCreated, "golden path must visibly leave planning before worker activity");
   assert.ok(workerActivity > missionActive, "golden path must expose worker activity after Mission activation");
-  assert.ok(missionCompleted > workerActivity, "golden path must visibly complete only after worker activity");
+  assert.ok(missionVerifying > workerActivity, "golden path must visibly enter verification after worker activity");
+  assert.ok(missionCompleted > missionVerifying, "golden path must visibly complete only after verification");
 }
 
 /**
