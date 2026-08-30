@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { GenericTerminalHarness } from "../src/harness/generic.ts";
 import { createChef } from "../src/main.ts";
+import { artifactHandoff, type LivingArtifact } from "../web/src/artifactProjection.ts";
 import type {
   AgentId,
   Decision,
@@ -245,6 +246,14 @@ function assertObservableMissionLifecycle(events: readonly RuntimeEvent[], taskI
   assert.ok(missionCompleted > missionVerifying, "golden path must visibly complete only after verification");
 }
 
+function resultHandoff(artifact: LivingArtifact, appPath: string): ReturnType<typeof artifactHandoff> {
+  const handoff = artifactHandoff(artifact);
+  assert.equal(handoff.summary, `Created runnable todo app at ${appPath}`, "Simple Mode handoff must explain what changed");
+  assert.equal(handoff.runCommand, `${process.execPath} ${appPath}`, "Simple Mode handoff must explain how to run the generated result");
+  assert.equal(handoff.verifiedBy, "golden-path", "Simple Mode handoff must expose the worker-supplied verification evidence");
+  return handoff;
+}
+
 /**
  * P0 golden path: the permanent boring acceptance task traverses the real
  * Mission -> Plan -> Task -> PTY lifecycle, produces a discoverable result in
@@ -293,6 +302,7 @@ async function main(): Promise<void> {
     assert.equal(snapshot.artifacts.length, 1, "worker must produce one durable result artifact");
     assert.equal(snapshot.artifacts[0].name, "todo-app", "artifact must make the generated result discoverable");
     assert.ok(snapshot.artifacts[0].uri.includes(TODO_APP), "artifact URI must point at the generated app");
+    const handoff = resultHandoff(snapshot.artifacts[0] as LivingArtifact, appPath);
     assert.ok(snapshot.sessions.some((session) => session.status === "completed"), "real PTY session must exit successfully");
     assert.ok(snapshot.sessions.every((session) => session.command.length > 0), "session command must be recorded");
     assert.ok(snapshot.sessions.every((session) => session.status !== "running"), "no session may remain stuck after completion");
@@ -316,6 +326,7 @@ async function main(): Promise<void> {
     assertObservableMissionLifecycle(restored.events, result.taskIds);
     assertRoutingModeIsDurable(restored.events);
     assert.equal(restored.artifacts.length, snapshot.artifacts.length, "result location must survive reopen");
+    assert.deepEqual(resultHandoff(restored.artifacts[0] as LivingArtifact, appPath), handoff, "result summary, run command, and verification handoff must survive reopen");
     assert.equal(restored.sessions.length, snapshot.sessions.length, "session history must survive reopen");
     assert.equal(restored.plans.length, snapshot.plans.length, "plan history must survive reopen");
 
