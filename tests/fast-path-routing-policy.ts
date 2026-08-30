@@ -27,7 +27,7 @@ const simpleDetailedRequests = [
   "Create a simple todo app\nUse React.",
   "Create a simple todo app; React is fine.",
   "Create a simple todo app, React is fine.",
-  "Create a simple todo app and make it responsive.",
+  "Create a simple todo app with React and TypeScript.",
   "Research the best way to create a system with AI\nKeep the answer concise.",
 ];
 
