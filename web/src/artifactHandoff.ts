@@ -52,6 +52,11 @@ function summaryText(artifact: ArtifactHandoffInput, durableLocation: string | n
   return name ? compactSummary(`Chef produced ${name}.`) : null;
 }
 
+export function canRevealArtifact(artifact: ArtifactHandoffInput): boolean {
+  return artifact.uri.startsWith("file:")
+    || firstText(artifact.metadata, ["resultLocation", "path", "location"]) !== null;
+}
+
 /**
  * Project result metadata is optional, so Simple Mode degrades gracefully while
  * still exposing a named durable result and location when richer handoff data
