@@ -16,6 +16,7 @@ const simpleExplanations = [
   "How does React share state across components?",
   "Can React render multiple roots?",
   "What is parallel rendering?",
+  "Should I update auth across multiple packages?",
 ];
 
 for (const goal of simpleExplanations) {
@@ -65,6 +66,9 @@ const scopedComplexRequests = [
   "Update auth across multiple packages.",
   "Research multiple providers for deployment.",
   "Create tests in parallel.",
+  "Can you update auth across multiple packages?",
+  "Could you create tests in parallel?",
+  "Please, would you update auth across multiple packages?",
 ];
 
 for (const goal of scopedComplexRequests) {
