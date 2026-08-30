@@ -11,6 +11,7 @@ import type {
   Plan,
   PlanProposalContext,
   PlanTaskOutcome,
+  RuntimeEvent,
   WorkspaceId,
 } from "../src/core/types.ts";
 import { createChef, type ChefRuntime } from "../src/main.ts";
@@ -149,6 +150,34 @@ try {
     "normal Mission completion must durably expose verification before Done",
   );
 
+  // A user interruption that arrives exactly when verification becomes durable
+  // must own the Mission. The stale completion path must not overwrite it.
+  let interruptMissionId: string | undefined;
+  let pauseTriggered = false;
+  let pausePromise: Promise<unknown> | undefined;
+  const unsubscribe = chef.subscribeEvents((event: RuntimeEvent) => {
+    const payload = event.payload as { missionId?: string; goal?: string; status?: string };
+    if (event.type === "mission.created" && payload.goal === "Create a simple todo app interrupted during verification") {
+      interruptMissionId = payload.missionId;
+    }
+    if (!pauseTriggered && event.type === "mission.status" && payload.missionId === interruptMissionId && payload.status === "verifying") {
+      pauseTriggered = true;
+      pausePromise = chef.pauseMission(interruptMissionId!);
+    }
+  });
+  const interruptedResult = await chef.sendUserMessage("Create a simple todo app interrupted during verification");
+  await pausePromise;
+  unsubscribe();
+  assert.equal(pauseTriggered, true, "test must interrupt the Mission at the durable verifying transition");
+  assert.equal(interruptedResult.ok, false, "stale completion must report interruption instead of success");
+  assert.ok(interruptMissionId);
+  assert.equal(chef.repository.getMission(interruptMissionId!)?.status, "paused");
+  assert.deepEqual(
+    statusSequence(chef, interruptMissionId!),
+    ["active", "verifying", "paused"],
+    "pause during verification must remain authoritative and never be overwritten by completed",
+  );
+
   // Resume must keep the same lifecycle contract for the fresh attempt rather
   // than jumping directly from active to completed.
   harness.autoExit = false;
@@ -202,7 +231,7 @@ try {
     "replacement attempt must own verification through completion",
   );
 
-  console.log("mission-verification-lifecycle: ok — verification is durable across normal, resume, and redirect paths");
+  console.log("mission-verification-lifecycle: ok — verification is durable and interruption-safe across normal, pause, resume, and redirect paths");
 } finally {
   try { await chef.close(); } catch { /* already closed */ }
   await rm(dir, { recursive: true, force: true });
