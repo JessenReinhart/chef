@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { loadSelectedThreadId, SELECTED_THREAD_EVENT } from "./threadApi";
-import { artifactHandoff } from "./artifactHandoff";
+import { artifactHandoff, canRevealArtifact, isFileUriArtifact } from "./artifactHandoff";
 import { missionResultHandoffProjection } from "./artifactProjection";
 import { copyRunCommand, createSingleFlightArtifactRevealer } from "./resultActions";
 import { selectLivingWorkspaceMission } from "./missionActivityProjection";
@@ -150,7 +150,7 @@ export function HomeMissionArtifacts() {
                 const handoff = artifactHandoff(artifact);
                 const copyState = runCopyState[artifact.id];
                 const reveal = revealState[artifact.id];
-                const fileBacked = artifact.uri.startsWith("file:");
+                const revealable = canRevealArtifact(artifact);
                 return (
                   <article key={`${artifact.id}:${artifact.version}`} className="rounded-xl border border-white/[0.07] bg-black/20 p-3">
                     <div className="flex items-start justify-between gap-3">
@@ -158,7 +158,7 @@ export function HomeMissionArtifacts() {
                         <div className="truncate text-xs font-medium text-zinc-200" title={artifact.name}>{artifact.name}</div>
                         <div className="mt-1 text-[10px] capitalize text-zinc-600">{artifact.type}</div>
                       </div>
-                      {fileBacked && (
+                      {revealable && (
                         <div className="flex shrink-0 items-center gap-1.5">
                           <button
                             type="button"
@@ -172,13 +172,15 @@ export function HomeMissionArtifacts() {
                                 ? "Opened folder"
                                 : "Show in folder"}
                           </button>
-                          <a
-                            href={`/api/artifacts/${encodeURIComponent(artifact.id)}/download`}
-                            download
-                            className="rounded-lg border border-white/10 px-2.5 py-1 text-[10px] font-medium text-zinc-400 transition hover:border-white/20 hover:text-zinc-100"
-                          >
-                            Save copy
-                          </a>
+                          {isFileUriArtifact(artifact) && (
+                            <a
+                              href={`/api/artifacts/${encodeURIComponent(artifact.id)}/download`}
+                              download
+                              className="rounded-lg border border-white/10 px-2.5 py-1 text-[10px] font-medium text-zinc-400 transition hover:border-white/20 hover:text-zinc-100"
+                            >
+                              Save copy
+                            </a>
+                          )}
                         </div>
                       )}
                     </div>

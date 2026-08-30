@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { createReadStream } from "node:fs";
 import { realpath, stat } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { dirname, isAbsolute, relative, sep, win32 } from "node:path";
+import { dirname, isAbsolute, relative, resolve, sep, win32 } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
@@ -42,35 +42,61 @@ function isWithinRoot(rootPath: string, candidatePath: string): boolean {
   return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
 }
 
+function metadataLocation(metadata: Record<string, unknown>): string | null {
+  for (const key of ["resultLocation", "path", "location"]) {
+    const value = metadata[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return null;
+}
+
+function hasFileScheme(value: string): boolean {
+  return /^file:/i.test(value);
+}
+
+function fileUriPath(value: string): string | null {
+  try {
+    const url = new URL(value);
+    return url.protocol === "file:" ? fileURLToPath(url) : null;
+  } catch {
+    return null;
+  }
+}
+
+function artifactPathCandidate(runtime: ChefRuntime, artifact: { uri: string; metadata: Record<string, unknown> }): string {
+  const uriPath = fileUriPath(artifact.uri);
+  if (uriPath) return uriPath;
+
+  const persistedLocation = metadataLocation(artifact.metadata);
+  if (!persistedLocation) throw new ArtifactLocationError(409, "artifact is not backed by a local file");
+
+  const isWindowsDrivePath = /^[A-Za-z]:[\\/]/.test(persistedLocation);
+  const hasUriScheme = /^[A-Za-z][A-Za-z0-9+.-]*:/.test(persistedLocation);
+  if (hasUriScheme && !hasFileScheme(persistedLocation) && !isWindowsDrivePath) {
+    throw new ArtifactLocationError(409, "artifact location is not a local file");
+  }
+
+  const persistedFileUriPath = hasFileScheme(persistedLocation) ? fileUriPath(persistedLocation) : null;
+  if (hasFileScheme(persistedLocation) && !persistedFileUriPath) {
+    throw new ArtifactLocationError(409, "artifact has an invalid file URI");
+  }
+  const path = persistedFileUriPath ?? persistedLocation;
+  return isAbsolute(path) ? path : resolve(runtime.projectDir, path);
+}
+
 async function resolveArtifactLocation(runtime: ChefRuntime, artifactId: string) {
   const artifact = runtime.repository.getArtifact(artifactId);
   if (!artifact || artifact.workspaceId !== runtime.workspaceId) {
     throw new ArtifactLocationError(404, "artifact not found");
   }
 
-  let artifactUrl: URL;
-  try {
-    artifactUrl = new URL(artifact.uri);
-  } catch {
-    throw new ArtifactLocationError(409, "artifact is not backed by a local file");
-  }
-  if (artifactUrl.protocol !== "file:") {
-    throw new ArtifactLocationError(409, "artifact is not backed by a local file");
-  }
-
-  let uriPath: string;
-  try {
-    uriPath = fileURLToPath(artifactUrl);
-  } catch {
-    throw new ArtifactLocationError(409, "artifact has an invalid file URI");
-  }
-
   let projectRoot: string;
   let filePath: string;
   try {
     projectRoot = await realpath(runtime.projectDir);
-    filePath = await realpath(uriPath);
+    filePath = await realpath(artifactPathCandidate(runtime, artifact));
   } catch (error) {
+    if (error instanceof ArtifactLocationError) throw error;
     const code = error && typeof error === "object" && "code" in error ? String(error.code) : "";
     if (code === "ENOENT") throw new ArtifactLocationError(404, "artifact file not found");
     throw error;
@@ -150,8 +176,9 @@ async function sendArtifactDownload(runtime: ChefRuntime, artifactId: string, re
  * explicit local reveal action for project-contained file-backed results.
  *
  * The reveal endpoint accepts only a durable artifact id. It resolves and
- * realpaths the stored URI server-side before invoking a shell-free OS opener,
- * so browser input can never choose an arbitrary filesystem path or command.
+ * realpaths the stored URI or persisted result location server-side before
+ * invoking a shell-free OS opener, so browser input can never choose an
+ * arbitrary filesystem path or command.
  */
 export function createArtifactServer(runtime: ChefRuntime, baseServer: Server, options: ArtifactServerOptions = {}): Server {
   const baseHandler = baseServer.listeners("request")[0] as RequestHandler | undefined;
