@@ -14,7 +14,8 @@ const INFORMATION_ACTION = /\b(research|explain|summari[sz]e)\b/i;
 const SIMPLE_INTENT_REQUEST = /\b(i\s+(?:need|want|would like)|please\s+(?:give|make|build|create)|can you\s+(?:make|build|create|give me))\b/i;
 const EXPLANATORY_QUESTION = /^(?:please[\s,]+)?(?:(?:what\s+(?:is|are|does)|how\s+(?:does|do|is|are|can)|why\s+(?:does|do|is|are)|tell\s+me\s+about)|(?:is|are|can|could|should|would|will|do|does|did|has|have)\b)/i;
 const EXECUTABLE_REQUEST_QUESTION = /^(?:please[\s,]+)?(?:can|could|would|will)\s+you\b/i;
-const EXECUTABLE_STAGE_ACTION = "create|build|make|implement|add|fix|update|change|rename|remove|write|draft|generate|test|verify|document|prepare|produce";
+const BOUNDED_REQUEST_QUESTION = /^(?:please[\s,]+)?(?:can|could|would|will)\s+you\s+(?:please\s+)?(?:create|build|make|implement|add|fix|update|change|rename|remove|write|draft|generate|research|explain|summari[sz]e)\b/i;
+const EXECUTABLE_STAGE_ACTION = "create|build|make|implement|add|fix|update|change|rename|remove|write|draft|generate|test|verify|document|prepare|produce|refactor|deploy|redesign|reorganize";
 const COMPLEXITY_MARKER = new RegExp(`\\b(compare|comparison|difference(?:s)?\\s+between|versus|vs\\.?|pros\\s+and\\s+cons|evaluate|analy[sz]e|audit|investigate|architecture|architect|migrate|migration|benchmark|multi[- ]agent)\\b|\\b(and then|then verify|then test|after that)\\b|\\b(and|then)\\s+(${EXECUTABLE_STAGE_ACTION})\\b`, "i");
 const SCOPE_COMPLEXITY_MARKER = /\b(parallel|multiple|across)\b/i;
 const MULTI_STAGE_SEPARATOR = new RegExp(`(?:[;,]|\\n)\\s*(?:(?:then|and)\\s+)?(?:${EXECUTABLE_STAGE_ACTION})\\b`, "i");
@@ -66,10 +67,17 @@ export function shouldUseSingleWorkerFastPath(goal: string): boolean {
     && (!EXPLANATORY_QUESTION.test(normalized) || EXECUTABLE_REQUEST_QUESTION.test(normalized))
   ) return false;
 
-  return DIRECT_SINGLE_STAGE_ACTION.test(normalized)
+  const hasBoundedIntent = DIRECT_SINGLE_STAGE_ACTION.test(normalized)
     || INFORMATION_ACTION.test(normalized)
-    || SIMPLE_INTENT_REQUEST.test(normalized)
-    || EXPLANATORY_QUESTION.test(normalized);
+    || SIMPLE_INTENT_REQUEST.test(normalized);
+
+  // "Can you ...?" is syntactically a question but semantically an execution
+  // request. Its first requested operation must itself be inside the bounded
+  // vocabulary; a later word such as "explain" must not launder an unbounded
+  // leading operation such as "refactor" into the single-worker shortcut.
+  if (EXECUTABLE_REQUEST_QUESTION.test(normalized)) return BOUNDED_REQUEST_QUESTION.test(normalized);
+
+  return hasBoundedIntent || EXPLANATORY_QUESTION.test(normalized);
 }
 
 export class SingleWorkerFastPathDecisionProvider implements DecisionProvider {

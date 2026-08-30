@@ -32,6 +32,9 @@ const simpleDetailedRequests = [
   "Create a simple todo app; React is fine.",
   "Create a simple todo app, React is fine.",
   "Create a simple todo app with React and TypeScript.",
+  "Can you create a simple todo app?",
+  "Can you please create a simple todo app?",
+  "Could you fix this button?",
   "Research the best way to create a system with AI\nKeep the answer concise.",
 ];
 
@@ -79,6 +82,24 @@ for (const goal of scopedComplexRequests) {
   );
 }
 
+const unrecognizedExecutableQuestions = [
+  "Can you refactor the authentication flow?",
+  "Could you deploy this app to production?",
+  "Would you redesign the settings experience?",
+  "Please, will you reorganize this repository?",
+  "Can you refactor auth and explain it?",
+  "Could you deploy this app and summarize the result?",
+  "Would you redesign settings and create a short note?",
+];
+
+for (const goal of unrecognizedExecutableQuestions) {
+  assert.equal(
+    shouldUseSingleWorkerFastPath(goal),
+    false,
+    `${goal} should retain planner routing because request-question grammar or a later bounded verb must not widen the bounded fast path`,
+  );
+}
+
 const separatedMultiStageRequests = [
   "Create a todo app\nThen test it.",
   "Create a todo app\nand test it.",
@@ -92,6 +113,10 @@ const separatedMultiStageRequests = [
   "Create a todo app and add end-to-end tests.",
   "Fix this bug then generate a regression report.",
   "Rename the API and document the migration.",
+  "Can you create a todo app and deploy it?",
+  "Create the settings page, then redesign the navigation.",
+  "Fix the auth bug; refactor the session flow.",
+  "Update this component and reorganize the module.",
 ];
 
 for (const goal of separatedMultiStageRequests) {
