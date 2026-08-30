@@ -33,6 +33,7 @@ const simpleDetailedRequests = [
   "Create a simple todo app, React is fine.",
   "Create a simple todo app with React and TypeScript.",
   "Can you create a simple todo app?",
+  "Can you please create a simple todo app?",
   "Could you fix this button?",
   "Research the best way to create a system with AI\nKeep the answer concise.",
 ];
@@ -86,13 +87,16 @@ const unrecognizedExecutableQuestions = [
   "Could you deploy this app to production?",
   "Would you redesign the settings experience?",
   "Please, will you reorganize this repository?",
+  "Can you refactor auth and explain it?",
+  "Could you deploy this app and summarize the result?",
+  "Would you redesign settings and create a short note?",
 ];
 
 for (const goal of unrecognizedExecutableQuestions) {
   assert.equal(
     shouldUseSingleWorkerFastPath(goal),
     false,
-    `${goal} should retain planner routing because request-question grammar alone must not widen the bounded fast path`,
+    `${goal} should retain planner routing because request-question grammar or a later bounded verb must not widen the bounded fast path`,
   );
 }
 
