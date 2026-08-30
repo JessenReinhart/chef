@@ -24,8 +24,12 @@ function compactSummary(value: string): string {
   return normalized.length <= 140 ? normalized : `${normalized.slice(0, 137)}…`;
 }
 
+function hasFileScheme(value: string): boolean {
+  return /^file:/i.test(value);
+}
+
 function fileUriLocation(uri: string): string | null {
-  if (!uri.startsWith("file:")) return null;
+  if (!hasFileScheme(uri)) return null;
   try {
     const url = new URL(uri);
     let pathname = decodeURIComponent(url.pathname);
@@ -53,13 +57,13 @@ function summaryText(artifact: ArtifactHandoffInput, durableLocation: string | n
 }
 
 function isLocalLocation(location: string): boolean {
-  if (location.startsWith("file:")) return true;
+  if (hasFileScheme(location)) return true;
   if (/^[A-Za-z]:[\\/]/.test(location)) return true;
   return !/^[A-Za-z][A-Za-z0-9+.-]*:/.test(location);
 }
 
 export function canRevealArtifact(artifact: ArtifactHandoffInput): boolean {
-  if (artifact.uri.startsWith("file:")) return true;
+  if (hasFileScheme(artifact.uri)) return true;
   const location = firstText(artifact.metadata, ["resultLocation", "path", "location"]);
   return location !== null && isLocalLocation(location);
 }
