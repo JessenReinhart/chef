@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-08-31
+
+- **Executable request-questions stay inside the right routing boundary (#279):** Chef still sends simple requests such as “Can you create a simple todo app?” straight to one worker, but broader operations such as refactoring, deploying, redesigning, or reorganizing now stay on the planner path even when a later clause contains a simple word like “explain” or “create”. Multi-step combinations such as “create this and deploy it” also keep coordinated planning.
+
 ## 2026-08-30
 
 - **Multi-step and genuinely scoped requests stay on the planner path (#278):** Chef now keeps follow-up work such as “Create a todo app and add end-to-end tests” on the planner route, while ordinary explanatory questions that merely mention words such as “multiple”, “parallel”, or “across” can still use the faster single-worker path.
