@@ -2,6 +2,7 @@
 
 ## 2026-08-30
 
+- **Mission verification is now a real durable lifecycle stage (#273):** After all authoritative work is complete, Chef now persists Verifying before final completion. Pause, cancel, redirect, and stale completion paths can no longer overwrite a newer authoritative Mission state during that handoff.
 - **Simple Mode shows verification as soon as durable work is complete (#272):** When every authoritative task has finished but the Mission snapshot has not caught up yet, Chef now shows a consistent Verifying state instead of briefly falling back to Working. Planning is also shown explicitly, and stale activity from a superseded redirect/replan attempt no longer replaces the current attempt’s progress.
 
 ## 2026-08-29
