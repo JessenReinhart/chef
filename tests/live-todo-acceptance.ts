@@ -11,6 +11,7 @@ import { createChef, type ChefRuntime } from "../src/main.ts";
 import { applyOrchestratorProviderEnv } from "../src/server/orchestrator-config.ts";
 import { createHttpServer } from "../src/server/http-server.ts";
 import { createThreadServer } from "../src/server/thread-http.ts";
+import { LIVE_TODO_REQUEST } from "./fixtures/live-todo-request.ts";
 
 const DEFAULT_TIMEOUT_MS = 10 * 60_000;
 const DEFAULT_STARTUP_BUDGET_MS = 5_000;
@@ -184,11 +185,10 @@ async function main(): Promise<void> {
     const threadId = createdThread.data?.id;
     assert.ok(threadId, "Created Thread must expose an id");
 
-    const request = "Create a todo app in this selected project using only Node.js built-ins and browser HTML/CSS/JavaScript, with package.json npm start, PORT support, and add/complete/remove controls. Verify it starts and summarize how to run it.";
     const response = await fetch(`${origin}/api/threads/${encodeURIComponent(threadId)}/chat`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ message: request }),
+      body: JSON.stringify({ message: LIVE_TODO_REQUEST }),
       signal: AbortSignal.timeout(Math.min(timeoutMs, 10_000)),
     });
     const body = await response.json() as { ok?: boolean; data?: { ok?: boolean; accepted?: boolean; missionId?: string; threadId?: string }; error?: string };
