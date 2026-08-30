@@ -157,13 +157,12 @@ function missionActivityFallback(mission: UiMission): string {
 
 function projectedMissionStatus(
   mission: UiMission,
-  ownedTaskIds: Set<string>,
   tasksById: Map<string, UiTask>,
 ): UiMission["status"] {
-  if (mission.status !== "active" || ownedTaskIds.size === 0) return mission.status;
-  const ownedTasks = [...ownedTaskIds].map((taskId) => tasksById.get(taskId));
-  if (ownedTasks.some((task) => task === undefined)) return mission.status;
-  return ownedTasks.every((task) => task?.status === "completed") ? "verifying" : mission.status;
+  if (mission.status !== "active" || mission.taskIds.length === 0) return mission.status;
+  const missionTasks = mission.taskIds.map((taskId) => tasksById.get(taskId));
+  if (missionTasks.some((task) => task === undefined)) return mission.status;
+  return missionTasks.every((task) => task?.status === "completed") ? "verifying" : mission.status;
 }
 
 export function projectMissionActivity(
@@ -177,7 +176,7 @@ export function projectMissionActivity(
   const tasksById = new Map(snapshot.tasks.map((task) => [task.id, task]));
   const harnessNames = new Map(harnesses.map((harness) => [harness.id, harness.name]));
   const scoped = scopeMissionActivity(snapshot.events, mission);
-  const visibleStatus = projectedMissionStatus(mission, scoped.ownedTaskIds, tasksById);
+  const visibleStatus = projectedMissionStatus(mission, tasksById);
   const visibleMission = visibleStatus === mission.status ? mission : { ...mission, status: visibleStatus };
   const workers = [...scoped.ownedTaskIds]
     .map((id) => tasksById.get(id))
