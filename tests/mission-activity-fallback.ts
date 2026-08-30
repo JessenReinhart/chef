@@ -147,7 +147,7 @@ assert.ok(convergingVerificationProjection, "completed task evidence should rema
 assert.equal(
   convergingVerificationProjection.missionState,
   "Verifying",
-  "an active Mission whose owned work is durably completed must project the real verification phase instead of stale Working",
+  "an active Mission whose authoritative owned work is durably completed must project the real verification phase instead of stale Working",
 );
 assert.equal(
   convergingVerificationProjection.fallback,
@@ -158,6 +158,42 @@ assert.equal(
   convergingVerificationProjection.feed[0],
   "Chef is still verifying. Last runtime activity was 20 seconds ago.",
   "a stale-silence heartbeat must preserve inferred verification rather than rewriting it back to Working",
+);
+
+const secondPendingTask: UiTask = {
+  ...activeTask,
+  id: "task-check",
+  title: "Check the todo app",
+  status: "pending",
+};
+const partiallyCompletedMission: UiMission = {
+  ...activeMission,
+  id: "mission-partially-complete",
+  taskIds: [completedTask.id, secondPendingTask.id],
+};
+const partialActivity = completedActivity.map((event) => ({
+  ...event,
+  source: event.source.type === "mission" ? { ...event.source, id: partiallyCompletedMission.id } : event.source,
+  payload: event.payload && typeof event.payload === "object"
+    ? { ...(event.payload as Record<string, unknown>), missionId: partiallyCompletedMission.id }
+    : event.payload,
+  correlationId: partiallyCompletedMission.id,
+}));
+const partialProjection = projectMissionActivity(
+  { missions: [partiallyCompletedMission], tasks: [completedTask, secondPendingTask], events: partialActivity },
+  [],
+  30_000,
+);
+assert.ok(partialProjection, "partial Mission progress should remain visible even before every task emits activity");
+assert.equal(
+  partialProjection.missionState,
+  "Working",
+  "one completed task must not imply verification while another authoritative Mission task is still pending and has emitted no event",
+);
+assert.equal(
+  partialProjection.feed[0],
+  "Chef is still working. Last runtime activity was 20 seconds ago.",
+  "heartbeat wording must remain Working until every authoritative Mission task is durably completed",
 );
 
 const verifyingMission: UiMission = {
@@ -200,4 +236,4 @@ assert.equal(
   "the promoted heartbeat must agree with the authoritative current Mission stage even when older events only imply working",
 );
 
-console.log("mission-activity-fallback: ok — attention, durable verification evidence, and stale-silence heartbeat states remain explicit and stage-consistent in Simple Mode");
+console.log("mission-activity-fallback: ok — attention, authoritative verification evidence, and stale-silence heartbeat states remain explicit and stage-consistent in Simple Mode");
