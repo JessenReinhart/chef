@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { GenericTerminalHarness } from "../src/harness/generic.ts";
 import { createChef } from "../src/main.ts";
+import { artifactHandoff, type LivingArtifact } from "../web/src/artifactProjection.ts";
 import type {
   AgentId,
   Decision,
@@ -218,22 +219,39 @@ function assertRoutingModeIsDurable(events: readonly RuntimeEvent[]): void {
   assert.equal(eventRoutingMode(planEvent), "single-worker", "golden path must retain the chosen routing mode");
 }
 
-function assertObservableMissionLifecycle(events: readonly RuntimeEvent[]): void {
+function assertObservableMissionLifecycle(events: readonly RuntimeEvent[], taskIds: readonly string[]): void {
   const missionCreated = events.findIndex((event) =>
     event.type === "mission.created" && eventStatus(event) === "planning"
   );
+  assert.ok(missionCreated >= 0, "golden path must visibly enter planning");
+
+  const missionId = events[missionCreated].source.id;
+  const taskIdSet = new Set(taskIds);
   const missionActive = events.findIndex((event) =>
-    event.type === "mission.status" && eventStatus(event) === "active"
+    event.source.id === missionId && event.type === "mission.status" && eventStatus(event) === "active"
   );
-  const workerActivity = events.findIndex((event) => event.type.startsWith("task."));
+  const workerActivity = events.findIndex((event) =>
+    event.taskId !== undefined && taskIdSet.has(event.taskId) && event.type.startsWith("task.")
+  );
+  const missionVerifying = events.findIndex((event) =>
+    event.source.id === missionId && event.type === "mission.status" && eventStatus(event) === "verifying"
+  );
   const missionCompleted = events.findIndex((event) =>
-    event.type === "mission.status" && eventStatus(event) === "completed"
+    event.source.id === missionId && event.type === "mission.status" && eventStatus(event) === "completed"
   );
 
-  assert.ok(missionCreated >= 0, "golden path must visibly enter planning");
   assert.ok(missionActive > missionCreated, "golden path must visibly leave planning before worker activity");
-  assert.ok(workerActivity > missionActive, "golden path must expose worker activity after Mission activation");
-  assert.ok(missionCompleted > workerActivity, "golden path must visibly complete only after worker activity");
+  assert.ok(workerActivity > missionActive, "golden path must expose authoritative worker activity after Mission activation");
+  assert.ok(missionVerifying > workerActivity, "golden path must visibly enter verification after worker activity");
+  assert.ok(missionCompleted > missionVerifying, "golden path must visibly complete only after verification");
+}
+
+function resultHandoff(artifact: LivingArtifact, appPath: string): ReturnType<typeof artifactHandoff> {
+  const handoff = artifactHandoff(artifact);
+  assert.equal(handoff.summary, `Created runnable todo app at ${appPath}`, "Simple Mode handoff must explain what changed");
+  assert.equal(handoff.runCommand, `${process.execPath} ${appPath}`, "Simple Mode handoff must explain how to run the generated result");
+  assert.equal(handoff.verifiedBy, "golden-path", "Simple Mode handoff must expose the worker-supplied verification evidence");
+  return handoff;
 }
 
 /**
@@ -267,7 +285,7 @@ async function main(): Promise<void> {
     assert.equal(result.ok, true, `orchestrator failed: ${result.report}`);
     assert.equal(result.taskIds.length, 1, "simple todo acceptance task should execute as one worker task");
     assert.match(result.report, /todo app/i, "completion report must identify the requested result");
-    assertObservableMissionLifecycle(liveEvents);
+    assertObservableMissionLifecycle(liveEvents, result.taskIds);
     assertRoutingModeIsDurable(liveEvents);
 
     const snapshot = await chef.inspectState();
@@ -279,11 +297,12 @@ async function main(): Promise<void> {
     assert.equal(snapshot.plans[0].status, "completed", "the executed plan must complete durably");
     assert.deepEqual(snapshot.plans[0].taskIds, result.taskIds, "plan must retain task lineage");
     assert.ok(snapshot.events.some((event) => event.type.startsWith("task.")), "task lifecycle events must be recorded");
-    assertObservableMissionLifecycle(snapshot.events);
+    assertObservableMissionLifecycle(snapshot.events, result.taskIds);
     assertRoutingModeIsDurable(snapshot.events);
     assert.equal(snapshot.artifacts.length, 1, "worker must produce one durable result artifact");
     assert.equal(snapshot.artifacts[0].name, "todo-app", "artifact must make the generated result discoverable");
     assert.ok(snapshot.artifacts[0].uri.includes(TODO_APP), "artifact URI must point at the generated app");
+    const handoff = resultHandoff(snapshot.artifacts[0] as LivingArtifact, appPath);
     assert.ok(snapshot.sessions.some((session) => session.status === "completed"), "real PTY session must exit successfully");
     assert.ok(snapshot.sessions.every((session) => session.command.length > 0), "session command must be recorded");
     assert.ok(snapshot.sessions.every((session) => session.status !== "running"), "no session may remain stuck after completion");
@@ -304,9 +323,10 @@ async function main(): Promise<void> {
     const restored = await reopened.inspectState();
     assert.equal(restored.tasks.length, snapshot.tasks.length, "task history must survive reopen");
     assert.equal(restored.events.length, snapshot.events.length, "event history must survive reopen");
-    assertObservableMissionLifecycle(restored.events);
+    assertObservableMissionLifecycle(restored.events, result.taskIds);
     assertRoutingModeIsDurable(restored.events);
     assert.equal(restored.artifacts.length, snapshot.artifacts.length, "result location must survive reopen");
+    assert.deepEqual(resultHandoff(restored.artifacts[0] as LivingArtifact, appPath), handoff, "result summary, run command, and verification handoff must survive reopen");
     assert.equal(restored.sessions.length, snapshot.sessions.length, "session history must survive reopen");
     assert.equal(restored.plans.length, snapshot.plans.length, "plan history must survive reopen");
 
