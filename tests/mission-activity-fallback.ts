@@ -213,6 +213,71 @@ assert.equal(
   "heartbeat wording must remain Working until every authoritative Mission task is durably completed",
 );
 
+const redirectedMission: UiMission = {
+  ...activeMission,
+  id: "mission-redirected",
+  taskIds: ["task-current"],
+};
+const obsoleteTask: UiTask = {
+  ...activeTask,
+  id: "task-obsolete",
+  title: "Build the obsolete approach",
+  status: "cancelled",
+};
+const currentTask: UiTask = {
+  ...activeTask,
+  id: "task-current",
+  title: "Build the redirected todo app",
+  status: "running",
+};
+const redirectedActivity: UiRuntimeEvent[] = [
+  {
+    id: "evt-current-task-running",
+    seq: 20,
+    timestamp: 28_000,
+    source: { type: "task", id: currentTask.id },
+    type: "task.running",
+    payload: { missionId: redirectedMission.id, taskId: currentTask.id },
+    taskId: currentTask.id,
+    correlationId: redirectedMission.id,
+  },
+  {
+    id: "evt-obsolete-task-finished-late",
+    seq: 21,
+    timestamp: 29_000,
+    source: { type: "task", id: obsoleteTask.id },
+    type: "task.completed",
+    payload: { missionId: redirectedMission.id, taskId: obsoleteTask.id },
+    taskId: obsoleteTask.id,
+    correlationId: redirectedMission.id,
+  },
+];
+const redirectedProjection = projectMissionActivity(
+  { missions: [redirectedMission], tasks: [obsoleteTask, currentTask], events: redirectedActivity },
+  [],
+  30_000,
+);
+assert.ok(redirectedProjection, "a redirected Mission should keep showing its current attempt");
+assert.deepEqual(
+  redirectedProjection.taskIds,
+  [currentTask.id],
+  "once a Mission has authoritative taskIds, obsolete task ids from older correlated attempts must not be re-owned",
+);
+assert.deepEqual(
+  redirectedProjection.workers.map((worker) => worker.id),
+  [currentTask.id],
+  "Simple Mode must not show workers from the superseded attempt after redirect/replan",
+);
+assert.ok(
+  redirectedProjection.feed.includes("Chef started Build the redirected todo app."),
+  "current-attempt worker activity must remain visible after redirect/replan",
+);
+assert.equal(
+  redirectedProjection.feed.some((line) => line.includes("obsolete approach")),
+  false,
+  "a late event from a superseded task must not overwrite the current Mission activity feed",
+);
+
 const verifyingMission: UiMission = {
   ...activeMission,
   id: "mission-verifying-silent",
@@ -253,4 +318,4 @@ assert.equal(
   "the promoted heartbeat must agree with the authoritative current Mission stage even when older events only imply working",
 );
 
-console.log("mission-activity-fallback: ok — planning, attention, authoritative verification evidence, and stale-silence heartbeat states remain explicit and stage-consistent in Simple Mode");
+console.log("mission-activity-fallback: ok — planning, attention, current-attempt continuity, authoritative verification evidence, and stale-silence heartbeat states remain explicit and stage-consistent in Simple Mode");
