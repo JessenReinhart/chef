@@ -18,6 +18,18 @@ function projectEmptyActivity(status: UiMission["status"]) {
   return projection;
 }
 
+const planning = projectEmptyActivity("planning");
+assert.equal(
+  planning.missionState,
+  "Planning",
+  "a real planning Mission must not collapse into the generic Working state before execution begins",
+);
+assert.equal(
+  planning.fallback,
+  "Chef is deciding who and what this work needs.",
+  "planning without newer runtime activity must still explain what Chef is doing",
+);
+
 assert.equal(
   projectEmptyActivity("waiting_for_approval").fallback,
   "Chef needs your approval before work can continue.",
@@ -241,4 +253,4 @@ assert.equal(
   "the promoted heartbeat must agree with the authoritative current Mission stage even when older events only imply working",
 );
 
-console.log("mission-activity-fallback: ok — attention, authoritative verification evidence, and stale-silence heartbeat states remain explicit and stage-consistent in Simple Mode");
+console.log("mission-activity-fallback: ok — planning, attention, authoritative verification evidence, and stale-silence heartbeat states remain explicit and stage-consistent in Simple Mode");
