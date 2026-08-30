@@ -13,6 +13,10 @@ const simpleExplanations = [
   "Can React handle this?",
   "Please, is this normal?",
   "Please should I use Vite?",
+  "How does React share state across components?",
+  "Can React render multiple roots?",
+  "What is parallel rendering?",
+  "Should I update auth across multiple packages?",
 ];
 
 for (const goal of simpleExplanations) {
@@ -27,6 +31,7 @@ const simpleDetailedRequests = [
   "Create a simple todo app\nUse React.",
   "Create a simple todo app; React is fine.",
   "Create a simple todo app, React is fine.",
+  "Create a simple todo app with React and TypeScript.",
   "Research the best way to create a system with AI\nKeep the answer concise.",
 ];
 
@@ -57,6 +62,23 @@ for (const goal of comparisonQuestions) {
   );
 }
 
+const scopedComplexRequests = [
+  "Update auth across multiple packages.",
+  "Research multiple providers for deployment.",
+  "Create tests in parallel.",
+  "Can you update auth across multiple packages?",
+  "Could you create tests in parallel?",
+  "Please, would you update auth across multiple packages?",
+];
+
+for (const goal of scopedComplexRequests) {
+  assert.equal(
+    shouldUseSingleWorkerFastPath(goal),
+    false,
+    `${goal} should retain planner routing because scope words describe real work rather than an informational question`,
+  );
+}
+
 const separatedMultiStageRequests = [
   "Create a todo app\nThen test it.",
   "Create a todo app\nand test it.",
@@ -67,13 +89,16 @@ const separatedMultiStageRequests = [
   "Research the options\nPrepare a migration plan.",
   "Should I use Vite and test it?",
   "Can React handle this and verify it?",
+  "Create a todo app and add end-to-end tests.",
+  "Fix this bug then generate a regression report.",
+  "Rename the API and document the migration.",
 ];
 
 for (const goal of separatedMultiStageRequests) {
   assert.equal(
     shouldUseSingleWorkerFastPath(goal),
     false,
-    `${goal} should retain planner routing because the separator introduces another executable stage`,
+    `${goal} should retain planner routing because the request introduces another executable stage`,
   );
 }
 
