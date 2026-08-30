@@ -67,6 +67,17 @@ try {
   });
   assert.equal(invalid.status, 400);
 
+  const selectedCurrent = await fetch(`${origin}/api/project/open`, {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: current }),
+  });
+  assert.equal(selectedCurrent.status, 200, "selecting the active project must clearly succeed without a relaunch");
+  const selectedCurrentBody = await selectedCurrent.json() as { ok?: boolean; data?: { path?: string; current?: boolean } };
+  assert.equal(selectedCurrentBody.ok, true);
+  assert.equal(selectedCurrentBody.data?.path, current);
+  assert.equal(selectedCurrentBody.data?.current, true, "project selection response must explicitly confirm the project is current");
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  assert.equal(opened, null, "selecting the already-active project must not trigger a runtime relaunch");
+
   const picked = await fetch(`${origin}/api/project/pick`, { method: "POST" });
   assert.equal(picked.status, 202);
   await new Promise((resolve) => setTimeout(resolve, 150));
