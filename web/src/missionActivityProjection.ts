@@ -234,7 +234,7 @@ export function projectMissionActivity(
   }
 
   return {
-    mission,
+    mission: visibleMission,
     taskIds: [...scoped.ownedTaskIds],
     missionState: missionActivityState(visibleMission),
     workers,
