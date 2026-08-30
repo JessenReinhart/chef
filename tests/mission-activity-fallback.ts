@@ -18,6 +18,18 @@ function projectEmptyActivity(status: UiMission["status"]) {
   return projection;
 }
 
+const planning = projectEmptyActivity("planning");
+assert.equal(
+  planning.missionState,
+  "Planning",
+  "a real planning Mission must not collapse into the generic Working state before execution begins",
+);
+assert.equal(
+  planning.fallback,
+  "Chef is deciding who and what this work needs.",
+  "planning without newer runtime activity must still explain what Chef is doing",
+);
+
 assert.equal(
   projectEmptyActivity("waiting_for_approval").fallback,
   "Chef needs your approval before work can continue.",
@@ -112,6 +124,160 @@ assert.ok(
   "promoting the heartbeat must still retain the newest concrete worker update",
 );
 
+const completedTask: UiTask = {
+  ...activeTask,
+  status: "completed",
+};
+const completedActivity: UiRuntimeEvent[] = [
+  ...olderActivity,
+  {
+    id: "evt-mission-active",
+    seq: 4,
+    timestamp: 10_000,
+    source: { type: "mission", id: activeMission.id },
+    type: "mission.status",
+    payload: { missionId: activeMission.id, status: "active" },
+    correlationId: activeMission.id,
+  },
+  {
+    id: "evt-task-completed",
+    seq: 5,
+    timestamp: 10_000,
+    source: { type: "task", id: completedTask.id },
+    type: "task.completed",
+    payload: { missionId: activeMission.id, taskId: completedTask.id, resultSummary: "Todo app created" },
+    taskId: completedTask.id,
+    correlationId: activeMission.id,
+  },
+];
+const convergingVerificationProjection = projectMissionActivity(
+  { missions: [activeMission], tasks: [completedTask], events: completedActivity },
+  [],
+  30_000,
+);
+assert.ok(convergingVerificationProjection, "completed task evidence should remain visible while Mission status catches up");
+assert.equal(
+  convergingVerificationProjection.mission.status,
+  "verifying",
+  "the projected Mission object must agree with the visible Verifying state so downstream Simple Mode consumers cannot regress to Active",
+);
+assert.equal(
+  convergingVerificationProjection.missionState,
+  "Verifying",
+  "an active Mission whose authoritative owned work is durably completed must project the real verification phase instead of stale Working",
+);
+assert.equal(
+  convergingVerificationProjection.fallback,
+  "Chef is verifying the completed work.",
+  "the fallback must agree with durable completed-task verification evidence while Mission status converges",
+);
+assert.equal(
+  convergingVerificationProjection.feed[0],
+  "Chef is still verifying. Last runtime activity was 20 seconds ago.",
+  "a stale-silence heartbeat must preserve inferred verification rather than rewriting it back to Working",
+);
+
+const secondPendingTask: UiTask = {
+  ...activeTask,
+  id: "task-check",
+  title: "Check the todo app",
+  status: "pending",
+};
+const partiallyCompletedMission: UiMission = {
+  ...activeMission,
+  id: "mission-partially-complete",
+  taskIds: [completedTask.id, secondPendingTask.id],
+};
+const partialActivity = completedActivity.map((event) => ({
+  ...event,
+  source: event.source.type === "mission" ? { ...event.source, id: partiallyCompletedMission.id } : event.source,
+  payload: event.payload && typeof event.payload === "object"
+    ? { ...(event.payload as Record<string, unknown>), missionId: partiallyCompletedMission.id }
+    : event.payload,
+  correlationId: partiallyCompletedMission.id,
+}));
+const partialProjection = projectMissionActivity(
+  { missions: [partiallyCompletedMission], tasks: [completedTask, secondPendingTask], events: partialActivity },
+  [],
+  30_000,
+);
+assert.ok(partialProjection, "partial Mission progress should remain visible even before every task emits activity");
+assert.equal(
+  partialProjection.missionState,
+  "Working",
+  "one completed task must not imply verification while another authoritative Mission task is still pending and has emitted no event",
+);
+assert.equal(
+  partialProjection.feed[0],
+  "Chef is still working. Last runtime activity was 20 seconds ago.",
+  "heartbeat wording must remain Working until every authoritative Mission task is durably completed",
+);
+
+const redirectedMission: UiMission = {
+  ...activeMission,
+  id: "mission-redirected",
+  taskIds: ["task-current"],
+};
+const obsoleteTask: UiTask = {
+  ...activeTask,
+  id: "task-obsolete",
+  title: "Build the obsolete approach",
+  status: "cancelled",
+};
+const currentTask: UiTask = {
+  ...activeTask,
+  id: "task-current",
+  title: "Build the redirected todo app",
+  status: "running",
+};
+const redirectedActivity: UiRuntimeEvent[] = [
+  {
+    id: "evt-current-task-running",
+    seq: 20,
+    timestamp: 28_000,
+    source: { type: "task", id: currentTask.id },
+    type: "task.running",
+    payload: { missionId: redirectedMission.id, taskId: currentTask.id },
+    taskId: currentTask.id,
+    correlationId: redirectedMission.id,
+  },
+  {
+    id: "evt-obsolete-task-finished-late",
+    seq: 21,
+    timestamp: 29_000,
+    source: { type: "task", id: obsoleteTask.id },
+    type: "task.completed",
+    payload: { missionId: redirectedMission.id, taskId: obsoleteTask.id },
+    taskId: obsoleteTask.id,
+    correlationId: redirectedMission.id,
+  },
+];
+const redirectedProjection = projectMissionActivity(
+  { missions: [redirectedMission], tasks: [obsoleteTask, currentTask], events: redirectedActivity },
+  [],
+  30_000,
+);
+assert.ok(redirectedProjection, "a redirected Mission should keep showing its current attempt");
+assert.deepEqual(
+  redirectedProjection.taskIds,
+  [currentTask.id],
+  "once a Mission has authoritative taskIds, obsolete task ids from older correlated attempts must not be re-owned",
+);
+assert.deepEqual(
+  redirectedProjection.workers.map((worker) => worker.id),
+  [currentTask.id],
+  "Simple Mode must not show workers from the superseded attempt after redirect/replan",
+);
+assert.ok(
+  redirectedProjection.feed.includes("Chef started Build the redirected todo app."),
+  "current-attempt worker activity must remain visible after redirect/replan",
+);
+assert.equal(
+  redirectedProjection.feed.some((line) => line.includes("obsolete approach")),
+  false,
+  "a late event from a superseded task must not overwrite the current Mission activity feed",
+);
+
 const verifyingMission: UiMission = {
   ...activeMission,
   id: "mission-verifying-silent",
@@ -152,4 +318,4 @@ assert.equal(
   "the promoted heartbeat must agree with the authoritative current Mission stage even when older events only imply working",
 );
 
-console.log("mission-activity-fallback: ok — attention, verification, and stale-silence heartbeat states remain explicit and stage-consistent in Simple Mode");
+console.log("mission-activity-fallback: ok — planning, attention, current-attempt continuity, authoritative verification evidence, and stale-silence heartbeat states remain explicit and stage-consistent in Simple Mode");

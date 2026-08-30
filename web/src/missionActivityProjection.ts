@@ -71,30 +71,44 @@ function directlyBelongsToMission(event: UiRuntimeEvent, missionId: string): boo
     || payloadString(payload, "missionId") === missionId;
 }
 
+function eventTaskIds(event: UiRuntimeEvent): string[] {
+  const payload = eventPayload(event);
+  return [...new Set([
+    ...(event.taskId ? [event.taskId] : []),
+    ...(payloadString(payload, "taskId") ? [payloadString(payload, "taskId")!] : []),
+    ...payloadStrings(payload, "taskIds"),
+  ])];
+}
+
 function scopeMissionActivity(events: UiRuntimeEvent[], mission: UiMission): {
   ownedTaskIds: Set<string>;
   events: UiRuntimeEvent[];
 } {
   const ownedTaskIds = new Set(mission.taskIds);
+  const hasAuthoritativeTaskIds = mission.taskIds.length > 0;
 
-  for (const event of events) {
-    if (!directlyBelongsToMission(event, mission.id)) continue;
-    const payload = eventPayload(event);
-    const taskId = payloadString(payload, "taskId");
-    if (taskId) ownedTaskIds.add(taskId);
-    for (const payloadTaskId of payloadStrings(payload, "taskIds")) ownedTaskIds.add(payloadTaskId);
+  // While planning, the Mission may not have persisted taskIds yet, so runtime
+  // events are the best available discovery source. Once taskIds exist they
+  // are authoritative for the current attempt. Redirect/replan keeps the same
+  // Mission id, so blindly re-adding older correlated task ids would mix stale
+  // worker activity into the new attempt.
+  if (!hasAuthoritativeTaskIds) {
+    for (const event of events) {
+      if (!directlyBelongsToMission(event, mission.id)) continue;
+      for (const taskId of eventTaskIds(event)) ownedTaskIds.add(taskId);
+    }
   }
 
   return {
     ownedTaskIds,
     events: events
       .filter((event) => {
+        const taskIds = eventTaskIds(event);
+        if (hasAuthoritativeTaskIds && taskIds.length > 0) {
+          return taskIds.some((taskId) => ownedTaskIds.has(taskId));
+        }
         if (directlyBelongsToMission(event, mission.id)) return true;
-        if (event.taskId && ownedTaskIds.has(event.taskId)) return true;
-        const payload = eventPayload(event);
-        const taskId = payloadString(payload, "taskId");
-        if (taskId && ownedTaskIds.has(taskId)) return true;
-        return payloadStrings(payload, "taskIds").some((payloadTaskId) => ownedTaskIds.has(payloadTaskId));
+        return taskIds.some((taskId) => ownedTaskIds.has(taskId));
       })
       .sort((a, b) => b.seq - a.seq),
   };
@@ -123,6 +137,7 @@ export function missionActivityState(mission: UiMission | null): string {
   if (mission.status === "failed" || mission.status === "blocked" || mission.status === "waiting_for_approval") return "Needs attention";
   if (mission.status === "cancelled") return "Stopped";
   if (mission.status === "paused") return "Paused";
+  if (mission.status === "planning") return "Planning";
   if (mission.status === "verifying") return "Verifying";
   return "Working";
 }
@@ -155,6 +170,16 @@ function missionActivityFallback(mission: UiMission): string {
   return "Work is active. Waiting for the next useful update.";
 }
 
+function projectedMissionStatus(
+  mission: UiMission,
+  tasksById: Map<string, UiTask>,
+): UiMission["status"] {
+  if (mission.status !== "active" || mission.taskIds.length === 0) return mission.status;
+  const missionTasks = mission.taskIds.map((taskId) => tasksById.get(taskId));
+  if (missionTasks.some((task) => task === undefined)) return mission.status;
+  return missionTasks.every((task) => task?.status === "completed") ? "verifying" : mission.status;
+}
+
 export function projectMissionActivity(
   snapshot: MissionActivitySnapshot,
   harnesses: HarnessInfo[],
@@ -166,6 +191,8 @@ export function projectMissionActivity(
   const tasksById = new Map(snapshot.tasks.map((task) => [task.id, task]));
   const harnessNames = new Map(harnesses.map((harness) => [harness.id, harness.name]));
   const scoped = scopeMissionActivity(snapshot.events, mission);
+  const visibleStatus = projectedMissionStatus(mission, tasksById);
+  const visibleMission = visibleStatus === mission.status ? mission : { ...mission, status: visibleStatus };
   const workers = [...scoped.ownedTaskIds]
     .map((id) => tasksById.get(id))
     .filter((task): task is UiTask => Boolean(task))
@@ -212,21 +239,21 @@ export function projectMissionActivity(
     if (feed.length === 3) break;
   }
 
-  if (missionCanHeartbeat(mission)) {
-    const heartbeat = deriveMissionHeartbeat(snapshot.events, mission.id, scoped.ownedTaskIds, now);
+  if (missionCanHeartbeat(visibleMission)) {
+    const heartbeat = deriveMissionHeartbeat(scoped.events, mission.id, scoped.ownedTaskIds, now);
     if (heartbeat && !seen.has(heartbeat.text)) {
-      const heartbeatText = heartbeatTextForMissionState(heartbeat.text, mission.status);
+      const heartbeatText = heartbeatTextForMissionState(heartbeat.text, visibleMission.status);
       feed.unshift(heartbeatText);
       if (feed.length > 3) feed.length = 3;
     }
   }
 
   return {
-    mission,
+    mission: visibleMission,
     taskIds: [...scoped.ownedTaskIds],
-    missionState: missionActivityState(mission),
+    missionState: missionActivityState(visibleMission),
     workers,
     feed,
-    fallback: missionActivityFallback(mission),
+    fallback: missionActivityFallback(visibleMission),
   };
 }
