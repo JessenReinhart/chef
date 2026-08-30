@@ -240,7 +240,7 @@ export function projectMissionActivity(
   }
 
   if (missionCanHeartbeat(visibleMission)) {
-    const heartbeat = deriveMissionHeartbeat(snapshot.events, mission.id, scoped.ownedTaskIds, now);
+    const heartbeat = deriveMissionHeartbeat(scoped.events, mission.id, scoped.ownedTaskIds, now);
     if (heartbeat && !seen.has(heartbeat.text)) {
       const heartbeatText = heartbeatTextForMissionState(heartbeat.text, visibleMission.status);
       feed.unshift(heartbeatText);
