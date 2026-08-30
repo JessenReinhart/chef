@@ -52,9 +52,16 @@ function summaryText(artifact: ArtifactHandoffInput, durableLocation: string | n
   return name ? compactSummary(`Chef produced ${name}.`) : null;
 }
 
+function isLocalLocation(location: string): boolean {
+  if (location.startsWith("file:")) return true;
+  if (/^[A-Za-z]:[\\/]/.test(location)) return true;
+  return !/^[A-Za-z][A-Za-z0-9+.-]*:/.test(location);
+}
+
 export function canRevealArtifact(artifact: ArtifactHandoffInput): boolean {
-  return artifact.uri.startsWith("file:")
-    || firstText(artifact.metadata, ["resultLocation", "path", "location"]) !== null;
+  if (artifact.uri.startsWith("file:")) return true;
+  const location = firstText(artifact.metadata, ["resultLocation", "path", "location"]);
+  return location !== null && isLocalLocation(location);
 }
 
 /**
