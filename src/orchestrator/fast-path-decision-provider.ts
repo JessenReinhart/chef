@@ -13,7 +13,7 @@ const DIRECT_SINGLE_STAGE_ACTION = /\b(create|build|make|implement|add|fix|updat
 const INFORMATION_ACTION = /\b(research|explain|summari[sz]e)\b/i;
 const SIMPLE_INTENT_REQUEST = /\b(i\s+(?:need|want|would like)|please\s+(?:give|make|build|create)|can you\s+(?:make|build|create|give me))\b/i;
 const EXPLANATORY_QUESTION = /^(?:(?:what\s+(?:is|are|does)|how\s+(?:does|do|is|are|can)|why\s+(?:does|do|is|are)|tell\s+me\s+about)|(?:is|are|can|could|should|would|will|do|does|did|has|have)\b)/i;
-const COMPLEXITY_MARKER = /\b(compare|comparison|difference(?:s)?\s+between|versus|vs\.?|pros\s+and\s+cons|evaluate|analy[sz]e|audit|investigate|architecture|architect|migrate|migration|benchmark|parallel|multiple|multi[- ]agent|across)\b|\b(and then|then verify|then test|after that)\b|\b(and|then)\s+(create|build|implement|fix|update|change|remove|write|draft|document|prepare|produce)\b/i;
+const COMPLEXITY_MARKER = /\b(compare|comparison|difference(?:s)?\s+between|versus|vs\.?|pros\s+and\s+cons|evaluate|analy[sz]e|audit|investigate|architecture|architect|migrate|migration|benchmark|parallel|multiple|multi[- ]agent|across)\b|\b(and then|then verify|then test|after that)\b|\b(and|then)\s+(create|build|implement|fix|update|change|remove|write|draft|document|prepare|produce|test|verify)\b/i;
 const MULTI_STAGE_SEPARATOR = /(?:;|\n)\s*(?:(?:then|and)\s+)?(?:create|build|implement|add|fix|update|change|rename|remove|write|draft|generate|test|verify|document|prepare|produce)\b/i;
 
 export const DEFAULT_PLANNER_TIMEOUT_MS = 20_000;
