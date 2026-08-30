@@ -65,6 +65,13 @@ function artifactPathCandidate(runtime: ChefRuntime, artifact: { uri: string; me
 
   const persistedLocation = metadataLocation(artifact.metadata);
   if (!persistedLocation) throw new ArtifactLocationError(409, "artifact is not backed by a local file");
+
+  const isWindowsDrivePath = /^[A-Za-z]:[\\/]/.test(persistedLocation);
+  const hasUriScheme = /^[A-Za-z][A-Za-z0-9+.-]*:/.test(persistedLocation);
+  if (hasUriScheme && !persistedLocation.startsWith("file:") && !isWindowsDrivePath) {
+    throw new ArtifactLocationError(409, "artifact location is not a local file");
+  }
+
   const persistedFileUriPath = persistedLocation.startsWith("file:") ? fileUriPath(persistedLocation) : null;
   if (persistedLocation.startsWith("file:") && !persistedFileUriPath) {
     throw new ArtifactLocationError(409, "artifact has an invalid file URI");
