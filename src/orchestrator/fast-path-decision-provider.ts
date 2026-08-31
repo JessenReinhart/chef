@@ -29,6 +29,10 @@ export interface SingleWorkerFastPathOptions {
   plannerTimeoutMs?: number;
 }
 
+export interface MissionDecisionProviderOptions {
+  allowDirectWithoutPlanner?: boolean;
+}
+
 function routedPlan(plan: Plan, routingMode: MissionRoutingMode): RoutedPlan {
   return { ...plan, routingMode };
 }
@@ -47,6 +51,25 @@ function deterministicTaskEvaluation(taskResult: PlanTaskOutcome, madeBy: string
     timestamp: Date.now(),
     status: accepted ? "accepted" : "rejected",
   };
+}
+
+class UnconfiguredPlannerDecisionProvider implements DecisionProvider {
+  readonly name = "planner-unconfigured";
+
+  async proposePlan(input: PlanProposalContext): Promise<Plan | null> {
+    if ((input.availableWorkers ?? []).length === 0) {
+      throw new Error(
+        "Chef cannot start this request because no task-capable CLI worker is ready. Install or configure a supported CLI worker, then retry.",
+      );
+    }
+    throw new Error(
+      "This request needs coordinated planning, but no orchestrator provider is configured. Configure a provider in Chef Settings, or ask for one bounded work step.",
+    );
+  }
+
+  async evaluate(taskResult: PlanTaskOutcome): Promise<Decision> {
+    return deterministicTaskEvaluation(taskResult, this.name);
+  }
 }
 
 /**
@@ -156,8 +179,15 @@ export class SingleWorkerFastPathDecisionProvider implements DecisionProvider {
   }
 }
 
-/** Use the normal configured LLM planner, with a bounded single-worker shortcut. */
-export function createMissionDecisionProvider(): DecisionProvider | null {
+/**
+ * Use the configured LLM planner with a bounded single-worker shortcut. The
+ * production web server may opt into a truthful direct-worker-only fallback
+ * when no planner is configured; callers that rely on the historical scripted
+ * fallback keep the default null result.
+ */
+export function createMissionDecisionProvider(options: MissionDecisionProviderOptions = {}): DecisionProvider | null {
   const provider = createLLMDecisionProvider();
-  return provider ? new SingleWorkerFastPathDecisionProvider(provider) : null;
+  if (provider) return new SingleWorkerFastPathDecisionProvider(provider);
+  if (!options.allowDirectWithoutPlanner) return null;
+  return new SingleWorkerFastPathDecisionProvider(new UnconfiguredPlannerDecisionProvider());
 }
