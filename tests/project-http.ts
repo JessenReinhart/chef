@@ -91,6 +91,23 @@ try {
 
   const picked = await fetch(`${origin}/api/project/pick`, { method: "POST" });
   assert.equal(picked.status, 202);
+
+  const blockedThreadCreate = await fetch(`${origin}/api/threads`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ title: "Todo app" }),
+  });
+  assert.equal(blockedThreadCreate.status, 409, "the old runtime must not create a Thread after another project is selected");
+  const blockedThreadCreateBody = await blockedThreadCreate.json() as { error?: string };
+  assert.match(blockedThreadCreateBody.error ?? "", /selected project is active/i);
+
+  const blockedChat = await fetch(`${origin}/api/threads/thread-old/chat`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ message: "Create a simple todo app" }),
+  });
+  assert.equal(blockedChat.status, 409, "the canonical task must not start against the old project during runtime handoff");
+
   await new Promise((resolve) => setTimeout(resolve, 150));
   assert.equal(opened, next);
 
@@ -99,6 +116,33 @@ try {
 
   const fallback = await fetch(`${origin}/anything`);
   assert.equal(fallback.status, 418);
+
+  const failingBase = createServer((_req, res) => { res.writeHead(418); res.end("base"); });
+  const failingServer = createProjectServer(runtime, failingBase, {
+    recentProjectsPath: join(dir, "state", "failed-recent.json"),
+    canPickDirectory: async () => false,
+    onOpenProject: async () => { throw new Error("restart failed"); },
+  });
+  await new Promise<void>((resolve) => failingServer.listen(0, "127.0.0.1", resolve));
+  const failingAddress = failingServer.address();
+  assert.ok(failingAddress && typeof failingAddress === "object");
+  const failingOrigin = `http://127.0.0.1:${failingAddress.port}`;
+  try {
+    const reopen = await fetch(`${failingOrigin}/api/project/open`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: next }),
+    });
+    assert.equal(reopen.status, 202);
+    assert.equal((await fetch(`${failingOrigin}/api/threads`, { method: "POST" })).status, 409);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    assert.equal(
+      (await fetch(`${failingOrigin}/api/threads`, { method: "POST" })).status,
+      418,
+      "a failed runtime reopen must release the old-project work gate so recovery remains possible",
+    );
+  } finally {
+    await new Promise<void>((resolve) => failingServer.close(() => resolve()));
+  }
+
   console.log("project-http: ok");
 } finally {
   await new Promise<void>((resolve) => server.close(() => resolve()));
