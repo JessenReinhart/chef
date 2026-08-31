@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { createThreadHistoryLoader, latestAssistantThreadNote, missionsForSelectedThread, resolveHomeThreadSelection } from "../web/src/threadSelection.ts";
+import { createThreadHistoryLoader, latestAssistantThreadNote, missionsForSelectedThread, resolveHomeThreadSelection, threadSubmissionOwnsForeground } from "../web/src/threadSelection.ts";
 import type { UiThread } from "../web/src/threadApi.ts";
 import type { ChatMessage, UiMission } from "../web/src/types.ts";
 
@@ -34,6 +34,45 @@ pending.get("thread-c")?.reject(new Error("stale Thread request failed"));
 
 assert.deepEqual(await latestSuccess, { current: true, messages: dMessages }, "the newest Thread history should remain authoritative");
 assert.deepEqual(await staleFailure, { current: false }, "a stale Thread failure must not surface over the latest selection");
+
+// A task submission may finish after the user has moved to another Thread.
+// The background work still belongs to its original Thread, but its late UI
+// feedback must not mutate the foreground Thread's draft/report/error state.
+let selectedSubmissionThread: string | null = "thread-a";
+let foregroundDraft = "";
+let foregroundReport: string | null = null;
+let foregroundError: string | null = null;
+let resolveSubmission: ((report: string) => void) | null = null;
+const submission = new Promise<string>((resolve) => {
+  resolveSubmission = resolve;
+});
+const applySubmission = submission.then((report) => {
+  if (!threadSubmissionOwnsForeground("thread-a", selectedSubmissionThread)) return;
+  foregroundDraft = "";
+  foregroundReport = report;
+});
+
+selectedSubmissionThread = "thread-b";
+foregroundDraft = "Draft for Thread B";
+resolveSubmission?.("Thread A todo app created");
+await applySubmission;
+assert.equal(selectedSubmissionThread, "thread-b", "background completion must not steal the foreground Thread");
+assert.equal(foregroundDraft, "Draft for Thread B", "background completion must not clear the new Thread draft");
+assert.equal(foregroundReport, null, "background completion must not surface its report in the new Thread");
+
+let rejectSubmission: ((error: Error) => void) | null = null;
+const failingSubmission = new Promise<never>((_resolve, reject) => {
+  rejectSubmission = reject;
+});
+const applyFailure = failingSubmission.catch((error: Error) => {
+  if (threadSubmissionOwnsForeground("thread-a", selectedSubmissionThread)) {
+    foregroundError = error.message;
+  }
+});
+rejectSubmission?.(new Error("Thread A worker failed"));
+await applyFailure;
+assert.equal(foregroundError, null, "background failure must not leak an error into the selected Thread");
+assert.equal(threadSubmissionOwnsForeground("thread-b", selectedSubmissionThread), true, "the selected Thread still owns its own eventual feedback");
 
 // Simple Mode uses the same loader for the conversational Chef note. A slow
 // response from the previously selected Thread must never overwrite the note
@@ -116,4 +155,4 @@ assert.equal(defaultSelection.readOnly, false);
 const missingSelection = resolveHomeThreadSelection(threads, "missing");
 assert.equal(missingSelection.selectedThread?.id, "active-a", "a stale remembered id should recover to an active Thread");
 
-console.log("thread-selection-race: ok — Thread switching, Mission activity, and terminal summaries stay isolated");
+console.log("thread-selection-race: ok — Thread switching, submission completion, Mission activity, and terminal summaries stay isolated");
