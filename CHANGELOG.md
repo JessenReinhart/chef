@@ -2,6 +2,7 @@
 
 ## 2026-08-31
 
+- **Both configured worker retries now remain available through recovery (#283):** A worker crash or spawn failure no longer spends an extra retry by itself. Chef now counts only actual retry dispatches, so a task can use both configured recovery attempts and still finish durably, while exhausted retries return a clear human-readable message.
 - **Failed worker retries now stay live through recovery (#282):** When a Simple Mode worker fails and is retried, Chef now keeps consuming the new worker session so recovery progress stays visible and the same task can reach durable completion instead of getting stuck in `running`.
 - **The permanent todo check now proves progress appears before completion (#281):** Chef’s golden-path acceptance now requires Planning, active work, and a real worker-running signal to become visible while the request is still in flight, so a regression that stays silent until the end can no longer pass the canonical journey check.
 - **Project selection and the permanent todo check now agree with the real canonical flow (#280):** Selecting the project that is already open now clearly succeeds without restarting Chef, including case-insensitive path identity on Windows while Linux keeps normal case-sensitive semantics. The permanent todo diagnostic also uses one shared request that is pinned to the intended single-worker route so its acceptance contract cannot silently drift away from the product router.
