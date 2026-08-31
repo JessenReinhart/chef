@@ -2,6 +2,7 @@
 
 ## 2026-08-31
 
+- **Fast worker results are preserved exactly once at exit (#284):** When a worker writes a structured result immediately before finishing, Chef now performs one final serialized result drain before publishing the exit event. Slow filesystem reads are also serialized so the same result cannot appear twice.
 - **Both configured worker retries now remain available through recovery (#283):** A worker crash or spawn failure no longer spends an extra retry by itself. Chef now counts only actual retry dispatches, so a task can use both configured recovery attempts and still finish durably, while exhausted retries return a clear human-readable message.
 - **Failed worker retries now stay live through recovery (#282):** When a Simple Mode worker fails and is retried, Chef now keeps consuming the new worker session so recovery progress stays visible and the same task can reach durable completion instead of getting stuck in `running`.
 - **The permanent todo check now proves progress appears before completion (#281):** Chef’s golden-path acceptance now requires Planning, active work, and a real worker-running signal to become visible while the request is still in flight, so a regression that stays silent until the end can no longer pass the canonical journey check.
