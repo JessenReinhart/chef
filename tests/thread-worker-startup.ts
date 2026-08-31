@@ -8,6 +8,8 @@ import { createChef, type ChefRuntime } from "../src/main.ts";
 import { createMissionDecisionProvider } from "../src/orchestrator/fast-path-decision-provider.ts";
 import { createHttpServer } from "../src/server/http-server.ts";
 import { createThreadServer } from "../src/server/thread-http.ts";
+import { summarizeMissionProgressEvent } from "../web/src/missionProgress.ts";
+import type { UiRuntimeEvent } from "../web/src/types.ts";
 
 const WORKER_STARTUP_BUDGET_MS = 1_500;
 const FIXTURE_SETTLE_BUDGET_MS = 5_000;
@@ -191,6 +193,12 @@ try {
     && (event.payload as { missionId?: unknown }).missionId === missionId
   );
   assert.ok(planningStarted, "successful worker startup must retain durable Mission-correlated planning-start evidence");
+  const planningStartedProgress = summarizeMissionProgressEvent(planningStarted as unknown as UiRuntimeEvent);
+  assert.equal(
+    planningStartedProgress?.text,
+    "Chef is deciding how to approach this Mission.",
+    "the real planning-start event must project as immediate human-readable Simple Mode activity",
+  );
 
   const planningSucceeded = finalSnapshot.events.find((event) =>
     event.type === "orchestrator.plan.proposed"
@@ -201,6 +209,12 @@ try {
     (planningSucceeded.payload as { routingMode?: unknown }).routingMode,
     "single-worker",
     "production no-planner path must durably expose its bounded single-worker routing decision",
+  );
+  const planningSucceededProgress = summarizeMissionProgressEvent(planningSucceeded as unknown as UiRuntimeEvent);
+  assert.equal(
+    planningSucceededProgress?.text,
+    "Chef chose one worker because this Mission fits one straightforward step.",
+    "the real routing event must tell Simple Mode why Chef skipped multi-agent planning",
   );
   assert.ok(planningStarted.seq < planningSucceeded.seq, "planning-start evidence must precede the accepted plan");
 
@@ -226,4 +240,4 @@ try {
   await rm(dir, { recursive: true, force: true });
 }
 
-console.log("thread-worker-startup: ok — production no-planner Thread chat acknowledges first, routes the canonical todo task, and launches one detected specialized CLI worker with the real Mission prompt");
+console.log("thread-worker-startup: ok — production no-planner Thread chat acknowledges first, exposes meaningful Simple Mode routing progress, and launches one detected specialized CLI worker with the real Mission prompt");
