@@ -1,5 +1,8 @@
 import { strict as assert } from "node:assert";
-import { shouldUseSingleWorkerFastPath } from "../src/orchestrator/fast-path-decision-provider.ts";
+import {
+  createMissionDecisionProvider,
+  shouldUseSingleWorkerFastPath,
+} from "../src/orchestrator/fast-path-decision-provider.ts";
 import { summarizeMissionProgressEvent } from "../web/src/missionProgress.ts";
 import type { UiRuntimeEvent } from "../web/src/types.ts";
 import { LIVE_TODO_REQUEST } from "./fixtures/live-todo-request.ts";
@@ -162,4 +165,58 @@ assert.equal(
   "planner routing without accepted task evidence must stay explicit about the missing reason instead of inventing a need for coordination",
 );
 
-console.log("fast-path-routing-policy: ok — routing policy stays bounded and Simple Mode explains the chosen path from runtime evidence");
+const previousProviderEnv = {
+  provider: process.env.CHEF_PROVIDER,
+  apiKey: process.env.CHEF_API_KEY,
+  model: process.env.CHEF_MODEL,
+  baseUrl: process.env.CHEF_BASE_URL,
+};
+try {
+  delete process.env.CHEF_PROVIDER;
+  delete process.env.CHEF_API_KEY;
+  delete process.env.CHEF_MODEL;
+  delete process.env.CHEF_BASE_URL;
+
+  const noPlannerProvider = createMissionDecisionProvider();
+  const canonicalPlan = await noPlannerProvider.proposePlan({
+    workspaceId: "workspace-no-planner",
+    goal: "Create a simple todo app",
+    availableWorkers: [{ id: "codex", name: "Codex", type: "codex" }],
+  });
+  assert.ok(canonicalPlan);
+  assert.equal(canonicalPlan.routingMode, "single-worker");
+  assert.equal(canonicalPlan.tasks.length, 1);
+  assert.equal(canonicalPlan.tasks[0].assignedTo, "codex");
+  assert.equal(
+    canonicalPlan.tasks[0].description,
+    "Create a simple todo app",
+    "the canonical request must reach the detected CLI worker unchanged even without a planner provider",
+  );
+
+  await assert.rejects(
+    () => noPlannerProvider.proposePlan({
+      workspaceId: "workspace-no-planner",
+      goal: "Research and compare two architectures, then write a migration report",
+      availableWorkers: [{ id: "codex", name: "Codex", type: "codex" }],
+    }),
+    /no orchestrator provider is configured/i,
+    "planner-required work must fail truthfully instead of silently switching to the scripted test orchestrator",
+  );
+
+  await assert.rejects(
+    () => noPlannerProvider.proposePlan({
+      workspaceId: "workspace-no-worker",
+      goal: "Create a simple todo app",
+      availableWorkers: [],
+    }),
+    /no task-capable CLI worker is ready/i,
+    "a missing worker must be reported as a worker-readiness problem instead of a planning failure",
+  );
+} finally {
+  if (previousProviderEnv.provider === undefined) delete process.env.CHEF_PROVIDER; else process.env.CHEF_PROVIDER = previousProviderEnv.provider;
+  if (previousProviderEnv.apiKey === undefined) delete process.env.CHEF_API_KEY; else process.env.CHEF_API_KEY = previousProviderEnv.apiKey;
+  if (previousProviderEnv.model === undefined) delete process.env.CHEF_MODEL; else process.env.CHEF_MODEL = previousProviderEnv.model;
+  if (previousProviderEnv.baseUrl === undefined) delete process.env.CHEF_BASE_URL; else process.env.CHEF_BASE_URL = previousProviderEnv.baseUrl;
+}
+
+console.log("fast-path-routing-policy: ok — routing stays bounded, no-provider direct work remains usable, and planner-required work fails truthfully");
