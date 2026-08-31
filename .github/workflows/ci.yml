@@ -68,6 +68,9 @@ jobs:
         run: npm install
       - name: Run bounded Thread to worker startup acceptance
         run: node --experimental-strip-types tests/thread-worker-startup.ts
+      - name: Run canonical todo golden path on Windows
+        if: runner.os == 'Windows'
+        run: node --experimental-strip-types tests/golden-path.ts
 
   web-build:
     name: Web TypeScript build

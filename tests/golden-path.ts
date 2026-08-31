@@ -6,7 +6,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { GenericTerminalHarness } from "../src/harness/generic.ts";
 import { createChef } from "../src/main.ts";
-import { artifactHandoff, type LivingArtifact } from "../web/src/artifactProjection.ts";
+import { artifactHandoff } from "../web/src/artifactHandoff.ts";
+import type { LivingArtifact } from "../web/src/artifactProjection.ts";
 import type {
   AgentId,
   Decision,
@@ -156,8 +157,6 @@ const outbox = path.join(os.tmpdir(), "chef-sideband", sid, "outbox");
 fs.mkdirSync(outbox, { recursive: true });
 fs.writeFileSync(path.join(outbox, envelope.id + ".json"), JSON.stringify(envelope));
 console.log("todo-builder: created " + appPath);
-const ingestionDeadline = Date.now() + 800;
-while (Date.now() < ingestionDeadline) { /* keep PTY alive for sideband polling */ }
 `;
   await writeFile(workerScript, source, "utf8");
   return workerScript;
@@ -264,8 +263,9 @@ function assertObservableMissionLifecycle(events: readonly RuntimeEvent[], taskI
 function resultHandoff(artifact: LivingArtifact, appPath: string): ReturnType<typeof artifactHandoff> {
   const handoff = artifactHandoff(artifact);
   assert.equal(handoff.summary, `Created runnable todo app at ${appPath}`, "Simple Mode handoff must explain what changed");
+  assert.equal(handoff.location, appPath.replace(/\\/g, "/"), "Simple Mode handoff must expose the generated result location");
   assert.equal(handoff.runCommand, `${process.execPath} ${appPath}`, "Simple Mode handoff must explain how to run the generated result");
-  assert.equal(handoff.verifiedBy, "golden-path", "Simple Mode handoff must expose the worker-supplied verification evidence");
+  assert.equal(handoff.verification, "Verified by golden-path", "Simple Mode handoff must expose the worker-supplied verification evidence");
   return handoff;
 }
 
@@ -360,7 +360,7 @@ async function main(): Promise<void> {
     assertObservableMissionLifecycle(restored.events, result.taskIds);
     assertRoutingModeIsDurable(restored.events);
     assert.equal(restored.artifacts.length, snapshot.artifacts.length, "result location must survive reopen");
-    assert.deepEqual(resultHandoff(restored.artifacts[0] as LivingArtifact, appPath), handoff, "result summary, run command, and verification handoff must survive reopen");
+    assert.deepEqual(resultHandoff(restored.artifacts[0] as LivingArtifact, appPath), handoff, "result location, summary, run command, and verification handoff must survive reopen");
     assert.equal(restored.sessions.length, snapshot.sessions.length, "session history must survive reopen");
     assert.equal(restored.plans.length, snapshot.plans.length, "plan history must survive reopen");
 
