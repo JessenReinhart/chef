@@ -1,9 +1,11 @@
 import { strict as assert } from "node:assert";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { GenericTerminalHarness } from "../src/harness/generic.ts";
 import { createChef } from "../src/main.ts";
+import { createRecoveryServer } from "../src/server/recovery-http.ts";
 import { summarizeMissionProgressEvent } from "../web/src/missionProgress.ts";
 import type {
   AgentId,
@@ -191,7 +193,25 @@ async function assertFailedWorkerCanRecover(): Promise<void> {
     assert.match(failedProgress.text, /failed/i, "worker failure must be understandable without raw runtime state");
 
     const failedSeq = failedEvent.seq;
-    await chef.retryTask(taskId);
+    const fallback = createServer((_req, res) => {
+      res.writeHead(404, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "not found" }));
+    });
+    const recoveryServer = createRecoveryServer(chef, fallback);
+    await new Promise<void>((resolve) => recoveryServer.listen(0, "127.0.0.1", resolve));
+    try {
+      const address = recoveryServer.address();
+      assert.ok(address && typeof address === "object", "recovery server must expose a local address");
+      const retryResponse = await fetch(`http://127.0.0.1:${address.port}/api/nodes/${taskId}/retry`, { method: "POST" });
+      assert.equal(retryResponse.status, 200, "Simple Mode retry route must accept the failed canonical task");
+      const retryBody = await retryResponse.json() as { ok?: boolean; data?: { id?: string; status?: string } };
+      assert.equal(retryBody.ok, true, "Simple Mode retry route must report successful recovery dispatch");
+      assert.equal(retryBody.data?.id, taskId, "retry response must identify the same canonical task");
+      assert.equal(retryBody.data?.status, "running", "retry response must immediately return the task to active work");
+    } finally {
+      await new Promise<void>((resolve) => recoveryServer.close(() => resolve()));
+    }
+
     const retryRunning = await waitForEvent(
       liveEvents,
       (event) => event.seq > failedSeq && event.taskId === taskId && event.type === "task.running",
@@ -226,4 +246,4 @@ async function assertFailedWorkerCanRecover(): Promise<void> {
 
 await assertLiveWorkerProgress();
 await assertFailedWorkerCanRecover();
-console.log("golden-path-live-worker-progress: ok — live work and failure recovery stay observable through durable completion");
+console.log("golden-path-live-worker-progress: ok — live work and Simple Mode failure recovery stay observable through durable completion");
