@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { GenericTerminalHarness } from "../src/harness/generic.ts";
 import { createChef } from "../src/main.ts";
+import { summarizeMissionProgressEvent } from "../web/src/missionProgress.ts";
 import type {
   AgentId,
   Decision,
@@ -123,6 +124,15 @@ async function main(): Promise<void> {
     );
     assert.ok(runningEvent.taskId, "live worker progress must identify the running task");
     assert.equal(sendSettled, false, "worker-running progress must be observable before request completion");
+
+    const projectedProgress = summarizeMissionProgressEvent(runningEvent);
+    assert.ok(projectedProgress, "live worker progress must cross the Simple Mode projection boundary");
+    assert.equal(projectedProgress.tone, "active", "live worker progress must remain visibly active in Simple Mode");
+    assert.equal(
+      projectedProgress.text,
+      "A worker started a work step.",
+      "live worker progress must become human-readable feedback instead of raw runtime jargon",
+    );
 
     const result = await sendPromise;
     unsubscribe();
