@@ -510,8 +510,15 @@ export function createChef(options: {
     interruptSession(sessionId: string): Promise<void> {
       return scheduler.interrupt(workspaceId, sessionId);
     },
-    retryTask(taskId: TaskId): Promise<void> {
-      return scheduler.retryTask(workspaceId, taskId);
+    async retryTask(taskId: TaskId): Promise<void> {
+      const knownSessionIds = new Set(repository.listSessions(workspaceId).map((session) => session.id));
+      await scheduler.retryTask(workspaceId, taskId);
+      const retrySession = repository.listSessions(workspaceId).find((session) =>
+        session.taskId === taskId
+        && !knownSessionIds.has(session.id)
+        && (session.status === "spawning" || session.status === "running")
+      );
+      if (retrySession) consumeStandaloneSession(retrySession);
     },
     resizeSession(sessionId: string, cols: number, rows: number): Promise<void> {
       return scheduler.resize(workspaceId, sessionId, cols, rows);
