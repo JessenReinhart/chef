@@ -2,6 +2,7 @@
 
 ## 2026-08-31
 
+- **Project selection and the permanent todo check now agree with the real canonical flow (#280):** Selecting the project that is already open now clearly succeeds without restarting Chef, including case-insensitive path identity on Windows while Linux keeps normal case-sensitive semantics. The permanent todo diagnostic also uses one shared request that is pinned to the intended single-worker route so its acceptance contract cannot silently drift away from the product router.
 - **Executable request-questions stay inside the right routing boundary (#279):** Chef still sends simple requests such as “Can you create a simple todo app?” straight to one worker, but broader operations such as refactoring, deploying, redesigning, or reorganizing now stay on the planner path even when a later clause contains a simple word like “explain” or “create”. Multi-step combinations such as “create this and deploy it” also keep coordinated planning.
 
 ## 2026-08-30
