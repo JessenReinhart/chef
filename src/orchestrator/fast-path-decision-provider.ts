@@ -29,6 +29,10 @@ export interface SingleWorkerFastPathOptions {
   plannerTimeoutMs?: number;
 }
 
+export interface MissionDecisionProviderOptions {
+  allowDirectWithoutPlanner?: boolean;
+}
+
 function routedPlan(plan: Plan, routingMode: MissionRoutingMode): RoutedPlan {
   return { ...plan, routingMode };
 }
@@ -176,11 +180,14 @@ export class SingleWorkerFastPathDecisionProvider implements DecisionProvider {
 }
 
 /**
- * Use the configured LLM planner when available. Without one, keep bounded
- * single-worker work usable with detected CLI workers instead of silently
- * falling back to Chef's scripted test orchestrator.
+ * Use the configured LLM planner with a bounded single-worker shortcut. The
+ * production web server may opt into a truthful direct-worker-only fallback
+ * when no planner is configured; callers that rely on the historical scripted
+ * fallback keep the default null result.
  */
-export function createMissionDecisionProvider(): DecisionProvider {
-  const provider = createLLMDecisionProvider() ?? new UnconfiguredPlannerDecisionProvider();
-  return new SingleWorkerFastPathDecisionProvider(provider);
+export function createMissionDecisionProvider(options: MissionDecisionProviderOptions = {}): DecisionProvider | null {
+  const provider = createLLMDecisionProvider();
+  if (provider) return new SingleWorkerFastPathDecisionProvider(provider);
+  if (!options.allowDirectWithoutPlanner) return null;
+  return new SingleWorkerFastPathDecisionProvider(new UnconfiguredPlannerDecisionProvider());
 }
