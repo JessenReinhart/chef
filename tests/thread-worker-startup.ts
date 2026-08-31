@@ -1,9 +1,9 @@
 import { strict as assert } from "node:assert";
 import { once } from "node:events";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { GenericTerminalHarness } from "../src/harness/generic.ts";
+import { SpecializedCliHarness } from "../src/harness/specialized.ts";
 import { createChef, type ChefRuntime } from "../src/main.ts";
 import { createMissionDecisionProvider } from "../src/orchestrator/fast-path-decision-provider.ts";
 import { createHttpServer } from "../src/server/http-server.ts";
@@ -14,14 +14,6 @@ const FIXTURE_SETTLE_BUDGET_MS = 5_000;
 const POLL_MS = 20;
 const TODO_REQUEST = "Create a simple todo app";
 const ACCEPTANCE_WORKER_ID = "acceptance-worker";
-
-class AcceptanceTaskHarness extends GenericTerminalHarness {
-  readonly taskCapable = true;
-
-  taskLaunch(): { command: string; args: string[] } {
-    return { command: this.command, args: this.args };
-  }
-}
 
 async function waitForWorkerStartup(
   inspect: () => Promise<{ tasks: Array<{ id: string }>; sessions: Array<{ id: string }> }>,
@@ -44,6 +36,18 @@ async function waitForWorkerStartup(
   );
 }
 
+async function waitForWorkerPrompt(path: string): Promise<string> {
+  const deadline = Date.now() + WORKER_STARTUP_BUDGET_MS;
+  while (Date.now() < deadline) {
+    try {
+      return await readFile(path, "utf8");
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, POLL_MS));
+    }
+  }
+  assert.fail(`detected CLI worker did not receive its Mission prompt within ${WORKER_STARTUP_BUDGET_MS}ms`);
+}
+
 async function allowFixtureToSettle(chef: ChefRuntime, missionId: string): Promise<void> {
   const deadline = Date.now() + FIXTURE_SETTLE_BUDGET_MS;
   while (Date.now() < deadline) {
@@ -59,6 +63,7 @@ async function allowFixtureToSettle(chef: ChefRuntime, missionId: string): Promi
 }
 
 const dir = await mkdtemp(join(tmpdir(), "chef-thread-worker-startup-"));
+const promptCapturePath = join(dir, "worker-prompt.txt");
 const previousEnv = {
   path: process.env.PATH,
   provider: process.env.CHEF_PROVIDER,
@@ -71,8 +76,9 @@ const previousEnv = {
 
 // Model the production server's no-planner mode deterministically. Hiding PATH
 // during harness discovery prevents a developer/CI machine's incidental CLI
-// installs from changing which worker wins the fast path; the acceptance worker
-// uses process.execPath directly and therefore remains cross-platform.
+// installs from changing which worker wins the fast path. The acceptance CLI
+// uses the absolute Node executable and the same SpecializedCliHarness launch
+// contract as the real Codex/Claude/Pi/OMP/Freebuff adapters.
 process.env.PATH = "";
 delete process.env.CHEF_PROVIDER;
 delete process.env.CHEF_API_KEY;
@@ -84,12 +90,18 @@ delete process.env.ANTHROPIC_API_KEY;
 const decisionProvider = createMissionDecisionProvider({ allowDirectWithoutPlanner: true });
 assert.ok(decisionProvider, "production no-planner mode must provide bounded direct-worker routing");
 const chef = createChef({ dbPath: join(dir, "chef.sqlite"), projectDir: dir, decisionProvider });
-chef.specializedHarnesses.register(ACCEPTANCE_WORKER_ID, "Acceptance Worker", () => new AcceptanceTaskHarness({
-  agentId: ACCEPTANCE_WORKER_ID,
-  workspaceId: chef.workspaceId,
-  command: process.execPath,
-  args: ["-e", "setTimeout(() => {}, 1000)"],
+chef.specializedHarnesses.register(ACCEPTANCE_WORKER_ID, "Acceptance Worker", () => new SpecializedCliHarness({
+  id: ACCEPTANCE_WORKER_ID,
+  type: "acceptance-cli",
+  name: "Acceptance Worker",
+  binary: process.execPath,
   cwd: dir,
+  workspaceId: chef.workspaceId,
+  taskArgs: (prompt) => [
+    "-e",
+    `require("fs").writeFileSync(${JSON.stringify(promptCapturePath)}, process.argv[1], "utf8"); setTimeout(() => {}, 1000);`,
+    prompt,
+  ],
 }));
 
 let server: ReturnType<typeof createThreadServer> | undefined;
@@ -159,6 +171,10 @@ try {
     };
   });
 
+  const workerPrompt = await waitForWorkerPrompt(promptCapturePath);
+  assert.match(workerPrompt, /Task: Complete the request/, "detected CLI must receive Chef's bounded Mission-task envelope");
+  assert.ok(workerPrompt.includes(TODO_REQUEST), "detected CLI must receive the canonical request text");
+
   const finalSnapshot = await chef.inspectState();
   const missionTasks = finalSnapshot.tasks.filter((task) => task.missionId === missionId);
   const missionTaskIds = new Set(missionTasks.map((task) => task.id));
@@ -168,7 +184,7 @@ try {
   assert.equal(missionTasks[0].description, TODO_REQUEST, "canonical request must reach the worker unchanged");
   assert.ok(missionSessions.length > 0, "acknowledged Mission must persist its real worker Session");
   assert.ok(missionSessions.every((session) => session.agentId === ACCEPTANCE_WORKER_ID), "worker Session must belong to the detected CLI worker");
-  assert.ok(missionSessions.every((session) => session.command.length > 0), "worker Session command must be observable");
+  assert.ok(missionSessions.every((session) => session.command === process.execPath), "worker Session must record the specialized CLI executable");
 
   const planningStarted = finalSnapshot.events.find((event) =>
     event.type === "orchestrator.plan.started"
@@ -210,4 +226,4 @@ try {
   await rm(dir, { recursive: true, force: true });
 }
 
-console.log("thread-worker-startup: ok — production no-planner Thread chat acknowledges first and durably reaches one detected CLI worker Session within its startup budget");
+console.log("thread-worker-startup: ok — production no-planner Thread chat acknowledges first, routes the canonical todo task, and launches one detected specialized CLI worker with the real Mission prompt");
