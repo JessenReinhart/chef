@@ -9,6 +9,14 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.end(JSON.stringify(body));
 }
 
+function retryErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message.includes("exceeds retry budget")) {
+    return "This work step has used all available retries.";
+  }
+  return message;
+}
+
 /**
  * Adds the normal user-facing recovery mutation for failed/blocked work.
  *
@@ -47,7 +55,7 @@ export function createRecoveryServer(runtime: ChefRuntime, baseServer: Server): 
         try {
           await runtime.retryTask(taskId);
         } catch (error) {
-          sendJson(res, 409, { error: error instanceof Error ? error.message : String(error) });
+          sendJson(res, 409, { error: retryErrorMessage(error) });
           return;
         }
 
