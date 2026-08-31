@@ -312,6 +312,7 @@ export class GenericTerminalHarness implements Harness {
   #finish(active: ActiveSession, rawExitCode: number | undefined): void {
     // onExit can re-fire once teardown starts; one finish owns the queue.
     if (this.#closed || !this.#sessions.has(active.session.id) || active.finishing) return;
+    active.finishing = true;
     if (active.watcher !== undefined) clearInterval(active.watcher);
     const exitCode = rawExitCode ?? active.signal ?? 1;
     const event: HarnessEvent =
@@ -325,9 +326,20 @@ export class GenericTerminalHarness implements Harness {
       : exitCode === 0
         ? "completed"
         : "crashed";
-    // Flush in-flight outbox reads so envelopes read from disk are pushed
-    // BEFORE the queue closes — otherwise they are deleted and dropped.
-    const drain = Promise.allSettled([...active.outboxDrains]).then(() => undefined);
+    // First let any poll already reading the outbox finish. The child has now
+    // exited, so one final read closes the race where it writes a structured
+    // result immediately before exit but before the next 250 ms poll.
+    const drain = Promise.allSettled([...active.outboxDrains])
+      .then(async () => {
+        try {
+          const envelopes = await active.session.sideband.readOutbox();
+          for (const envelope of envelopes) {
+            active.queue.push({ type: "structured", payload: envelope });
+          }
+        } catch {
+          // close() can own sideband teardown concurrently; best effort only.
+        }
+      });
     active.finishDrain = drain.then(() => {
       if (this.#closed) return; // close() owns teardown after it clears maps
       active.queue.push(event);
@@ -371,7 +383,9 @@ export class GenericTerminalHarness implements Harness {
 
   #watchOutbox(active: ActiveSession): void {
     const poll = (): void => {
-      if (this.#closed || active.finishing) return;
+      // One filesystem drain at a time. Overlapping reads can observe the same
+      // envelope before either removes it and duplicate a user-visible result.
+      if (this.#closed || active.finishing || active.outboxDrains.size > 0) return;
       const read = active.session.sideband.readOutbox()
         .then((envelopes) => {
           for (const envelope of envelopes) {
