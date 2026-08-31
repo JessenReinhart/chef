@@ -18,6 +18,19 @@ const tasks = new Map<string, Task>([
     createdAt: 1,
     updatedAt: 1,
   }],
+  ["exhausted-task", {
+    id: "exhausted-task",
+    workspaceId: "workspace-a",
+    title: "No retries left",
+    description: "failed after every configured retry",
+    status: "failed",
+    dependencies: [],
+    contextRefs: [],
+    priority: 0,
+    retryCount: 2,
+    createdAt: 1,
+    updatedAt: 1,
+  }],
   ["approval-task", {
     id: "approval-task",
     workspaceId: "workspace-a",
@@ -72,9 +85,10 @@ const runtime = {
     },
   },
   async retryTask(taskId: string) {
-    retryCalls.push(taskId);
     const task = tasks.get(taskId);
     if (!task) throw new Error(`Task ${taskId} not found`);
+    if (task.retryCount >= 2) throw new Error(`Task ${taskId} exceeds retry budget (${task.retryCount}/2)`);
+    retryCalls.push(taskId);
     tasks.set(taskId, { ...task, status: "running", retryCount: task.retryCount + 1, updatedAt: task.updatedAt + 1 });
   },
 } as unknown as ChefRuntime;
@@ -104,6 +118,12 @@ try {
   assert.equal(success.json.data?.status, "running");
   assert.deepEqual(retryCalls, ["failed-task"]);
 
+  const exhausted = await post("/api/nodes/exhausted-task/retry");
+  assert.equal(exhausted.status, 409);
+  assert.equal(exhausted.json.error, "This work step has used all available retries.");
+  assert.doesNotMatch(exhausted.json.error ?? "", /exhausted-task|retry budget/i, "Simple Mode must not leak scheduler/task jargon when recovery is exhausted");
+  assert.deepEqual(retryCalls, ["failed-task"], "exhausted recovery must not dispatch another worker attempt");
+
   const approvalBlocked = await post("/api/nodes/approval-task/retry");
   assert.equal(approvalBlocked.status, 409);
   assert.match(approvalBlocked.json.error ?? "", /waiting for approval/);
@@ -122,7 +142,7 @@ try {
   assert.equal(fallbackResult.status, 418);
   assert.equal(fallbackResult.json.fallback, true);
 
-  console.log("simple-mode-recovery-http: ok — retry is reachable, bounded, approval-safe, and workspace-scoped");
+  console.log("simple-mode-recovery-http: ok — retry is reachable, bounded, approval-safe, workspace-scoped, and understandable when exhausted");
 } finally {
   if (server.listening) await new Promise<void>((resolve) => server.close(() => resolve()));
 }
