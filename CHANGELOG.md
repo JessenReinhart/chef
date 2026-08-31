@@ -2,6 +2,7 @@
 
 ## 2026-08-31
 
+- **The permanent todo journey now proves real result handoff on both Windows and Linux (#285):** Chef’s canonical todo acceptance now uses the same Simple Mode handoff projection users see, requires result location, run instructions, and verification details to survive reopen, proves useful results can appear before the overall Mission finishes, and runs the full golden path on Windows as well as Ubuntu.
 - **Fast worker results are preserved exactly once at exit (#284):** When a worker writes a structured result immediately before finishing, Chef now performs one final serialized result drain before publishing the exit event. Slow filesystem reads are also serialized so the same result cannot appear twice.
 - **Both configured worker retries now remain available through recovery (#283):** A worker crash or spawn failure no longer spends an extra retry by itself. Chef now counts only actual retry dispatches, so a task can use both configured recovery attempts and still finish durably, while exhausted retries return a clear human-readable message.
 - **Failed worker retries now stay live through recovery (#282):** When a Simple Mode worker fails and is retried, Chef now keeps consuming the new worker session so recovery progress stays visible and the same task can reach durable completion instead of getting stuck in `running`.
