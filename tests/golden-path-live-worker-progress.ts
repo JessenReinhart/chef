@@ -1,9 +1,11 @@
 import { strict as assert } from "node:assert";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { GenericTerminalHarness } from "../src/harness/generic.ts";
 import { createChef } from "../src/main.ts";
+import { createRecoveryServer } from "../src/server/recovery-http.ts";
 import { summarizeMissionProgressEvent } from "../web/src/missionProgress.ts";
 import type {
   AgentId,
@@ -91,7 +93,7 @@ async function waitForEvent(
   assert.fail(`${label} was not observable within ${timeoutMs} ms`);
 }
 
-async function main(): Promise<void> {
+async function assertLiveWorkerProgress(): Promise<void> {
   const projectDir = await mkdtemp(join(tmpdir(), "chef-golden-live-progress-"));
   const dbPath = join(projectDir, "chef.sqlite");
 
@@ -151,7 +153,97 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((error: unknown) => {
-  console.error(error);
-  process.exitCode = 1;
-});
+async function assertFailedWorkerCanRecover(): Promise<void> {
+  const projectDir = await mkdtemp(join(tmpdir(), "chef-golden-retry-"));
+  const dbPath = join(projectDir, "chef.sqlite");
+  const markerPath = join(projectDir, "retry-marker");
+
+  try {
+    const workerScript = join(projectDir, "fail-once-todo-worker.cjs");
+    await writeFile(
+      workerScript,
+      `const fs = require("fs");\nconst marker = ${JSON.stringify(markerPath)};\nif (!fs.existsSync(marker)) { fs.writeFileSync(marker, "failed-once"); console.error("todo-builder: recoverable failure"); process.exit(1); }\nconsole.log("todo-builder: recovered");\n`,
+      "utf8",
+    );
+
+    const chef = createChef({
+      dbPath,
+      projectDir,
+      decisionProvider: new SlowTodoDecisionProvider(projectDir, workerScript),
+      orchestratorTimeoutMs: 10_000,
+    });
+    await chef.start();
+
+    const liveEvents: RuntimeEvent[] = [];
+    const unsubscribe = chef.subscribeEvents((event) => liveEvents.push(event));
+    const firstResult = await chef.sendUserMessage(TODO_REQUEST);
+    assert.equal(firstResult.ok, false, "the fail-once worker must expose the initial failure");
+    assert.equal(firstResult.taskIds.length, 1, "recovery scenario must stay on one canonical task");
+    const taskId = firstResult.taskIds[0];
+
+    const failedEvent = await waitForEvent(
+      liveEvents,
+      (event) => event.taskId === taskId && event.type === "task.failed",
+      2_000,
+      "worker failure",
+    );
+    const failedProgress = summarizeMissionProgressEvent(failedEvent);
+    assert.ok(failedProgress, "worker failure must cross the Simple Mode projection boundary");
+    assert.equal(failedProgress.tone, "attention", "worker failure must visibly require attention");
+    assert.match(failedProgress.text, /failed/i, "worker failure must be understandable without raw runtime state");
+
+    const failedSeq = failedEvent.seq;
+    const fallback = createServer((_req, res) => {
+      res.writeHead(404, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "not found" }));
+    });
+    const recoveryServer = createRecoveryServer(chef, fallback);
+    await new Promise<void>((resolve) => recoveryServer.listen(0, "127.0.0.1", resolve));
+    try {
+      const address = recoveryServer.address();
+      assert.ok(address && typeof address === "object", "recovery server must expose a local address");
+      const retryResponse = await fetch(`http://127.0.0.1:${address.port}/api/nodes/${taskId}/retry`, { method: "POST" });
+      assert.equal(retryResponse.status, 200, "Simple Mode retry route must accept the failed canonical task");
+      const retryBody = await retryResponse.json() as { ok?: boolean; data?: { id?: string; status?: string } };
+      assert.equal(retryBody.ok, true, "Simple Mode retry route must report successful recovery dispatch");
+      assert.equal(retryBody.data?.id, taskId, "retry response must identify the same canonical task");
+      assert.equal(retryBody.data?.status, "running", "retry response must immediately return the task to active work");
+    } finally {
+      await new Promise<void>((resolve) => recoveryServer.close(() => resolve()));
+    }
+
+    const retryRunning = await waitForEvent(
+      liveEvents,
+      (event) => event.seq > failedSeq && event.taskId === taskId && event.type === "task.running",
+      2_000,
+      "retry progress",
+    );
+    const retryProgress = summarizeMissionProgressEvent(retryRunning);
+    assert.ok(retryProgress, "retry must cross the Simple Mode projection boundary");
+    assert.equal(retryProgress.tone, "active", "retry must visibly return the task to active work");
+    assert.match(retryProgress.text, /retrying/i, "retry must be described as recovery rather than a frozen loading state");
+
+    await waitForEvent(
+      liveEvents,
+      (event) => event.seq > retryRunning.seq && event.taskId === taskId && event.type === "task.completed",
+      5_000,
+      "retried task completion",
+    );
+    const snapshot = await chef.inspectState();
+    const recoveredTask = snapshot.tasks.find((task) => task.id === taskId);
+    assert.equal(recoveredTask?.status, "completed", "retry worker exit must be consumed and persisted as durable completion");
+    assert.ok(
+      snapshot.sessions.filter((session) => session.taskId === taskId).some((session) => session.status === "completed"),
+      "retry must persist the recovered worker session instead of leaving it running",
+    );
+
+    unsubscribe();
+    await chef.close();
+  } finally {
+    await rm(projectDir, { recursive: true, force: true });
+  }
+}
+
+await assertLiveWorkerProgress();
+await assertFailedWorkerCanRecover();
+console.log("golden-path-live-worker-progress: ok — live work and Simple Mode failure recovery stay observable through durable completion");
