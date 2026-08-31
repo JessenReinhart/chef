@@ -195,9 +195,11 @@ export function createProjectServer(runtime: ChefRuntime, baseServer: Server, op
     reopeningProjectPath = path;
     sendJson(res, 202, { ok: true, data: { path, reopening: true, recent } });
     setTimeout(() => {
-      void Promise.resolve(options.onOpenProject(path)).catch(() => {
-        if (reopeningProjectPath === path) reopeningProjectPath = null;
-      });
+      void Promise.resolve()
+        .then(() => options.onOpenProject(path))
+        .catch(() => {
+          if (reopeningProjectPath === path) reopeningProjectPath = null;
+        });
     }, 100);
   };
 
