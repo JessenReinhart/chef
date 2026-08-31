@@ -34,6 +34,7 @@ assert.equal(windowsSelection.ariaLabel, "Selected project: todo-app (C:\\dev\\t
 
 assert.equal(sameSelectedProjectPath("/home/alice/todo-app/", "/home/alice/todo-app"), true);
 assert.equal(sameSelectedProjectPath("C:\\Dev\\Todo-App\\", "c:/dev/todo-app"), true);
+assert.equal(sameSelectedProjectPath("\\\\SERVER\\Share\\Todo-App", "//server/share/todo-app/"), true);
 assert.equal(sameSelectedProjectPath("/home/alice/old-project", "/home/alice/todo-app"), false);
 
 const observed: string[] = [];
