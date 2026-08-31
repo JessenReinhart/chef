@@ -354,15 +354,12 @@ export class Scheduler {
         this.#repo.updateSession(session.id, { status: "crashed", endedAt: now() });
         const currentTask = this.#repo.getTask(task.id)!;
         if (currentTask.status !== "running") return;
-        const retryCount = Math.min(currentTask.retryCount + 1, this.#maxRetries + 1);
         const { event: failEvt } = TaskMachine.transition(currentTask, "failed", {
           error: `spawn failed: ${message}`,
-          retryCount,
         });
         this.#repo.updateTask(task.id, {
           status: "failed",
           error: `spawn failed: ${message}`,
-          retryCount,
         });
         this.#appendEvent(workspaceId, failEvt);
       });
@@ -457,18 +454,13 @@ export class Scheduler {
           this.#appendEvent(workspaceId, doneEvt);
           runtimeDebug("task.completed", { taskId, worker: agentId, sessionId });
         } else {
-          // Bound retryCount at maxRetries+1 so the budget check in
-          // retryTask/dispatch stays authoritative for re-dispatch.
-          const retryCount = Math.min(task.retryCount + 1, this.#maxRetries + 1);
           TaskMachine.validateTransition(task.status, "failed");
           const { event: failEvt } = TaskMachine.transition(task, "failed", {
             error: `crashed with exit code ${event.exitCode}`,
-            retryCount,
           });
           this.#repo.updateTask(taskId, {
             status: "failed",
             error: `crashed with exit code ${event.exitCode}`,
-            retryCount,
           });
           this.#appendEvent(workspaceId, failEvt);
           runtimeDebug("task.failed", { taskId, worker: agentId, sessionId, exitCode: event.exitCode });
