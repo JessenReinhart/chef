@@ -171,12 +171,18 @@ async function defaultPickDirectory(): Promise<string | null> {
   throw new Error("native directory picker is not available on this platform; enter the project path manually");
 }
 
+function startsNewThreadWork(method: string | undefined, pathname: string): boolean {
+  if (method !== "POST") return false;
+  return pathname === "/api/threads" || /^\/api\/threads\/[^/]+\/chat$/.test(pathname);
+}
+
 export function createProjectServer(runtime: ChefRuntime, baseServer: Server, options: ProjectServerOptions): Server {
   const baseHandler = baseServer.listeners("request")[0] as RequestHandler | undefined;
   if (!baseHandler) throw new Error("base HTTP server has no request handler");
   const recentProjectsPath = options.recentProjectsPath ?? resolve(homedir(), ".chef", "recent-projects.json");
   const pickDirectory = options.pickDirectory ?? defaultPickDirectory;
   const canPickDirectory = options.canPickDirectory ?? defaultCanPickDirectory;
+  let reopeningProjectPath: string | null = null;
 
   const openProject = async (rawPath: string, res: ServerResponse) => {
     const path = await validateDirectory(rawPath);
@@ -186,8 +192,13 @@ export function createProjectServer(runtime: ChefRuntime, baseServer: Server, op
       return;
     }
     const recent = await rememberProject(recentProjectsPath, path);
+    reopeningProjectPath = path;
     sendJson(res, 202, { ok: true, data: { path, reopening: true, recent } });
-    setTimeout(() => { void options.onOpenProject(path); }, 100);
+    setTimeout(() => {
+      void Promise.resolve(options.onOpenProject(path)).catch(() => {
+        if (reopeningProjectPath === path) reopeningProjectPath = null;
+      });
+    }, 100);
   };
 
   return createServer(async (req, res) => {
@@ -207,6 +218,12 @@ export function createProjectServer(runtime: ChefRuntime, baseServer: Server, op
         const selected = await pickDirectory();
         if (!selected) { sendJson(res, 200, { ok: true, data: { cancelled: true } }); return; }
         await openProject(selected, res); return;
+      }
+      if (reopeningProjectPath && startsNewThreadWork(req.method, url.pathname)) {
+        sendJson(res, 409, {
+          error: `Chef is switching to ${reopeningProjectPath}. Wait until the selected project is active before starting new work.`,
+        });
+        return;
       }
       await baseHandler(req, res);
     } catch (error) {
