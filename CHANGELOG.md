@@ -2,6 +2,7 @@
 
 ## 2026-09-01
 
+- **Simple Mode live progress now stays inside the selected Thread (#290):** Chef now treats the global runtime event stream only as a signal to refresh authoritative Thread-scoped state, so concurrent Missions cannot leak another conversation's planning, failure, verification, or completion into the current Simple Mode feed. Temporary refresh failures recover on the next signal without substituting unscoped raw events.
 - **Project switching now waits for the selected workspace to really become active (#288):** Chef no longer reloads on a stale response from the old runtime. It waits for the requested project path, blocks new Thread work in the old workspace during the handoff, handles Windows path casing and separators correctly, and keeps the switch recoverable if relaunch fails.
 - **Simple CLI work no longer needs a separate planner provider (#286):** When a task-capable CLI worker is ready, bounded requests such as creating a simple todo app can start that worker directly even if no orchestrator provider is configured. Work that genuinely needs planning now fails with clear setup guidance instead of silently switching to Chef’s scripted test orchestrator.
 
