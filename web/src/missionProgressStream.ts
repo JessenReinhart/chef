@@ -97,3 +97,29 @@ export function subscribeMissionProgressRefresh(
   if (createStream) return createMissionProgressRefreshHub(createStream)(onRefresh);
   return subscribeSharedMissionProgressRefresh(onRefresh);
 }
+
+/**
+ * Treat the live stream as an invalidation signal, then rebuild UI state from an
+ * authoritative projection. The initial read and live invalidations share one
+ * coalesced queue so a slower mount-time read cannot overwrite newer progress.
+ */
+export function subscribeMissionProgressProjection<T>(
+  loadProjection: () => Promise<T>,
+  applyProjection: (projection: T) => void,
+  createStream?: MissionProgressEventStreamFactory,
+): () => void {
+  let closed = false;
+  const projectionRefresh = coalescedRefresh(async () => {
+    const projection = await loadProjection();
+    if (!closed) applyProjection(projection);
+  });
+  const unsubscribe = subscribeMissionProgressRefresh(projectionRefresh.trigger, createStream);
+
+  projectionRefresh.trigger();
+
+  return () => {
+    closed = true;
+    projectionRefresh.close();
+    unsubscribe();
+  };
+}

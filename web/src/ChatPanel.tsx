@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { api } from "./api";
-import type { ChatMessage, LlmStatus, UiRuntimeEvent, ViewMode } from "./types";
-import { summarizeMissionProgress, summarizeMissionProgressEvent, type MissionProgressItem } from "./missionProgress";
-import { missionProgressEventStreamUrl } from "./missionProgressStream";
+import type { ChatMessage, LlmStatus, ViewMode } from "./types";
+import { summarizeMissionProgress, type MissionProgressItem } from "./missionProgress";
+import { subscribeMissionProgressProjection } from "./missionProgressStream";
 
 interface ChatPanelProps {
   onPlanProposed: (taskIds: string[]) => void;
@@ -74,37 +74,12 @@ export function ChatPanel({ onPlanProposed, mode }: ChatPanelProps) {
     };
   }, []);
 
-  // Seed the human-readable Mission digest from durable runtime history.
-  useEffect(() => {
-    let cancelled = false;
-    api.stateRaw()
-      .then((snapshot) => {
-        if (!cancelled) setProgress(summarizeMissionProgress(snapshot.events));
-      })
-      .catch(() => {
-        // Progress digest is additive; chat remains usable if state is unavailable.
-      });
-    return () => { cancelled = true; };
-  }, []);
-
-  // Keep the digest live from authoritative runtime events without exposing raw-log noise.
-  useEffect(() => {
-    const es = new EventSource(missionProgressEventStreamUrl());
-    es.onmessage = (ev) => {
-      try {
-        const event = JSON.parse(ev.data) as UiRuntimeEvent;
-        const item = summarizeMissionProgressEvent(event);
-        if (!item) return;
-        setProgress((current) => {
-          if (current.some((candidate) => candidate.id === item.id)) return current;
-          return [...current, item].slice(-5);
-        });
-      } catch {
-        // Ignore malformed event frames; EventSource reconnect remains active.
-      }
-    };
-    return () => es.close();
-  }, []);
+  // Build the human-readable Mission digest from durable Thread-scoped state on mount
+  // and whenever the shared runtime stream signals that authoritative evidence changed.
+  useEffect(() => subscribeMissionProgressProjection(
+    async () => summarizeMissionProgress((await api.stateRaw()).events),
+    setProgress,
+  ), []);
 
   // Initial history load — dedupes messages already present.
   useEffect(() => {
