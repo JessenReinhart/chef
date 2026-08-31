@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-09-01
+
+- **Simple CLI work no longer needs a separate planner provider (#286):** When a task-capable CLI worker is ready, bounded requests such as creating a simple todo app can start that worker directly even if no orchestrator provider is configured. Work that genuinely needs planning now fails with clear setup guidance instead of silently switching to Chef’s scripted test orchestrator.
+
 ## 2026-08-31
 
 - **The permanent todo journey now proves real result handoff on both Windows and Linux (#285):** Chef’s canonical todo acceptance now uses the same Simple Mode handoff projection users see, requires result location, run instructions, and verification details to survive reopen, proves useful results can appear before the overall Mission finishes, and runs the full golden path on Windows as well as Ubuntu.
