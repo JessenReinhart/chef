@@ -177,7 +177,8 @@ try {
   delete process.env.CHEF_MODEL;
   delete process.env.CHEF_BASE_URL;
 
-  const noPlannerProvider = createMissionDecisionProvider();
+  const noPlannerProvider = createMissionDecisionProvider({ allowDirectWithoutPlanner: true });
+  assert.ok(noPlannerProvider, "production opt-in should provide truthful direct-worker routing without a planner");
   const canonicalPlan = await noPlannerProvider.proposePlan({
     workspaceId: "workspace-no-planner",
     goal: "Create a simple todo app",
@@ -212,6 +213,12 @@ try {
     /no task-capable CLI worker is ready/i,
     "a missing worker must be reported as a worker-readiness problem instead of a planning failure",
   );
+
+  assert.equal(
+    createMissionDecisionProvider(),
+    null,
+    "non-production callers should retain the historical null contract when no planner is configured",
+  );
 } finally {
   if (previousProviderEnv.provider === undefined) delete process.env.CHEF_PROVIDER; else process.env.CHEF_PROVIDER = previousProviderEnv.provider;
   if (previousProviderEnv.apiKey === undefined) delete process.env.CHEF_API_KEY; else process.env.CHEF_API_KEY = previousProviderEnv.apiKey;
@@ -219,4 +226,4 @@ try {
   if (previousProviderEnv.baseUrl === undefined) delete process.env.CHEF_BASE_URL; else process.env.CHEF_BASE_URL = previousProviderEnv.baseUrl;
 }
 
-console.log("fast-path-routing-policy: ok — routing stays bounded, no-provider direct work remains usable, and planner-required work fails truthfully");
+console.log("fast-path-routing-policy: ok — routing stays bounded, production no-provider direct work remains usable, and planner-required work fails truthfully");
