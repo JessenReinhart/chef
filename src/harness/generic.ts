@@ -383,7 +383,9 @@ export class GenericTerminalHarness implements Harness {
 
   #watchOutbox(active: ActiveSession): void {
     const poll = (): void => {
-      if (this.#closed || active.finishing) return;
+      // One filesystem drain at a time. Overlapping reads can observe the same
+      // envelope before either removes it and duplicate a user-visible result.
+      if (this.#closed || active.finishing || active.outboxDrains.size > 0) return;
       const read = active.session.sideband.readOutbox()
         .then((envelopes) => {
           for (const envelope of envelopes) {
