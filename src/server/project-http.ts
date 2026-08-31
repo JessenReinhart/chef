@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { constants as fsConstants } from "node:fs";
 import { access, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, delimiter, dirname, resolve } from "node:path";
+import { basename, delimiter, dirname, resolve, win32 } from "node:path";
 import { promisify } from "node:util";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { ChefRuntime } from "../main.ts";
@@ -54,6 +54,11 @@ async function validateDirectory(input: string): Promise<string> {
   if (!info.isDirectory()) throw new Error("project path must be a directory");
   await access(path);
   return path;
+}
+
+export function isSameProjectPath(left: string, right: string, platform: NodeJS.Platform = process.platform): boolean {
+  if (platform === "win32") return win32.resolve(left).toLowerCase() === win32.resolve(right).toLowerCase();
+  return resolve(left) === resolve(right);
 }
 
 async function readRecentProjects(path: string): Promise<RecentProject[]> {
@@ -175,7 +180,7 @@ export function createProjectServer(runtime: ChefRuntime, baseServer: Server, op
 
   const openProject = async (rawPath: string, res: ServerResponse) => {
     const path = await validateDirectory(rawPath);
-    if (path === resolve(runtime.projectDir)) {
+    if (isSameProjectPath(path, runtime.projectDir)) {
       const recent = await rememberProject(recentProjectsPath, path);
       sendJson(res, 200, { ok: true, data: { path, current: true, recent } });
       return;
