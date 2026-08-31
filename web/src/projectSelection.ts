@@ -15,7 +15,8 @@ function normalizedProjectPath(path: string): string {
   while (normalized.length > 1 && normalized.endsWith("/") && !/^[A-Za-z]:\/$/.test(normalized)) {
     normalized = normalized.slice(0, -1);
   }
-  return /^[A-Za-z]:\//.test(normalized) ? normalized.toLowerCase() : normalized;
+  const windowsPath = /^[A-Za-z]:\//.test(normalized) || normalized.startsWith("//");
+  return windowsPath ? normalized.toLowerCase() : normalized;
 }
 
 export function sameSelectedProjectPath(left: string, right: string): boolean {
