@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, type ProjectInfo } from "./api";
-import { projectSelectionSummary } from "./projectSelection";
+import { projectSelectionSummary, waitForSelectedProject } from "./projectSelection";
 
 export function ProjectSwitcher() {
   const [project, setProject] = useState<ProjectInfo | null>(null);
@@ -16,19 +16,22 @@ export function ProjectSwitcher() {
 
   useEffect(() => { void refresh(); }, []);
 
-  const reopen = async (action: () => Promise<{ reopening?: boolean; cancelled?: boolean }>) => {
+  const reopen = async (action: () => Promise<{ path?: string; reopening?: boolean; cancelled?: boolean }>) => {
     setBusy(true);
     setError(null);
     try {
       const result = await action();
       if (result.cancelled) return;
       if (result.reopening) {
+        if (!result.path) throw new Error("Chef did not report which project it is reopening");
         setOpen(false);
-        for (let attempt = 0; attempt < 40; attempt += 1) {
-          await new Promise((resolve) => window.setTimeout(resolve, 250));
-          try { await api.project(); window.location.reload(); return; } catch { /* runtime is between processes */ }
-        }
-        throw new Error("Chef did not reopen the selected project");
+        await waitForSelectedProject(
+          result.path,
+          () => api.project(),
+          () => new Promise((resolve) => window.setTimeout(resolve, 250)),
+        );
+        window.location.reload();
+        return;
       }
       await refresh();
       setOpen(false);
