@@ -2,6 +2,7 @@
 
 ## 2026-09-01
 
+- **Project switching now waits for the selected workspace to really become active (#288):** Chef no longer reloads on a stale response from the old runtime. It waits for the requested project path, blocks new Thread work in the old workspace during the handoff, handles Windows path casing and separators correctly, and keeps the switch recoverable if relaunch fails.
 - **Simple CLI work no longer needs a separate planner provider (#286):** When a task-capable CLI worker is ready, bounded requests such as creating a simple todo app can start that worker directly even if no orchestrator provider is configured. Work that genuinely needs planning now fails with clear setup guidance instead of silently switching to Chef’s scripted test orchestrator.
 
 ## 2026-08-31
