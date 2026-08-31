@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "node:http";
-import { createProjectServer, findLinuxDirectoryPicker } from "../src/server/project-http.ts";
+import { createProjectServer, findLinuxDirectoryPicker, isSameProjectPath } from "../src/server/project-http.ts";
 import { shouldRejectOtherProjectRuntime } from "../scripts/launcher-policy.mjs";
 import type { ChefRuntime } from "../src/main.ts";
 
@@ -25,6 +25,17 @@ assert.equal(shouldRejectOtherProjectRuntime({
   restart: false,
   platform: "win32",
 }), false, "Windows project comparison must remain case-insensitive");
+
+assert.equal(
+  isSameProjectPath("C:\\Work\\Chef", "c:\\work\\chef", "win32"),
+  true,
+  "selecting the already-open Windows project must not relaunch Chef just because path casing differs",
+);
+assert.equal(
+  isSameProjectPath("/home/jessen/Chef", "/home/jessen/chef", "linux"),
+  false,
+  "Linux project selection must preserve case-sensitive path semantics",
+);
 
 const zenityPicker = await findLinuxDirectoryPicker(async (command) => command === "zenity");
 assert.equal(zenityPicker?.command, "zenity");
