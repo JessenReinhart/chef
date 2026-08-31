@@ -1,0 +1,1 @@
+export const LIVE_TODO_REQUEST = "Create a simple todo app in this selected project using only Node.js built-ins and browser HTML/CSS/JavaScript with package.json npm start, PORT support, todo add/complete/remove controls, startup verification, and a short run summary.";

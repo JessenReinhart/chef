@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "node:http";
-import { createProjectServer, findLinuxDirectoryPicker } from "../src/server/project-http.ts";
+import { createProjectServer, findLinuxDirectoryPicker, isSameProjectPath } from "../src/server/project-http.ts";
 import { shouldRejectOtherProjectRuntime } from "../scripts/launcher-policy.mjs";
 import type { ChefRuntime } from "../src/main.ts";
 
@@ -25,6 +25,17 @@ assert.equal(shouldRejectOtherProjectRuntime({
   restart: false,
   platform: "win32",
 }), false, "Windows project comparison must remain case-insensitive");
+
+assert.equal(
+  isSameProjectPath("C:\\Work\\Chef", "c:\\work\\chef", "win32"),
+  true,
+  "selecting the already-open Windows project must not relaunch Chef just because path casing differs",
+);
+assert.equal(
+  isSameProjectPath("/home/jessen/Chef", "/home/jessen/chef", "linux"),
+  false,
+  "Linux project selection must preserve case-sensitive path semantics",
+);
 
 const zenityPicker = await findLinuxDirectoryPicker(async (command) => command === "zenity");
 assert.equal(zenityPicker?.command, "zenity");
@@ -66,6 +77,17 @@ try {
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: join(dir, "missing") }),
   });
   assert.equal(invalid.status, 400);
+
+  const selectedCurrent = await fetch(`${origin}/api/project/open`, {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: current }),
+  });
+  assert.equal(selectedCurrent.status, 200, "selecting the active project must clearly succeed without a relaunch");
+  const selectedCurrentBody = await selectedCurrent.json() as { ok?: boolean; data?: { path?: string; current?: boolean } };
+  assert.equal(selectedCurrentBody.ok, true);
+  assert.equal(selectedCurrentBody.data?.path, current);
+  assert.equal(selectedCurrentBody.data?.current, true, "project selection response must explicitly confirm the project is current");
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  assert.equal(opened, null, "selecting the already-active project must not trigger a runtime relaunch");
 
   const picked = await fetch(`${origin}/api/project/pick`, { method: "POST" });
   assert.equal(picked.status, 202);

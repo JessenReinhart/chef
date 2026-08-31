@@ -2,6 +2,7 @@ import { strict as assert } from "node:assert";
 import { shouldUseSingleWorkerFastPath } from "../src/orchestrator/fast-path-decision-provider.ts";
 import { summarizeMissionProgressEvent } from "../web/src/missionProgress.ts";
 import type { UiRuntimeEvent } from "../web/src/types.ts";
+import { LIVE_TODO_REQUEST } from "./fixtures/live-todo-request.ts";
 
 const simpleExplanations = [
   "What is React?",
@@ -36,6 +37,7 @@ const simpleDetailedRequests = [
   "Can you please create a simple todo app?",
   "Could you fix this button?",
   "Research the best way to create a system with AI\nKeep the answer concise.",
+  LIVE_TODO_REQUEST,
 ];
 
 for (const goal of simpleDetailedRequests) {
