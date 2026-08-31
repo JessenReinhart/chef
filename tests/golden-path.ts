@@ -213,6 +213,21 @@ function eventRoutingMode(event: RuntimeEvent): unknown {
   return (event.payload as Record<string, unknown>).routingMode;
 }
 
+async function waitForObservableEvent(
+  events: readonly RuntimeEvent[],
+  predicate: (event: RuntimeEvent) => boolean,
+  timeoutMs: number,
+  label: string,
+): Promise<RuntimeEvent> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const event = events.find(predicate);
+    if (event) return event;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.fail(`${label} was not observable within ${timeoutMs} ms`);
+}
+
 function assertRoutingModeIsDurable(events: readonly RuntimeEvent[]): void {
   const planEvent = events.find((event) => event.type === "orchestrator.plan.proposed");
   assert.ok(planEvent, "golden path must publish its routing decision");
@@ -278,7 +293,26 @@ async function main(): Promise<void> {
     const workspaceId = chef.workspaceId;
     const liveEvents: RuntimeEvent[] = [];
     const unsubscribe = chef.subscribeEvents((event) => liveEvents.push(event));
-    const result = await chef.sendUserMessage(TODO_REQUEST);
+    let sendSettled = false;
+    const sendPromise = chef.sendUserMessage(TODO_REQUEST).finally(() => { sendSettled = true; });
+
+    const planningEvent = await waitForObservableEvent(
+      liveEvents,
+      (event) => event.type === "mission.created" && eventStatus(event) === "planning",
+      500,
+      "planning acknowledgement",
+    );
+    assert.equal(sendSettled, false, "planning acknowledgement must be observable before request completion");
+    const missionId = planningEvent.source.id;
+    await waitForObservableEvent(
+      liveEvents,
+      (event) => event.source.id === missionId && event.type === "mission.status" && eventStatus(event) === "active",
+      2_000,
+      "active working state",
+    );
+    assert.equal(sendSettled, false, "active working state must be observable while the request is still running");
+
+    const result = await sendPromise;
     unsubscribe();
 
     assert.equal(result.workspaceId, workspaceId);
