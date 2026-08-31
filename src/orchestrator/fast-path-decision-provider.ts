@@ -49,6 +49,25 @@ function deterministicTaskEvaluation(taskResult: PlanTaskOutcome, madeBy: string
   };
 }
 
+class UnconfiguredPlannerDecisionProvider implements DecisionProvider {
+  readonly name = "planner-unconfigured";
+
+  async proposePlan(input: PlanProposalContext): Promise<Plan | null> {
+    if ((input.availableWorkers ?? []).length === 0) {
+      throw new Error(
+        "Chef cannot start this request because no task-capable CLI worker is ready. Install or configure a supported CLI worker, then retry.",
+      );
+    }
+    throw new Error(
+      "This request needs coordinated planning, but no orchestrator provider is configured. Configure a provider in Chef Settings, or ask for one bounded work step.",
+    );
+  }
+
+  async evaluate(taskResult: PlanTaskOutcome): Promise<Decision> {
+    return deterministicTaskEvaluation(taskResult, this.name);
+  }
+}
+
 /**
  * Short, single-stage work should not pay a planner round-trip just because the
  * user omitted a magic qualifier, phrased the request as an intent, added a
@@ -156,8 +175,12 @@ export class SingleWorkerFastPathDecisionProvider implements DecisionProvider {
   }
 }
 
-/** Use the normal configured LLM planner, with a bounded single-worker shortcut. */
-export function createMissionDecisionProvider(): DecisionProvider | null {
-  const provider = createLLMDecisionProvider();
-  return provider ? new SingleWorkerFastPathDecisionProvider(provider) : null;
+/**
+ * Use the configured LLM planner when available. Without one, keep bounded
+ * single-worker work usable with detected CLI workers instead of silently
+ * falling back to Chef's scripted test orchestrator.
+ */
+export function createMissionDecisionProvider(): DecisionProvider {
+  const provider = createLLMDecisionProvider() ?? new UnconfiguredPlannerDecisionProvider();
+  return new SingleWorkerFastPathDecisionProvider(provider);
 }
