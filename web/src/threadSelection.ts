@@ -29,6 +29,13 @@ export function resolveHomeThreadSelection(
   };
 }
 
+export function threadSubmissionOwnsForeground(
+  submittedThreadId: string | null,
+  selectedThreadId: string | null,
+): boolean {
+  return submittedThreadId !== null && submittedThreadId === selectedThreadId;
+}
+
 export function missionsForSelectedThread(
   missions: readonly UiMission[],
   threadId: string | null,
