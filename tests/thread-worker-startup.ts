@@ -17,6 +17,10 @@ const ACCEPTANCE_WORKER_ID = "acceptance-worker";
 
 class AcceptanceTaskHarness extends GenericTerminalHarness {
   readonly taskCapable = true;
+
+  taskLaunch(): { command: string; args: string[] } {
+    return { command: this.command, args: this.args };
+  }
 }
 
 async function waitForWorkerStartup(
@@ -84,7 +88,7 @@ chef.specializedHarnesses.register(ACCEPTANCE_WORKER_ID, "Acceptance Worker", ()
   agentId: ACCEPTANCE_WORKER_ID,
   workspaceId: chef.workspaceId,
   command: process.execPath,
-  args: ["-e", "setInterval(() => {}, 1000)"],
+  args: ["-e", "setTimeout(() => {}, 1000)"],
   cwd: dir,
 }));
 
@@ -111,6 +115,7 @@ try {
   if (!address || typeof address === "string") throw new Error("worker-startup HTTP server did not bind");
   const baseUrl = `http://127.0.0.1:${address.port}`;
 
+  assert.equal(chef.llmStatus.configured, false, "acceptance must run without a configured planner provider");
   const detections = chef.specializedHarnesses.detections();
   const readyTaskWorkers = detections.filter((worker) => worker.available && worker.taskCapable);
   assert.deepEqual(
@@ -160,6 +165,7 @@ try {
   const missionSessions = finalSnapshot.sessions.filter((session) => missionTaskIds.has(session.taskId));
   assert.equal(missionTasks.length, 1, "canonical bounded request must create exactly one worker Task");
   assert.equal(missionTasks[0].assignedTo, ACCEPTANCE_WORKER_ID, "no-planner production routing must assign the detected CLI worker");
+  assert.equal(missionTasks[0].description, TODO_REQUEST, "canonical request must reach the worker unchanged");
   assert.ok(missionSessions.length > 0, "acknowledged Mission must persist its real worker Session");
   assert.ok(missionSessions.every((session) => session.agentId === ACCEPTANCE_WORKER_ID), "worker Session must belong to the detected CLI worker");
   assert.ok(missionSessions.every((session) => session.command.length > 0), "worker Session command must be observable");
