@@ -43,7 +43,7 @@ if (process.env.CHEF_PROVIDER && process.env.CHEF_API_KEY) {
   delete process.env.ANTHROPIC_API_KEY;
   delete process.env.OPENAI_API_KEY;
 }
-const missionDecisionProvider = createMissionDecisionProvider();
+const missionDecisionProvider = createMissionDecisionProvider({ allowDirectWithoutPlanner: true });
 const chef = createChef({
   dbPath,
   projectDir,
