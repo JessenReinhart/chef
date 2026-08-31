@@ -1,5 +1,14 @@
 import { strict as assert } from "node:assert";
-import { createThreadHistoryLoader, latestAssistantThreadNote, missionsForSelectedThread, resolveHomeThreadSelection, threadSubmissionOwnsForeground } from "../web/src/threadSelection.ts";
+import {
+  createThreadHistoryLoader,
+  latestAssistantThreadNote,
+  missionsForSelectedThread,
+  moveThreadSubmissionPending,
+  resolveHomeThreadSelection,
+  setThreadSubmissionPending,
+  threadSubmissionKey,
+  threadSubmissionOwnsForeground,
+} from "../web/src/threadSelection.ts";
 import type { UiThread } from "../web/src/threadApi.ts";
 import type { ChatMessage, UiMission } from "../web/src/types.ts";
 
@@ -34,6 +43,28 @@ pending.get("thread-c")?.reject(new Error("stale Thread request failed"));
 
 assert.deepEqual(await latestSuccess, { current: true, messages: dMessages }, "the newest Thread history should remain authoritative");
 assert.deepEqual(await staleFailure, { current: false }, "a stale Thread failure must not surface over the latest selection");
+
+// Submission-in-progress UI is owned by the Thread that submitted the work.
+// Switching to another Thread must leave that Thread usable, and overlapping
+// submissions must not clear one another when they finish in a different order.
+let pendingSubmissions = new Set<string>();
+pendingSubmissions = setThreadSubmissionPending(pendingSubmissions, threadSubmissionKey("thread-a"), true);
+assert.equal(pendingSubmissions.has(threadSubmissionKey("thread-a")), true, "Thread A should show its own starting state");
+assert.equal(pendingSubmissions.has(threadSubmissionKey("thread-b")), false, "switching to Thread B must not inherit Thread A's starting state");
+
+pendingSubmissions = setThreadSubmissionPending(pendingSubmissions, threadSubmissionKey("thread-b"), true);
+assert.equal(pendingSubmissions.has(threadSubmissionKey("thread-a")), true, "Thread A can keep working in the background");
+assert.equal(pendingSubmissions.has(threadSubmissionKey("thread-b")), true, "Thread B can start independent work while Thread A is still running");
+
+pendingSubmissions = setThreadSubmissionPending(pendingSubmissions, threadSubmissionKey("thread-a"), false);
+assert.equal(pendingSubmissions.has(threadSubmissionKey("thread-a")), false, "Thread A completion should clear only Thread A's transient state");
+assert.equal(pendingSubmissions.has(threadSubmissionKey("thread-b")), true, "Thread A completion must not clear Thread B's in-flight state");
+
+const newThreadKey = threadSubmissionKey(null);
+pendingSubmissions = setThreadSubmissionPending(new Set(), newThreadKey, true);
+pendingSubmissions = moveThreadSubmissionPending(pendingSubmissions, newThreadKey, threadSubmissionKey("thread-created"));
+assert.equal(pendingSubmissions.has(newThreadKey), false, "new-Thread submission state should leave the temporary key after creation");
+assert.equal(pendingSubmissions.has(threadSubmissionKey("thread-created")), true, "the created Thread should inherit its own in-flight state");
 
 // A task submission may finish after the user has moved to another Thread.
 // The background work still belongs to its original Thread, but its late UI
@@ -155,4 +186,4 @@ assert.equal(defaultSelection.readOnly, false);
 const missingSelection = resolveHomeThreadSelection(threads, "missing");
 assert.equal(missingSelection.selectedThread?.id, "active-a", "a stale remembered id should recover to an active Thread");
 
-console.log("thread-selection-race: ok — Thread switching, submission completion, Mission activity, and terminal summaries stay isolated");
+console.log("thread-selection-race: ok — Thread switching, concurrent submissions, Mission activity, and terminal summaries stay isolated");
