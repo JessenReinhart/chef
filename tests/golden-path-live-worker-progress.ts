@@ -159,10 +159,10 @@ async function assertFailedWorkerCanRecover(): Promise<void> {
   const markerPath = join(projectDir, "retry-marker");
 
   try {
-    const workerScript = join(projectDir, "fail-once-todo-worker.cjs");
+    const workerScript = join(projectDir, "fail-twice-todo-worker.cjs");
     await writeFile(
       workerScript,
-      `const fs = require("fs");\nconst marker = ${JSON.stringify(markerPath)};\nif (!fs.existsSync(marker)) { fs.writeFileSync(marker, "failed-once"); console.error("todo-builder: recoverable failure"); process.exit(1); }\nconsole.log("todo-builder: recovered");\n`,
+      `const fs = require("fs");\nconst marker = ${JSON.stringify(markerPath)};\nconst previous = fs.existsSync(marker) ? Number(fs.readFileSync(marker, "utf8")) : 0;\nconst attempt = previous + 1;\nfs.writeFileSync(marker, String(attempt));\nif (attempt <= 2) { console.error("todo-builder: recoverable failure " + attempt); process.exit(1); }\nconsole.log("todo-builder: recovered on attempt " + attempt);\n`,
       "utf8",
     );
 
@@ -177,7 +177,7 @@ async function assertFailedWorkerCanRecover(): Promise<void> {
     const liveEvents: RuntimeEvent[] = [];
     const unsubscribe = chef.subscribeEvents((event) => liveEvents.push(event));
     const firstResult = await chef.sendUserMessage(TODO_REQUEST);
-    assert.equal(firstResult.ok, false, "the fail-once worker must expose the initial failure");
+    assert.equal(firstResult.ok, false, "the fail-twice worker must expose the initial failure");
     assert.equal(firstResult.taskIds.length, 1, "recovery scenario must stay on one canonical task");
     const taskId = firstResult.taskIds[0];
 
@@ -192,7 +192,13 @@ async function assertFailedWorkerCanRecover(): Promise<void> {
     assert.equal(failedProgress.tone, "attention", "worker failure must visibly require attention");
     assert.match(failedProgress.text, /failed/i, "worker failure must be understandable without raw runtime state");
 
-    const failedSeq = failedEvent.seq;
+    const afterInitialFailure = await chef.inspectState();
+    assert.equal(
+      afterInitialFailure.tasks.find((task) => task.id === taskId)?.retryCount,
+      0,
+      "an initial worker failure must not spend a retry before the user requests one",
+    );
+
     const fallback = createServer((_req, res) => {
       res.writeHead(404, { "content-type": "application/json" });
       res.end(JSON.stringify({ ok: false, error: "not found" }));
@@ -202,39 +208,79 @@ async function assertFailedWorkerCanRecover(): Promise<void> {
     try {
       const address = recoveryServer.address();
       assert.ok(address && typeof address === "object", "recovery server must expose a local address");
-      const retryResponse = await fetch(`http://127.0.0.1:${address.port}/api/nodes/${taskId}/retry`, { method: "POST" });
-      assert.equal(retryResponse.status, 200, "Simple Mode retry route must accept the failed canonical task");
-      const retryBody = await retryResponse.json() as { ok?: boolean; data?: { id?: string; status?: string } };
-      assert.equal(retryBody.ok, true, "Simple Mode retry route must report successful recovery dispatch");
-      assert.equal(retryBody.data?.id, taskId, "retry response must identify the same canonical task");
-      assert.equal(retryBody.data?.status, "running", "retry response must immediately return the task to active work");
+      const retryUrl = `http://127.0.0.1:${address.port}/api/nodes/${taskId}/retry`;
+
+      const firstRetryResponse = await fetch(retryUrl, { method: "POST" });
+      assert.equal(firstRetryResponse.status, 200, "Simple Mode must accept the first allowed retry");
+      const firstRetryBody = await firstRetryResponse.json() as { ok?: boolean; data?: { id?: string; status?: string } };
+      assert.equal(firstRetryBody.ok, true, "first retry route must report successful recovery dispatch");
+      assert.equal(firstRetryBody.data?.id, taskId, "first retry must identify the same canonical task");
+      assert.equal(firstRetryBody.data?.status, "running", "first retry must immediately return the task to active work");
+
+      const firstRetryRunning = await waitForEvent(
+        liveEvents,
+        (event) => event.seq > failedEvent.seq && event.taskId === taskId && event.type === "task.running",
+        2_000,
+        "first retry progress",
+      );
+      const firstRetryProgress = summarizeMissionProgressEvent(firstRetryRunning);
+      assert.ok(firstRetryProgress, "first retry must cross the Simple Mode projection boundary");
+      assert.equal(firstRetryProgress.tone, "active", "first retry must visibly return the task to active work");
+      assert.match(firstRetryProgress.text, /retrying/i, "first retry must be described as recovery rather than frozen loading");
+
+      const secondFailure = await waitForEvent(
+        liveEvents,
+        (event) => event.seq > firstRetryRunning.seq && event.taskId === taskId && event.type === "task.failed",
+        5_000,
+        "second worker failure",
+      );
+      const afterFirstRetryFailure = await chef.inspectState();
+      assert.equal(
+        afterFirstRetryFailure.tasks.find((task) => task.id === taskId)?.retryCount,
+        1,
+        "a failed first retry must preserve one remaining configured retry",
+      );
+
+      const secondRetryResponse = await fetch(retryUrl, { method: "POST" });
+      assert.equal(secondRetryResponse.status, 200, "Simple Mode must accept the second configured retry");
+      const secondRetryBody = await secondRetryResponse.json() as { ok?: boolean; data?: { id?: string; status?: string } };
+      assert.equal(secondRetryBody.ok, true, "second retry route must report successful recovery dispatch");
+      assert.equal(secondRetryBody.data?.id, taskId, "second retry must stay on the same canonical task");
+      assert.equal(secondRetryBody.data?.status, "running", "second retry must immediately return the task to active work");
+
+      const secondRetryRunning = await waitForEvent(
+        liveEvents,
+        (event) => event.seq > secondFailure.seq && event.taskId === taskId && event.type === "task.running",
+        2_000,
+        "second retry progress",
+      );
+      const secondRetryProgress = summarizeMissionProgressEvent(secondRetryRunning);
+      assert.ok(secondRetryProgress, "second retry must cross the Simple Mode projection boundary");
+      assert.equal(secondRetryProgress.tone, "active", "second retry must visibly return the task to active work");
+      assert.match(secondRetryProgress.text, /retrying/i, "second retry must remain understandable recovery feedback");
+
+      await waitForEvent(
+        liveEvents,
+        (event) => event.seq > secondRetryRunning.seq && event.taskId === taskId && event.type === "task.completed",
+        5_000,
+        "second-retry task completion",
+      );
     } finally {
       await new Promise<void>((resolve) => recoveryServer.close(() => resolve()));
     }
 
-    const retryRunning = await waitForEvent(
-      liveEvents,
-      (event) => event.seq > failedSeq && event.taskId === taskId && event.type === "task.running",
-      2_000,
-      "retry progress",
-    );
-    const retryProgress = summarizeMissionProgressEvent(retryRunning);
-    assert.ok(retryProgress, "retry must cross the Simple Mode projection boundary");
-    assert.equal(retryProgress.tone, "active", "retry must visibly return the task to active work");
-    assert.match(retryProgress.text, /retrying/i, "retry must be described as recovery rather than a frozen loading state");
-
-    await waitForEvent(
-      liveEvents,
-      (event) => event.seq > retryRunning.seq && event.taskId === taskId && event.type === "task.completed",
-      5_000,
-      "retried task completion",
-    );
     const snapshot = await chef.inspectState();
     const recoveredTask = snapshot.tasks.find((task) => task.id === taskId);
-    assert.equal(recoveredTask?.status, "completed", "retry worker exit must be consumed and persisted as durable completion");
+    assert.equal(recoveredTask?.status, "completed", "second allowed retry must reach durable completion");
+    assert.equal(recoveredTask?.retryCount, 2, "retry count must represent the two actual retry dispatches");
+    assert.equal(
+      snapshot.sessions.filter((session) => session.taskId === taskId).length,
+      3,
+      "initial attempt plus two configured retries must each persist a worker session",
+    );
     assert.ok(
       snapshot.sessions.filter((session) => session.taskId === taskId).some((session) => session.status === "completed"),
-      "retry must persist the recovered worker session instead of leaving it running",
+      "second retry must persist the recovered worker session instead of leaving it running",
     );
 
     unsubscribe();
@@ -246,4 +292,4 @@ async function assertFailedWorkerCanRecover(): Promise<void> {
 
 await assertLiveWorkerProgress();
 await assertFailedWorkerCanRecover();
-console.log("golden-path-live-worker-progress: ok — live work and Simple Mode failure recovery stay observable through durable completion");
+console.log("golden-path-live-worker-progress: ok — live work and both configured Simple Mode retries stay observable through durable completion");
