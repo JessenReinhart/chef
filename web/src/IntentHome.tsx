@@ -11,7 +11,7 @@ import {
   threadMessages,
   type UiThread,
 } from "./threadApi";
-import { createThreadHistoryLoader, resolveHomeThreadSelection } from "./threadSelection";
+import { createThreadHistoryLoader, resolveHomeThreadSelection, threadSubmissionOwnsForeground } from "./threadSelection";
 import {
   deriveMissionHomeState,
   summarizeMissionProgressForMission,
@@ -100,7 +100,7 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
     const selectionSnapshot = threadHistory.snapshot();
     try {
       const [snapshot, listedThreads] = await Promise.all([api.stateRaw(), listThreads()]);
-      const rememberedId = selectedThreadId ?? loadSelectedThreadId();
+      const rememberedId = loadSelectedThreadId();
       const selected = resolveHomeThreadSelection(listedThreads, rememberedId).selectedThread;
       const selectedMessages = selected ? await threadMessages(selected.id) : [];
 
@@ -120,7 +120,7 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
         setError(err instanceof Error ? err.message : "Chef could not refresh the workspace");
       }
     }
-  }, [selectedThreadId, threadHistory]);
+  }, [threadHistory]);
 
   useEffect(() => {
     void refresh();
@@ -369,22 +369,26 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
     setSubmitting(true);
     setLastReport(null);
     setError(null);
+    let submissionThreadId = selectedThreadId;
     try {
-      let threadId = selectedThreadId;
-      if (!threadId) {
+      if (!submissionThreadId) {
         const thread = await createThread(titleFromMessage(message));
         threadHistory.invalidate();
         setThreads((current) => [...current, thread]);
-        threadId = thread.id;
+        submissionThreadId = thread.id;
         saveSelectedThreadId(thread.id);
         setSelectedThreadId(thread.id);
       }
-      const result = await sendThreadMessage(threadId, message);
-      setGoal("");
-      setLastReport(result.report || null);
+      const result = await sendThreadMessage(submissionThreadId, message);
+      if (threadSubmissionOwnsForeground(submissionThreadId, loadSelectedThreadId())) {
+        setGoal("");
+        setLastReport(result.report || null);
+      }
       await refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Chef could not start this work");
+      if (submissionThreadId === null || threadSubmissionOwnsForeground(submissionThreadId, loadSelectedThreadId())) {
+        setError(err instanceof Error ? err.message : "Chef could not start this work");
+      }
     } finally {
       setSubmitting(false);
     }
