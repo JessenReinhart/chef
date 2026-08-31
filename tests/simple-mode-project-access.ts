@@ -1,5 +1,9 @@
 import { strict as assert } from "node:assert";
-import { projectSelectionSummary } from "../web/src/projectSelection.ts";
+import {
+  projectSelectionSummary,
+  sameSelectedProjectPath,
+  waitForSelectedProject,
+} from "../web/src/projectSelection.ts";
 import { setupChromeFeatures } from "../web/src/setupChromeFeatures.ts";
 
 const home = setupChromeFeatures("home");
@@ -28,4 +32,44 @@ assert.equal(windowsSelection.label, "todo-app");
 assert.equal(windowsSelection.status, "Selected");
 assert.equal(windowsSelection.ariaLabel, "Selected project: todo-app (C:\\dev\\todo-app)");
 
-console.log("simple-mode-project-access: ok — project selection is available and explicitly confirmed across local path formats");
+assert.equal(sameSelectedProjectPath("/home/alice/todo-app/", "/home/alice/todo-app"), true);
+assert.equal(sameSelectedProjectPath("C:\\Dev\\Todo-App\\", "c:/dev/todo-app"), true);
+assert.equal(sameSelectedProjectPath("/home/alice/old-project", "/home/alice/todo-app"), false);
+
+const observed: string[] = [];
+const responses: Array<{ name: string; path: string } | Error> = [
+  { name: "old-project", path: "/home/alice/old-project" },
+  new Error("runtime restarting"),
+  { name: "todo-app", path: "/home/alice/todo-app" },
+];
+const activated = await waitForSelectedProject(
+  "/home/alice/todo-app",
+  async () => {
+    const next = responses.shift();
+    if (!next) throw new Error("unexpected project poll");
+    if (next instanceof Error) throw next;
+    observed.push(next.path);
+    return next;
+  },
+  async () => {},
+  4,
+);
+assert.equal(activated.path, "/home/alice/todo-app");
+assert.deepEqual(
+  observed,
+  ["/home/alice/old-project", "/home/alice/todo-app"],
+  "a stale old-runtime response must not be accepted as successful project selection",
+);
+
+await assert.rejects(
+  () => waitForSelectedProject(
+    "C:\\dev\\new-project",
+    async () => ({ name: "old-project", path: "C:\\dev\\old-project" }),
+    async () => {},
+    2,
+  ),
+  /selected project did not become active/,
+  "selection timeout must fail visibly instead of reloading the wrong workspace",
+);
+
+console.log("simple-mode-project-access: ok — project selection waits for the requested runtime across Linux and Windows path formats");
