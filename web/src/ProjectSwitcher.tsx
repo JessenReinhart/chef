@@ -24,7 +24,6 @@ export function ProjectSwitcher() {
       if (result.cancelled) return;
       if (result.reopening) {
         if (!result.path) throw new Error("Chef did not report which project it is reopening");
-        setOpen(false);
         await waitForSelectedProject(
           result.path,
           () => api.project(),
