@@ -3,14 +3,17 @@ import { strict as assert } from "node:assert";
 import {
   deriveMissionHeartbeat,
   deriveMissionHomeState,
+  summarizeMissionProgress,
   summarizeMissionProgressEvent,
   summarizeMissionProgressForMission,
 } from "../web/src/missionProgress.ts";
 import {
   MISSION_PROGRESS_EVENT_TYPES,
   missionProgressEventStreamUrl,
+  subscribeMissionProgressProjection,
   subscribeMissionProgressRefresh,
 } from "../web/src/missionProgressStream.ts";
+import { scopeStateToThread } from "../web/src/threadScope.ts";
 import type { UiRuntimeEvent } from "../web/src/types.ts";
 
 function missionStatusEvent(id: string, status: string, missionId = "mission-1", timestamp = 1_000): UiRuntimeEvent {
@@ -78,6 +81,68 @@ await new Promise<void>((resolve) => setImmediate(resolve));
 assert.equal(liveRefreshCount, 2, "bursty worker output must collapse into one trailing refresh so the latest state is still observed");
 unsubscribeLiveProgress();
 assert.equal(liveStreamClosed, true, "unmounting the progress projection must release its EventSource connection");
+
+const multiThreadState = {
+  tasks: [],
+  sessions: [],
+  approvals: [],
+  canvasNodes: [],
+  canvasEdges: [],
+  missions: [
+    { id: "mission-selected", taskIds: [], metadata: { threadId: "thread-selected" } },
+    { id: "mission-other", taskIds: [], metadata: { threadId: "thread-other" } },
+  ],
+  events: [
+    missionStatusEvent("event-50", "active", "mission-selected", 5_000),
+    missionStatusEvent("event-51", "failed", "mission-other", 5_100),
+  ],
+} as Parameters<typeof scopeStateToThread>[0];
+let projectedProgress = [] as ReturnType<typeof summarizeMissionProgress>;
+let projectedStreamClosed = false;
+let failNextProjectionLoad = false;
+const fakeProjectedStream = {
+  onmessage: null as ((event: MessageEvent) => void) | null,
+  close() { projectedStreamClosed = true; },
+};
+const unsubscribeProjectedProgress = subscribeMissionProgressProjection(
+  async () => {
+    if (failNextProjectionLoad) {
+      failNextProjectionLoad = false;
+      throw new Error("temporary state refresh failure");
+    }
+    return summarizeMissionProgress(scopeStateToThread(multiThreadState, "thread-selected").events);
+  },
+  (projection) => { projectedProgress = projection; },
+  () => fakeProjectedStream,
+);
+
+fakeProjectedStream.onmessage?.({ data: JSON.stringify(multiThreadState.events[1]) } as MessageEvent);
+await new Promise<void>((resolve) => setImmediate(resolve));
+assert.ok(
+  projectedProgress.some((item) => item.text === "Mission work is active."),
+  "a global live signal must refresh and retain progress for the selected Thread",
+);
+assert.ok(
+  projectedProgress.every((item) => !item.text.includes("failed")),
+  "activity belonging only to another Thread must not leak into the selected Simple Mode progress projection",
+);
+
+multiThreadState.events.push(missionStatusEvent("event-52", "verifying", "mission-selected", 5_200));
+failNextProjectionLoad = true;
+fakeProjectedStream.onmessage?.({} as MessageEvent);
+await new Promise<void>((resolve) => setImmediate(resolve));
+assert.ok(
+  projectedProgress.every((item) => item.text !== "Chef is verifying the result."),
+  "a failed authoritative refresh must not invent progress from the raw global SSE payload",
+);
+fakeProjectedStream.onmessage?.({} as MessageEvent);
+await new Promise<void>((resolve) => setImmediate(resolve));
+assert.ok(
+  projectedProgress.some((item) => item.text === "Chef is verifying the result."),
+  "a later live signal must recover after a temporary refresh failure and expose relevant selected-Thread progress",
+);
+unsubscribeProjectedProgress();
+assert.equal(projectedStreamClosed, true, "the scoped projection must release its live subscription on unmount");
 
 const cancelled = summarizeMissionProgressEvent(missionStatusEvent("event-1", "cancelled"));
 assert.ok(cancelled);
@@ -285,4 +350,4 @@ assert.equal(
   "a crashed worker session must never degrade into a misleading still-working heartbeat",
 );
 
-console.log("mission-progress-ui: ok — mounted live refresh, bounded event bursts, scoped progress, recovery, and truthful long-running heartbeat behavior are covered");
+console.log("mission-progress-ui: ok — mounted live refresh, Thread-scoped projection, bounded event bursts, recovery, and truthful long-running heartbeat behavior are covered");
