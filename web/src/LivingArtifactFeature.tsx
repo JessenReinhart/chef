@@ -167,6 +167,9 @@ export function LivingArtifactFeature() {
   );
   const resultNotice = selectedThreadProjection?.notice
     ?? (selectedThreadId ? null : missingResultHandoffNotice(missionScope?.status, currentMissionArtifacts.length));
+  const visibleResultCount = selectedThreadId && missionScope?.threadId !== selectedThreadId
+    ? 0
+    : currentMissionArtifacts.length;
   const shelfArtifacts = useMemo(
     () => recentArtifacts(artifacts, MAX_SHELF_RESULTS),
     [artifacts],
@@ -195,7 +198,7 @@ export function LivingArtifactFeature() {
     <section className="chef-result-cluster" aria-label="Workspace results">
       <div className="chef-result-cluster__label">
         <span>Results</span>
-        <small>{selectedThreadId ? visibleArtifacts.length : currentMissionArtifacts.length}</small>
+        <small>{visibleResultCount}</small>
       </div>
       {resultNotice && (
         <p className="chef-result-cluster__notice" role="status">{resultNotice}</p>
