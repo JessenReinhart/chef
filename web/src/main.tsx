@@ -12,6 +12,7 @@ import { ChannelRoomsFeature } from "./ChannelRoomsFeature";
 import { AgentContextInspector } from "./AgentContextInspector";
 import { WorkspaceContextBar } from "./WorkspaceContextBar";
 import { MissionActivityRail } from "./MissionActivityRail";
+import { SELECTED_THREAD_EVENT } from "./threadApi";
 import {
   nextWorkspaceDepth,
   readWorkspaceDepth,
@@ -30,6 +31,7 @@ function persistedDepth(): WorkspaceDepth {
 
 function ChefRoot() {
   const [viewMode, setViewMode] = useState<WorkspaceDepth>(persistedDepth);
+  const [threadSurfaceGeneration, setThreadSurfaceGeneration] = useState(0);
 
   // The Living Workspace still exposes its own Advanced action. Keep both
   // controls on the same persisted depth without mounting both streaming trees.
@@ -39,6 +41,17 @@ function ChefRoot() {
       setViewMode((current) => current === persisted ? current : persisted);
     }, 200);
     return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    const onThreadChanged = () => {
+      // Simple Mode surfaces own Thread-scoped projections independently.
+      // Remount them together so none can keep the previous Thread visible
+      // while their asynchronous refreshes resolve.
+      setThreadSurfaceGeneration((generation) => generation + 1);
+    };
+    window.addEventListener(SELECTED_THREAD_EVENT, onThreadChanged);
+    return () => window.removeEventListener(SELECTED_THREAD_EVENT, onThreadChanged);
   }, []);
 
   const toggleRuntimeDetails = () => {
@@ -75,9 +88,9 @@ function ChefRoot() {
     {plan.agentContext && <AgentContextInspector />}
 
     {plan.projectContext && <WorkspaceContextBar />}
-    {plan.livingWorkspace && <LivingWorkspaceFeature />}
-    {plan.missionActivity && <MissionActivityRail />}
-    {plan.livingArtifacts && <LivingArtifactFeature />}
+    {plan.livingWorkspace && <LivingWorkspaceFeature key={`workspace:${threadSurfaceGeneration}`} />}
+    {plan.missionActivity && <MissionActivityRail key={`activity:${threadSurfaceGeneration}`} />}
+    {plan.livingArtifacts && <LivingArtifactFeature key={`artifacts:${threadSurfaceGeneration}`} />}
 
     <SetupChrome surface="workbench" />
   </>;

@@ -93,5 +93,7 @@ export function saveSelectedThreadId(threadId: string | null): void {
   const previous = loadSelectedThreadId();
   if (threadId) localStorage.setItem(SELECTED_THREAD_KEY, threadId);
   else localStorage.removeItem(SELECTED_THREAD_KEY);
-  if (previous !== threadId) window.dispatchEvent(new CustomEvent(SELECTED_THREAD_EVENT, { detail: { threadId } }));
+  if (previous !== threadId && localStorage.getItem("chef:view-mode") !== "power") {
+    window.dispatchEvent(new CustomEvent(SELECTED_THREAD_EVENT, { detail: { threadId } }));
+  }
 }
