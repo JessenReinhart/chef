@@ -14,6 +14,7 @@ import { api } from "./api";
 import { loadSelectedThreadId, SELECTED_THREAD_EVENT, threadMessages } from "./threadApi";
 import {
   createThreadHistoryLoader,
+  isThreadSubmissionPending,
   setThreadSubmissionPending,
   threadSubmissionKey,
 } from "./threadSelection";
@@ -278,7 +279,7 @@ export function LivingWorkspaceFeature() {
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const threadHistoryLoader = useMemo(() => createThreadHistoryLoader(threadMessages), []);
-  const sending = submittingThreadKeys.has(threadSubmissionKey(selectedThreadId));
+  const sending = isThreadSubmissionPending(submittingThreadKeys, selectedThreadId);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
