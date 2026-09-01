@@ -86,6 +86,15 @@ export function visibleArtifactsForSelectedThreadMission<T extends MissionLinked
   return visibleArtifactsForCurrentMission(artifacts, scope, limit);
 }
 
+export function shouldOfferArtifactShelf(
+  workspaceArtifactCount: number,
+  visibleResultCount: number,
+  visibleLimit = MAX_VISIBLE_RESULTS,
+): boolean {
+  if (workspaceArtifactCount <= 0) return false;
+  return visibleResultCount === 0 || workspaceArtifactCount > visibleLimit;
+}
+
 export function missingResultHandoffNotice(missionStatus: string | undefined, resultCount: number): string | null {
   if (!missionStatus) return null;
   if (missionStatus === "completed" && resultCount === 0) {
