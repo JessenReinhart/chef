@@ -46,12 +46,16 @@ assert.deepEqual(await latestSuccess, { current: true, messages: dMessages }, "t
 assert.deepEqual(await staleFailure, { current: false }, "a stale Thread failure must not surface over the latest selection");
 
 // Submission-in-progress UI is owned by the Thread that submitted the work.
-// Switching to another Thread must leave that Thread usable, and overlapping
-// submissions must not clear one another when they finish in a different order.
+// Switching to another Thread must leave that Thread usable, switching back
+// must still block a duplicate in the original Thread, and overlapping
+// submissions must not clear one another when they finish out of order.
 let pendingSubmissions = new Set<string>();
 pendingSubmissions = setThreadSubmissionPending(pendingSubmissions, threadSubmissionKey("thread-a"), true);
 assert.equal(pendingSubmissions.has(threadSubmissionKey("thread-a")), true, "Thread A should show its own starting state");
 assert.equal(pendingSubmissions.has(threadSubmissionKey("thread-b")), false, "switching to Thread B must not inherit Thread A's starting state");
+assert.equal(!pendingSubmissions.has(threadSubmissionKey("thread-b")), true, "Thread B should remain eligible for an independent submission while A starts");
+assert.equal(pendingSubmissions.has(threadSubmissionKey("thread-a")), true, "switching back to Thread A before completion must restore its pending state");
+assert.equal(!pendingSubmissions.has(threadSubmissionKey("thread-a")), false, "returning to Thread A must not make a duplicate submission eligible while its first request is pending");
 
 pendingSubmissions = setThreadSubmissionPending(pendingSubmissions, threadSubmissionKey("thread-b"), true);
 assert.equal(pendingSubmissions.has(threadSubmissionKey("thread-a")), true, "Thread A can keep working in the background");
@@ -183,7 +187,7 @@ assert.equal(rememberedArchive.readOnly, true, "archived Thread selection must b
 
 const defaultSelection = resolveHomeThreadSelection(threads, null);
 assert.equal(defaultSelection.selectedThread?.id, "active-a", "Home should still prefer an active Thread when there is no remembered selection");
-assert.equal(foregroundThreadId(defaultSelection), "active-a", "fresh Simple Mode should persist and submit against the active Thread it visibly selected");
+assert.equal(foregroundThreadId(defaultSelection), "active-a", "fresh Simple Mode should persist and submit against the active Thread it visibly selected before new work starts");
 assert.equal(defaultSelection.readOnly, false);
 
 const missingSelection = resolveHomeThreadSelection(threads, "missing");
