@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-09-02
+
+- **Switching Threads now clears stale Simple Mode activity immediately (#319):** Simple Mode remounts its Thread-scoped workspace, activity, and result surfaces as soon as the selected Thread changes, so the previous conversation cannot linger while asynchronous refreshes catch up. Power Mode keeps its workspace-wide presentation.
+
 ## 2026-09-01
 
 - **Simple Mode results now stay with the selected Thread (#315):** Switching conversations can no longer show another Thread's result cards, run instructions, verification status, or missing-result warning. Returning to the original Thread restores its own result handoff while the artifact shelf remains project-wide.
