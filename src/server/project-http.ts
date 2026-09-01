@@ -173,7 +173,7 @@ async function defaultPickDirectory(): Promise<string | null> {
 
 function startsNewThreadWork(method: string | undefined, pathname: string): boolean {
   if (method !== "POST") return false;
-  return pathname === "/api/threads" || /^\/api\/threads\/[^/]+\/chat$/.test(pathname);
+  return pathname === "/api/chat" || pathname === "/api/threads" || /^\/api\/threads\/[^/]+\/chat$/.test(pathname);
 }
 
 export function createProjectServer(runtime: ChefRuntime, baseServer: Server, options: ProjectServerOptions): Server {
