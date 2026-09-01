@@ -1,5 +1,5 @@
 import type { ChatMessage } from "./types";
-import { foregroundThreadId, resolveHomeThreadSelection } from "./threadSelection";
+import { foregroundThreadId, resolveHomeThreadSelection } from "./threadSelection.ts";
 
 export interface UiThread {
   id: string;
