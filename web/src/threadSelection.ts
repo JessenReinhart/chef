@@ -72,8 +72,10 @@ export function foregroundThreadId(selection: HomeThreadSelection): string | nul
 export function threadSubmissionOwnsForeground(
   submittedThreadId: string | null,
   selectedThreadId: string | null,
+  transferredThreadId: string | null = null,
 ): boolean {
-  return submittedThreadId !== null && submittedThreadId === selectedThreadId;
+  const ownerThreadId = submittedThreadId ?? transferredThreadId;
+  return ownerThreadId !== null && ownerThreadId === selectedThreadId;
 }
 
 export function missionsForSelectedThread(
