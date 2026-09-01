@@ -131,9 +131,6 @@ function blocksHeartbeat(event: UiRuntimeEvent): boolean {
 
 function resumesHeartbeat(event: UiRuntimeEvent): boolean {
   if (event.type === "task.assigned" || event.type === "task.running") return true;
-  if (event.type === "approval.resolved") {
-    return stringValue(objectPayload(event), "decision") !== "rejected";
-  }
   if (event.type !== "mission.status") return false;
   const status = stringValue(objectPayload(event), "status");
   return status === "planning" || status === "active" || status === "verifying";
