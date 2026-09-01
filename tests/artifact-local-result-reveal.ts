@@ -5,8 +5,33 @@ import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
 import { createChef } from "../src/main.ts";
 import { createHttpServer } from "../src/server/http-server.ts";
-import { createArtifactServer } from "../src/server/artifact-http.ts";
+import { artifactRevealCommand, createArtifactServer } from "../src/server/artifact-http.ts";
 import { canRevealArtifact, isFileUriArtifact } from "../web/src/artifactHandoff.ts";
+
+const windowsFilePath = "C:\\projects\\chef\\todo-app\\index.html";
+assert.deepEqual(
+  artifactRevealCommand(windowsFilePath, false, "win32"),
+  { command: "explorer.exe", args: [`/select,${windowsFilePath}`] },
+  "Windows file reveal must select the exact generated result",
+);
+const windowsDirectoryPath = "C:\\projects\\chef\\todo-app";
+assert.deepEqual(
+  artifactRevealCommand(windowsDirectoryPath, true, "win32"),
+  { command: "explorer.exe", args: [windowsDirectoryPath] },
+  "Windows directory reveal must continue opening the result directory",
+);
+const linuxFilePath = "/tmp/chef/todo-app/index.html";
+assert.deepEqual(
+  artifactRevealCommand(linuxFilePath, false, "linux"),
+  { command: "xdg-open", args: ["/tmp/chef/todo-app"] },
+  "Linux file reveal must continue opening the containing result directory",
+);
+const linuxDirectoryPath = "/tmp/chef/todo-app";
+assert.deepEqual(
+  artifactRevealCommand(linuxDirectoryPath, true, "linux"),
+  { command: "xdg-open", args: [linuxDirectoryPath] },
+  "Linux directory reveal must continue opening the result directory itself",
+);
 
 const projectDir = await mkdtemp(join(tmpdir(), "chef-local-result-reveal-"));
 const outsideDir = await mkdtemp(join(tmpdir(), "chef-local-result-reveal-outside-"));
@@ -126,7 +151,7 @@ try {
   assert.match(outsideReveal.body.error ?? "", /outside the project root/);
   assert.equal(revealed.length, 3, "rejected result locations must never invoke the OS opener");
 
-  console.log("artifact-local-result-reveal: ok — opaque artifacts retain safe project-scoped reveal and file-URI actions stay scheme-case invariant");
+  console.log("artifact-local-result-reveal: ok — durable local result reveal stays project-scoped and opens the most useful safe OS location on Windows/Linux");
 } finally {
   if (server.listening) await new Promise<void>((resolve) => server.close(() => resolve()));
   await runtime.close();
