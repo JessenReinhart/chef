@@ -12,7 +12,11 @@ import {
 import "@xyflow/react/dist/style.css";
 import { api } from "./api";
 import { loadSelectedThreadId, SELECTED_THREAD_EVENT, threadMessages } from "./threadApi";
-import { createThreadHistoryLoader } from "./threadSelection";
+import {
+  createThreadHistoryLoader,
+  setThreadSubmissionPending,
+  threadSubmissionKey,
+} from "./threadSelection";
 import { missionSubmissionAcknowledgement } from "./missionSubmissionFeedback";
 import type {
   HarnessInfo,
@@ -266,13 +270,15 @@ export function LivingWorkspaceFeature() {
   const [input, setInput] = useState("");
   const [optimisticGoal, setOptimisticGoal] = useState("");
   const [chefNote, setChefNote] = useState(DEFAULT_CHEF_NOTE);
-  const [sending, setSending] = useState(false);
+  const [selectedThreadId, setSelectedThreadId] = useState<string | null>(() => loadSelectedThreadId());
+  const [submittingThreadKeys, setSubmittingThreadKeys] = useState<Set<string>>(() => new Set());
   const [toolsOpen, setToolsOpen] = useState(false);
   const [directMessage, setDirectMessage] = useState("");
   const [directSending, setDirectSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const threadHistoryLoader = useMemo(() => createThreadHistoryLoader(threadMessages), []);
+  const sending = submittingThreadKeys.has(threadSubmissionKey(selectedThreadId));
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -332,9 +338,10 @@ export function LivingWorkspaceFeature() {
     loadThreadNote(loadSelectedThreadId());
     const onThreadChanged = (event: Event) => {
       const detail = (event as CustomEvent<{ threadId?: string | null }>).detail;
-      setSending(false);
+      const nextThreadId = detail?.threadId ?? loadSelectedThreadId();
+      setSelectedThreadId(nextThreadId);
       setOptimisticGoal("");
-      loadThreadNote(detail?.threadId ?? loadSelectedThreadId());
+      loadThreadNote(nextThreadId);
       void refresh();
     };
     window.addEventListener(SELECTED_THREAD_EVENT, onThreadChanged);
@@ -532,12 +539,13 @@ export function LivingWorkspaceFeature() {
 
   const sendGoal = useCallback(async (preset?: string) => {
     const text = (preset ?? input).trim();
-    if (!text || sending) return;
     const submittedThreadId = loadSelectedThreadId();
+    const submissionKey = threadSubmissionKey(submittedThreadId);
+    if (!text || submittingThreadKeys.has(submissionKey)) return;
     setInput("");
     setOptimisticGoal(text);
     setChefNote(missionSubmissionAcknowledgement());
-    setSending(true);
+    setSubmittingThreadKeys((current) => setThreadSubmissionPending(current, submissionKey, true));
     setToolsOpen(false);
     try {
       const result = await api.chat(text);
@@ -547,14 +555,14 @@ export function LivingWorkspaceFeature() {
       } else if (result.report) {
         setChefNote(result.report);
       }
-      setSending(false);
       void refresh();
     } catch (reason) {
       if (loadSelectedThreadId() !== submittedThreadId) return;
       setChefNote(reason instanceof Error ? reason.message : "Chef could not start the work.");
-      setSending(false);
+    } finally {
+      setSubmittingThreadKeys((current) => setThreadSubmissionPending(current, submissionKey, false));
     }
-  }, [input, sending, refresh]);
+  }, [input, submittingThreadKeys, refresh]);
 
   const addNode = useCallback(async (inputNode: { type: string; label: string; kind: "agent" | "tool"; harnessId?: string }) => {
     try {
