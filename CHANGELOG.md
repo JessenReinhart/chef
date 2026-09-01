@@ -2,6 +2,8 @@
 
 ## 2026-09-01
 
+- **Simple Mode results now stay with the selected Thread (#315):** Switching conversations can no longer show another Thread's result cards, run instructions, verification status, or missing-result warning. Returning to the original Thread restores its own result handoff while the artifact shelf remains project-wide.
+- **Project selection handoffs are now single-flight (#318):** While Chef is reopening a project, choosing the same target again is safely idempotent and choosing a different target is rejected clearly instead of racing runtime callbacks. A failed handoff still releases the gate so another project can be selected.
 - **Simple Mode mission focus now stays with the selected Thread (#309):** Switching conversations no longer lets a newer Mission from another Thread take over the visible goal or status. A selected Thread with no Mission stays truthfully idle instead of inheriting workspace-global activity.
 - **Synchronous startup failures now remain visible after reload (#311):** If Chef cannot start work immediately, it now persists a clear assistant failure response in the originating Thread. Existing Mission lineage is preserved when available, and Chef does not invent one when startup fails before Mission creation.
 - **Project handoff now blocks legacy chat submissions too (#313):** While Chef is switching projects, compatibility `POST /api/chat` requests are refused alongside Thread work so no task can accidentally start in the project the user is leaving.
