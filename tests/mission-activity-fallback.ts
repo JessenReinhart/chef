@@ -1,5 +1,6 @@
 import { strict as assert } from "node:assert";
 
+import { missionResultHandoffProjection, type LivingArtifact } from "../web/src/artifactProjection.ts";
 import { projectMissionActivity } from "../web/src/missionActivityProjection.ts";
 import type { UiMission, UiRuntimeEvent, UiTask } from "../web/src/types.ts";
 
@@ -45,6 +46,86 @@ assert.equal(
   "Work failed before a useful recovery update was available.",
   "failed work without runtime detail must stay truthful about the missing recovery evidence",
 );
+
+const blockedBeforeRecovery: UiMission = {
+  id: "mission-blocked-before-recovery",
+  goal: "Create a simple todo app",
+  status: "blocked",
+  taskIds: ["task-blocked-before-recovery"],
+  createdAt: 1_000,
+  updatedAt: 1_500,
+};
+const completedRecovery: UiMission = {
+  id: "mission-completed-recovery",
+  goal: "Create a simple todo app",
+  status: "completed",
+  taskIds: ["task-completed-recovery"],
+  createdAt: 2_000,
+  updatedAt: 2_500,
+};
+const completedRecoveryTask: UiTask = {
+  id: "task-completed-recovery",
+  title: "Build the recovered todo app",
+  description: "Create a runnable todo app after the earlier blocked attempt",
+  status: "completed",
+};
+const recoveredProjection = projectMissionActivity(
+  {
+    missions: [blockedBeforeRecovery, completedRecovery],
+    tasks: [completedRecoveryTask],
+    events: [],
+  },
+  [],
+  3_000,
+);
+assert.ok(recoveredProjection, "a completed recovery Mission must remain visible after an older blocked attempt");
+assert.equal(
+  recoveredProjection.mission.id,
+  completedRecovery.id,
+  "an older blocked Mission must not steal Simple Mode foreground/results from a newer completed recovery Mission",
+);
+assert.equal(
+  recoveredProjection.missionState,
+  "Done",
+  "the latest completed recovery must expose completion instead of regressing to the older blocked state",
+);
+assert.equal(
+  recoveredProjection.fallback,
+  "Work is complete. Results are available in this workspace.",
+  "the recovery handoff must direct the user to the completed Mission's results",
+);
+const recoveredTodoArtifact: LivingArtifact = {
+  id: "artifact-completed-recovery",
+  workspaceId: "workspace-1",
+  type: "code",
+  name: "todo-app.mjs",
+  uri: "file:///tmp/todo-app.mjs",
+  version: 1,
+  createdBy: "codex",
+  taskId: completedRecoveryTask.id,
+  metadata: {
+    missionId: completedRecovery.id,
+    summary: "Created the recovered todo app",
+    run: "node /tmp/todo-app.mjs",
+    verifiedBy: "runtime smoke",
+  },
+};
+const recoveredHandoff = missionResultHandoffProjection(
+  [recoveredTodoArtifact],
+  {
+    missionId: recoveredProjection.mission.id,
+    taskIds: recoveredProjection.taskIds,
+    threadId: "thread-recovery",
+  },
+  "thread-recovery",
+  recoveredProjection.mission.status,
+);
+assert.deepEqual(
+  recoveredHandoff.artifacts.map((artifact) => artifact.id),
+  [recoveredTodoArtifact.id],
+  "the completed recovery Mission must keep its durable todo result eligible for the Simple Mode handoff",
+);
+assert.equal(recoveredHandoff.notice, null, "a completed recovery with a durable result must not show a missing-result warning");
 
 const verifying = projectEmptyActivity("verifying");
 assert.equal(
@@ -318,4 +399,4 @@ assert.equal(
   "the promoted heartbeat must agree with the authoritative current Mission stage even when older events only imply working",
 );
 
-console.log("mission-activity-fallback: ok — planning, attention, current-attempt continuity, authoritative verification evidence, and stale-silence heartbeat states remain explicit and stage-consistent in Simple Mode");
+console.log("mission-activity-fallback: ok — planning, attention, recovery result continuity, current-attempt continuity, authoritative verification evidence, and stale-silence heartbeat states remain explicit and stage-consistent in Simple Mode");
