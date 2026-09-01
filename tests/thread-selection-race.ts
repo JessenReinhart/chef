@@ -4,7 +4,9 @@ import {
   foregroundThreadId,
   isThreadSubmissionPending,
   latestAssistantThreadNote,
+  latestMissionForSelectedThread,
   missionsForSelectedThread,
+  missionStatusForSelectedThread,
   moveThreadSubmissionPending,
   resolveHomeThreadSelection,
   setThreadSubmissionPending,
@@ -180,7 +182,7 @@ assert.equal(
 const workspaceMissions = [
   { id: "mission-selected-old", goal: "Older selected work", status: "completed", taskIds: [], metadata: { threadId: "thread-selected" }, createdAt: 11, updatedAt: 11 },
   { id: "mission-other-new", goal: "Other Thread work", status: "active", taskIds: [], metadata: { threadId: "thread-other" }, createdAt: 13, updatedAt: 13 },
-  { id: "mission-selected-new", goal: "Selected todo app", status: "active", taskIds: [], metadata: { threadId: "thread-selected" }, createdAt: 12, updatedAt: 12 },
+  { id: "mission-selected-new", goal: "Selected todo app", status: "completed", taskIds: [], metadata: { threadId: "thread-selected" }, createdAt: 12, updatedAt: 12 },
 ] as UiMission[];
 assert.deepEqual(
   missionsForSelectedThread(workspaceMissions, "thread-selected").map((mission) => mission.id),
@@ -196,6 +198,34 @@ assert.deepEqual(
   missionsForSelectedThread(workspaceMissions, null).map((mission) => mission.id),
   workspaceMissions.map((mission) => mission.id),
   "workspace-level activity remains available when no Thread is selected",
+);
+const selectedLatestMission = latestMissionForSelectedThread(workspaceMissions, "thread-selected");
+assert.equal(
+  selectedLatestMission?.id,
+  "mission-selected-new",
+  "the selected Thread must keep its own latest Mission even when another Thread has a newer workspace Mission",
+);
+assert.equal(
+  missionStatusForSelectedThread(selectedLatestMission, "thread-selected", "active"),
+  "completed",
+  "selected-Thread status must come from that Thread's Mission instead of the workspace-global active state",
+);
+const missingThreadMission = latestMissionForSelectedThread(workspaceMissions, "thread-missing");
+assert.equal(missingThreadMission, undefined, "a Thread with no Mission must not borrow another Thread's Mission focus");
+assert.equal(
+  missionStatusForSelectedThread(missingThreadMission, "thread-missing", "active"),
+  "idle",
+  "a selected Thread with no Mission must stay idle instead of inheriting another Thread's workspace activity",
+);
+assert.equal(
+  latestMissionForSelectedThread(workspaceMissions, null)?.id,
+  "mission-other-new",
+  "without a selected Thread the workspace may still expose its globally latest Mission",
+);
+assert.equal(
+  missionStatusForSelectedThread(undefined, null, "active"),
+  "active",
+  "without a selected Thread the existing workspace-level status fallback remains valid",
 );
 
 const snapshot = history.snapshot();
