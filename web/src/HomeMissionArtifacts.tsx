@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { loadSelectedThreadId, SELECTED_THREAD_EVENT } from "./threadApi";
 import { artifactHandoff, canRevealArtifact, isFileUriArtifact } from "./artifactHandoff";
 import { missionResultHandoffProjection } from "./artifactProjection";
-import { copyRunCommand, createSingleFlightArtifactRevealer } from "./resultActions";
+import { artifactRevealLabel, copyRunCommand, createSingleFlightArtifactRevealer } from "./resultActions";
 import { selectLivingWorkspaceMission } from "./missionActivityProjection";
 import { subscribeMissionProgressRefresh } from "./missionProgressStream";
 import { missionTaskIdsFromEvents } from "./threadScope";
@@ -166,11 +166,7 @@ export function HomeMissionArtifacts() {
                             disabled={reveal?.status === "opening"}
                             className="rounded-lg border border-white/10 px-2.5 py-1 text-[10px] font-medium text-zinc-400 transition hover:border-white/20 hover:text-zinc-100 disabled:cursor-wait disabled:opacity-60"
                           >
-                            {reveal?.status === "opening"
-                              ? "Opening…"
-                              : reveal?.status === "opened"
-                                ? "Opened folder"
-                                : "Show in folder"}
+                            {artifactRevealLabel(reveal?.status ?? "idle")}
                           </button>
                           {isFileUriArtifact(artifact) && (
                             <a
@@ -186,7 +182,7 @@ export function HomeMissionArtifacts() {
                     </div>
                     {reveal?.status === "error" && (
                       <p role="status" className="mt-2 text-[10px] leading-4 text-amber-300">
-                        {reveal.message ?? "Could not show this result in its folder."}
+                        {reveal.message ?? "Could not show this result."}
                       </p>
                     )}
                     {handoff.summary && <p className="mt-2 line-clamp-3 text-[11px] leading-4 text-zinc-500">{handoff.summary}</p>}
