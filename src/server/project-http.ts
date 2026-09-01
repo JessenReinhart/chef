@@ -186,6 +186,17 @@ export function createProjectServer(runtime: ChefRuntime, baseServer: Server, op
 
   const openProject = async (rawPath: string, res: ServerResponse) => {
     const path = await validateDirectory(rawPath);
+    if (reopeningProjectPath) {
+      if (isSameProjectPath(path, reopeningProjectPath)) {
+        const recent = await readRecentProjects(recentProjectsPath);
+        sendJson(res, 202, { ok: true, data: { path: reopeningProjectPath, reopening: true, recent } });
+        return;
+      }
+      sendJson(res, 409, {
+        error: `Chef is already switching to ${reopeningProjectPath}. Wait until that project is active or the handoff fails before selecting another project.`,
+      });
+      return;
+    }
     if (isSameProjectPath(path, runtime.projectDir)) {
       const recent = await rememberProject(recentProjectsPath, path);
       sendJson(res, 200, { ok: true, data: { path, current: true, recent } });
