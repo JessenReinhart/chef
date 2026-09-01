@@ -46,6 +46,54 @@ assert.equal(
   "failed work without runtime detail must stay truthful about the missing recovery evidence",
 );
 
+const blockedBeforeRecovery: UiMission = {
+  id: "mission-blocked-before-recovery",
+  goal: "Create a simple todo app",
+  status: "blocked",
+  taskIds: ["task-blocked-before-recovery"],
+  createdAt: 1_000,
+  updatedAt: 1_500,
+};
+const completedRecovery: UiMission = {
+  id: "mission-completed-recovery",
+  goal: "Create a simple todo app",
+  status: "completed",
+  taskIds: ["task-completed-recovery"],
+  createdAt: 2_000,
+  updatedAt: 2_500,
+};
+const completedRecoveryTask: UiTask = {
+  id: "task-completed-recovery",
+  title: "Build the recovered todo app",
+  description: "Create a runnable todo app after the earlier blocked attempt",
+  status: "completed",
+};
+const recoveredProjection = projectMissionActivity(
+  {
+    missions: [blockedBeforeRecovery, completedRecovery],
+    tasks: [completedRecoveryTask],
+    events: [],
+  },
+  [],
+  3_000,
+);
+assert.ok(recoveredProjection, "a completed recovery Mission must remain visible after an older blocked attempt");
+assert.equal(
+  recoveredProjection.mission.id,
+  completedRecovery.id,
+  "an older blocked Mission must not steal Simple Mode foreground/results from a newer completed recovery Mission",
+);
+assert.equal(
+  recoveredProjection.missionState,
+  "Done",
+  "the latest completed recovery must expose completion instead of regressing to the older blocked state",
+);
+assert.equal(
+  recoveredProjection.fallback,
+  "Work is complete. Results are available in this workspace.",
+  "the recovery handoff must direct the user to the completed Mission's results",
+);
+
 const verifying = projectEmptyActivity("verifying");
 assert.equal(
   verifying.missionState,
@@ -318,4 +366,4 @@ assert.equal(
   "the promoted heartbeat must agree with the authoritative current Mission stage even when older events only imply working",
 );
 
-console.log("mission-activity-fallback: ok — planning, attention, current-attempt continuity, authoritative verification evidence, and stale-silence heartbeat states remain explicit and stage-consistent in Simple Mode");
+console.log("mission-activity-fallback: ok — planning, attention, recovery result continuity, current-attempt continuity, authoritative verification evidence, and stale-silence heartbeat states remain explicit and stage-consistent in Simple Mode");
