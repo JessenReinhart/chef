@@ -15,6 +15,8 @@ import { loadSelectedThreadId, SELECTED_THREAD_EVENT, threadMessages } from "./t
 import {
   createThreadHistoryLoader,
   isThreadSubmissionPending,
+  latestMissionForSelectedThread,
+  missionStatusForSelectedThread,
   moveThreadSubmissionPending,
   NEW_THREAD_SUBMISSION_KEY,
   setThreadSubmissionPending,
@@ -371,10 +373,10 @@ export function LivingWorkspaceFeature() {
   }, [enabled, refresh]);
 
   const latestMission = useMemo(
-    () => [...snapshot.missions].sort((a, b) => b.updatedAt - a.updatedAt)[0],
-    [snapshot.missions],
+    () => latestMissionForSelectedThread(snapshot.missions, selectedThreadId),
+    [snapshot.missions, selectedThreadId],
   );
-  const currentStatus = latestMission?.status ?? missionStatusFor(snapshot);
+  const currentStatus = missionStatusForSelectedThread(latestMission, selectedThreadId, missionStatusFor(snapshot));
   const focusGoal = latestMission?.goal || optimisticGoal;
   const missionTaskIds = useMemo(() => new Set(latestMission?.taskIds ?? []), [latestMission?.taskIds]);
   const missionTaskOrder = useMemo(
