@@ -7,7 +7,6 @@ import { api } from "./api";
 import { NODE_LIBRARY, registerHarnesses, subscribeLibrary } from "./nodeCatalog";
 import { TerminalView } from "./TerminalView";
 import { BrowserSurface } from "./BrowserSurface";
-import { SELECTED_THREAD_EVENT } from "./threadApi";
 import type {
   UiTask,
   HarnessInfo,
@@ -109,27 +108,6 @@ export function App() {
       if (pollingRef.current) window.clearInterval(pollingRef.current);
     };
   }, [refresh]);
-
-  useEffect(() => {
-    const onThreadChanged = () => {
-      // The previous snapshot belongs to another conversation. Invalidate it
-      // synchronously so the header, canvas, approvals, and controls cannot
-      // present stale Thread activity while the new scoped snapshot loads.
-      setTasks([]);
-      setCanvasNodes([]);
-      setCanvasEdges([]);
-      setMissions([]);
-      setEvents([]);
-      setApprovals([]);
-      setSelectedTask(null);
-      setTerminalSelection({ nodeId: null, sessionId: null });
-      setShowMissionControls(false);
-      void refresh();
-    };
-    window.addEventListener(SELECTED_THREAD_EVENT, onThreadChanged);
-    return () => window.removeEventListener(SELECTED_THREAD_EVENT, onThreadChanged);
-  }, [refresh]);
-
   // Poll sessions for terminal canvas nodes so each node can resolve its
   // task id to an active session id. TerminalView consumes session.data SSE
   // itself — App only maintains the id mapping here.
