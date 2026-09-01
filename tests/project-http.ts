@@ -48,10 +48,13 @@ assert.equal(await findLinuxDirectoryPicker(async () => false), null);
 const dir = await mkdtemp(join(tmpdir(), "chef-project-http-"));
 const current = join(dir, "current");
 const next = join(dir, "next");
+const other = join(dir, "other");
 const recents = join(dir, "state", "recent.json");
 await mkdir(current);
 await mkdir(next);
+await mkdir(other);
 let opened: string | null = null;
+const openAttempts: string[] = [];
 
 const runtime = { projectDir: current } as ChefRuntime;
 const base = createServer((_req, res) => { res.writeHead(418); res.end("base"); });
@@ -59,7 +62,7 @@ const server = createProjectServer(runtime, base, {
   recentProjectsPath: recents,
   pickDirectory: async () => next,
   canPickDirectory: async () => true,
-  onOpenProject: async (path) => { opened = path; },
+  onOpenProject: async (path) => { opened = path; openAttempts.push(path); },
 });
 
 await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -92,6 +95,22 @@ try {
   const picked = await fetch(`${origin}/api/project/pick`, { method: "POST" });
   assert.equal(picked.status, 202);
 
+  const duplicatePending = await fetch(`${origin}/api/project/open`, {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: next }),
+  });
+  assert.equal(duplicatePending.status, 202, "re-selecting the pending target should be idempotent");
+  const duplicatePendingBody = await duplicatePending.json() as { data?: { path?: string; reopening?: boolean } };
+  assert.equal(duplicatePendingBody.data?.path, next);
+  assert.equal(duplicatePendingBody.data?.reopening, true);
+
+  const conflictingPending = await fetch(`${origin}/api/project/open`, {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: other }),
+  });
+  assert.equal(conflictingPending.status, 409, "a second project must not race the already-pending runtime handoff");
+  const conflictingPendingBody = await conflictingPending.json() as { error?: string };
+  assert.match(conflictingPendingBody.error ?? "", /already switching/i);
+  assert.match(conflictingPendingBody.error ?? "", new RegExp(next.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+
   const blockedThreadCreate = await fetch(`${origin}/api/threads`, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -119,6 +138,7 @@ try {
 
   await new Promise((resolve) => setTimeout(resolve, 150));
   assert.equal(opened, next);
+  assert.deepEqual(openAttempts, [next], "duplicate/conflicting project selections must schedule exactly one runtime handoff");
 
   const remembered = JSON.parse(await readFile(recents, "utf8")) as Array<{ path: string }>;
   assert.equal(remembered[0]?.path, next);
@@ -148,6 +168,11 @@ try {
       418,
       "a failed runtime reopen must release the old-project work gate so recovery remains possible",
     );
+    const recoverySelection = await fetch(`${failingOrigin}/api/project/open`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: other }),
+    });
+    assert.equal(recoverySelection.status, 202, "after a failed handoff Chef must accept a new project selection for recovery");
+    await new Promise((resolve) => setTimeout(resolve, 150));
   } finally {
     await new Promise<void>((resolve) => failingServer.close(() => resolve()));
   }
