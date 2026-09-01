@@ -44,6 +44,7 @@ const runtime = {
         throw new Error("async startup failed");
       });
     }
+    if (message === "Fail before mission creation") throw new Error("provider unavailable");
     repository.insertMission({ workspaceId: "workspace-a", goal: message, status: "planning", createdBy: "user" });
     if (message === "Fail during startup") throw new Error("startup failed");
     if (message === "Hold until released") return heldWork;
@@ -192,6 +193,30 @@ try {
   const failedMission = repository.listMissions("workspace-a").find((mission) => mission.goal === "Fail during startup");
   assert.ok(failedMission);
   assert.equal(failedMission.metadata.threadId, failingThread.id);
+  const startupFailureReply = chat.list("workspace-a", failingThread.id).find((message) => message.role === "assistant");
+  assert.ok(startupFailureReply, "a synchronous startup failure must remain visible after the request and page lifecycle end");
+  assert.equal(startupFailureReply.content, "Chef could not start that work: startup failed");
+  assert.equal(startupFailureReply.metadata?.ok, false);
+  assert.equal(startupFailureReply.metadata?.missionId, failedMission.id, "startup failure feedback must preserve Mission lineage when startup created one");
+
+  const preMissionFailureThread = threads.create({ workspaceId: "workspace-a", title: "Pre-Mission failure" });
+  const preMissionFailureResponse = await fetch(`${origin}/api/threads/${preMissionFailureThread.id}/chat`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ message: "Fail before mission creation" }),
+  });
+  assert.equal(preMissionFailureResponse.status, 500, "pre-Mission startup failure must remain a submit failure");
+  assert.deepEqual(await preMissionFailureResponse.json(), { error: "provider unavailable" });
+  assert.equal(
+    repository.listMissions("workspace-a").some((mission) => mission.goal === "Fail before mission creation"),
+    false,
+    "the failure test must prove feedback does not depend on a Mission being created",
+  );
+  const preMissionFailureReply = chat.list("workspace-a", preMissionFailureThread.id).find((message) => message.role === "assistant");
+  assert.ok(preMissionFailureReply, "Chef must leave durable Thread feedback even when startup fails before Mission creation");
+  assert.equal(preMissionFailureReply.content, "Chef could not start that work: provider unavailable");
+  assert.equal(preMissionFailureReply.metadata?.ok, false);
+  assert.equal(preMissionFailureReply.metadata?.missionId, undefined, "Chef must not invent Mission lineage for a pre-Mission failure");
 
   const asyncFailingThread = threads.create({ workspaceId: "workspace-a", title: "Async failure" });
   const asyncFailingResponse = await fetch(`${origin}/api/threads/${asyncFailingThread.id}/chat`, {
@@ -260,7 +285,7 @@ try {
   const fallback = await fetch(`${origin}/api/state`);
   assert.equal(fallback.status, 200);
   assert.deepEqual(await fallback.json(), { fallback: "/api/state" });
-  console.log("thread-http: ok — Thread chat acknowledges durable Missions immediately, persists background results, and preserves workspace/context isolation");
+  console.log("thread-http: ok — Thread chat acknowledges durable Missions immediately, persists completion and startup failure feedback, and preserves workspace/context isolation");
 } finally {
   releaseHeldWork();
   await new Promise<void>((resolve) => server.close(() => resolve()));
