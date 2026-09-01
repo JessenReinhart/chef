@@ -1,5 +1,6 @@
 import { strict as assert } from "node:assert";
 
+import { missionResultHandoffProjection, type LivingArtifact } from "../web/src/artifactProjection.ts";
 import { projectMissionActivity } from "../web/src/missionActivityProjection.ts";
 import type { UiMission, UiRuntimeEvent, UiTask } from "../web/src/types.ts";
 
@@ -93,6 +94,38 @@ assert.equal(
   "Work is complete. Results are available in this workspace.",
   "the recovery handoff must direct the user to the completed Mission's results",
 );
+const recoveredTodoArtifact: LivingArtifact = {
+  id: "artifact-completed-recovery",
+  workspaceId: "workspace-1",
+  type: "code",
+  name: "todo-app.mjs",
+  uri: "file:///tmp/todo-app.mjs",
+  version: 1,
+  createdBy: "codex",
+  taskId: completedRecoveryTask.id,
+  metadata: {
+    missionId: completedRecovery.id,
+    summary: "Created the recovered todo app",
+    run: "node /tmp/todo-app.mjs",
+    verifiedBy: "runtime smoke",
+  },
+};
+const recoveredHandoff = missionResultHandoffProjection(
+  [recoveredTodoArtifact],
+  {
+    missionId: recoveredProjection.mission.id,
+    taskIds: recoveredProjection.taskIds,
+    threadId: "thread-recovery",
+  },
+  "thread-recovery",
+  recoveredProjection.mission.status,
+);
+assert.deepEqual(
+  recoveredHandoff.artifacts.map((artifact) => artifact.id),
+  [recoveredTodoArtifact.id],
+  "the completed recovery Mission must keep its durable todo result eligible for the Simple Mode handoff",
+);
+assert.equal(recoveredHandoff.notice, null, "a completed recovery with a durable result must not show a missing-result warning");
 
 const verifying = projectEmptyActivity("verifying");
 assert.equal(
