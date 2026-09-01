@@ -1,5 +1,5 @@
 import type { UiThread } from "./threadApi";
-import type { ChatMessage, UiMission } from "./types";
+import type { ChatMessage, MissionStatus, UiMission } from "./types";
 
 export type ThreadHistoryLoad =
   | { current: true; messages: ChatMessage[] }
@@ -85,6 +85,22 @@ export function missionsForSelectedThread(
 ): UiMission[] {
   if (!threadId) return [...missions];
   return missions.filter((mission) => mission.metadata?.threadId === threadId);
+}
+
+export function latestMissionForSelectedThread(
+  missions: readonly UiMission[],
+  threadId: string | null,
+): UiMission | undefined {
+  return [...missionsForSelectedThread(missions, threadId)].sort((a, b) => b.updatedAt - a.updatedAt)[0];
+}
+
+export function missionStatusForSelectedThread(
+  mission: UiMission | undefined,
+  threadId: string | null,
+  workspaceStatus: MissionStatus,
+): MissionStatus {
+  if (mission) return mission.status;
+  return threadId ? "idle" : workspaceStatus;
 }
 
 export function latestAssistantThreadNote(
