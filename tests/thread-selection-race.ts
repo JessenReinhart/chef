@@ -66,21 +66,19 @@ pendingSubmissions = setThreadSubmissionPending(pendingSubmissions, threadSubmis
 assert.equal(isThreadSubmissionPending(pendingSubmissions, "thread-a"), false, "Thread A completion should clear only Thread A's transient state");
 assert.equal(isThreadSubmissionPending(pendingSubmissions, "thread-b"), true, "Thread A completion must not clear Thread B's in-flight state");
 
-// A fresh project has no selected Thread when the first request starts. Chef can
-// create/select the initial Thread before that request settles. The temporary
-// new-Thread key must therefore continue to disable the newly selected Thread
-// until the original request clears it, without changing normal A -> B ownership.
+// A fresh project has no selected Thread when the first request starts. Once
+// Chef creates/selects the initial Thread, ownership must move to that exact
+// Thread instead of making the temporary key behave like a wildcard.
 const newThreadKey = threadSubmissionKey(null);
 let freshProjectSubmissions = setThreadSubmissionPending(new Set<string>(), newThreadKey, true);
 assert.equal(isThreadSubmissionPending(freshProjectSubmissions, null), true, "the first fresh-project request should be pending before a Thread exists");
-assert.equal(isThreadSubmissionPending(freshProjectSubmissions, "thread-created"), true, "the Thread Chef creates for the first request must stay pending while that request is unresolved");
-freshProjectSubmissions = setThreadSubmissionPending(freshProjectSubmissions, newThreadKey, false);
-assert.equal(isThreadSubmissionPending(freshProjectSubmissions, "thread-created"), false, "settling the original first request should release the created Thread composer");
-
-pendingSubmissions = setThreadSubmissionPending(new Set(), newThreadKey, true);
-pendingSubmissions = moveThreadSubmissionPending(pendingSubmissions, newThreadKey, threadSubmissionKey("thread-created"));
-assert.equal(pendingSubmissions.has(newThreadKey), false, "new-Thread submission state should leave the temporary key after explicit ownership transfer");
-assert.equal(pendingSubmissions.has(threadSubmissionKey("thread-created")), true, "the created Thread should inherit its own in-flight state after explicit ownership transfer");
+assert.equal(isThreadSubmissionPending(freshProjectSubmissions, "thread-created"), false, "the temporary new-Thread key must not disable arbitrary concrete Threads");
+freshProjectSubmissions = moveThreadSubmissionPending(freshProjectSubmissions, newThreadKey, threadSubmissionKey("thread-created"));
+assert.equal(isThreadSubmissionPending(freshProjectSubmissions, null), false, "new-Thread ownership should leave the temporary key after creation");
+assert.equal(isThreadSubmissionPending(freshProjectSubmissions, "thread-created"), true, "the Thread Chef creates for the first request must inherit the pending state");
+assert.equal(isThreadSubmissionPending(freshProjectSubmissions, "thread-unrelated"), false, "an unrelated Thread must remain usable while the created Thread is still starting");
+freshProjectSubmissions = setThreadSubmissionPending(freshProjectSubmissions, threadSubmissionKey("thread-created"), false);
+assert.equal(isThreadSubmissionPending(freshProjectSubmissions, "thread-created"), false, "settling the original first request should release only the created Thread composer");
 
 // A task submission may finish after the user has moved to another Thread.
 // The background work still belongs to its original Thread, but its late UI
@@ -205,4 +203,4 @@ const missingSelection = resolveHomeThreadSelection(threads, "missing");
 assert.equal(missingSelection.selectedThread?.id, "active-a", "a stale remembered id should recover to an active Thread");
 assert.equal(foregroundThreadId(missingSelection), "active-a", "a stale persisted id must resolve to the same Thread the user sees before new work starts");
 
-console.log("thread-selection-race: ok — Thread switching, first-Thread startup, concurrent submissions, Mission activity, and terminal summaries stay isolated");
+console.log("thread-selection-race: ok — Thread switching, explicit first-Thread startup ownership, concurrent submissions, Mission activity, and terminal summaries stay isolated");
