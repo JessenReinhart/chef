@@ -72,6 +72,11 @@ assert.equal(isThreadSubmissionPending(pendingSubmissions, "thread-b"), true, "T
 const newThreadKey = threadSubmissionKey(null);
 let freshProjectSubmissions = setThreadSubmissionPending(new Set<string>(), newThreadKey, true);
 assert.equal(isThreadSubmissionPending(freshProjectSubmissions, null), true, "the first fresh-project request should be pending before a Thread exists");
+assert.equal(
+  threadSubmissionOwnsForeground(null, null),
+  true,
+  "a very fast fresh-project request should still own feedback before the first Thread selection event arrives",
+);
 assert.equal(isThreadSubmissionPending(freshProjectSubmissions, "thread-created"), false, "the temporary new-Thread key must not disable arbitrary concrete Threads");
 freshProjectSubmissions = moveThreadSubmissionPending(freshProjectSubmissions, newThreadKey, threadSubmissionKey("thread-created"));
 assert.equal(isThreadSubmissionPending(freshProjectSubmissions, null), false, "new-Thread ownership should leave the temporary key after creation");
