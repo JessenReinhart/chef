@@ -11,7 +11,14 @@ import {
   threadMessages,
   type UiThread,
 } from "./threadApi";
-import { createThreadHistoryLoader, resolveHomeThreadSelection } from "./threadSelection";
+import {
+  createThreadHistoryLoader,
+  moveThreadSubmissionPending,
+  resolveHomeThreadSelection,
+  setThreadSubmissionPending,
+  threadSubmissionKey,
+  threadSubmissionOwnsForeground,
+} from "./threadSelection";
 import {
   deriveMissionHomeState,
   summarizeMissionProgressForMission,
@@ -88,7 +95,7 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(() => loadSelectedThreadId());
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [goal, setGoal] = useState("");
-  const [submitting, setSubmitting] = useState(false);
+  const [submittingThreadKeys, setSubmittingThreadKeys] = useState<Set<string>>(() => new Set());
   const [creatingThread, setCreatingThread] = useState(false);
   const [managingThread, setManagingThread] = useState(false);
   const [retryingTaskId, setRetryingTaskId] = useState<string | null>(null);
@@ -100,7 +107,7 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
     const selectionSnapshot = threadHistory.snapshot();
     try {
       const [snapshot, listedThreads] = await Promise.all([api.stateRaw(), listThreads()]);
-      const rememberedId = selectedThreadId ?? loadSelectedThreadId();
+      const rememberedId = loadSelectedThreadId();
       const selected = resolveHomeThreadSelection(listedThreads, rememberedId).selectedThread;
       const selectedMessages = selected ? await threadMessages(selected.id) : [];
 
@@ -120,7 +127,7 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
         setError(err instanceof Error ? err.message : "Chef could not refresh the workspace");
       }
     }
-  }, [selectedThreadId, threadHistory]);
+  }, [threadHistory]);
 
   useEffect(() => {
     void refresh();
@@ -134,6 +141,7 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
   );
   const { activeThreads, archivedThreads, selectedThread } = threadNavigation;
   const archivedThreadSelected = threadNavigation.readOnly;
+  const submitting = submittingThreadKeys.has(threadSubmissionKey(selectedThreadId));
 
   const threadMissionSummaries = useMemo(() => {
     const summaries = new Map<string, { count: number; active: boolean }>();
@@ -361,32 +369,41 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
 
   async function submitGoal() {
     const message = goal.trim();
-    if (!message || submitting) return;
+    const initialSubmissionKey = threadSubmissionKey(selectedThreadId);
+    if (!message || submittingThreadKeys.has(initialSubmissionKey)) return;
     if (archivedThreadSelected) {
       setError("Archived Threads are read-only. Select an active Thread or start a new Thread to continue working.");
       return;
     }
-    setSubmitting(true);
+    setSubmittingThreadKeys((current) => setThreadSubmissionPending(current, initialSubmissionKey, true));
     setLastReport(null);
     setError(null);
+    let submissionThreadId = selectedThreadId;
+    let activeSubmissionKey = initialSubmissionKey;
     try {
-      let threadId = selectedThreadId;
-      if (!threadId) {
+      if (!submissionThreadId) {
         const thread = await createThread(titleFromMessage(message));
         threadHistory.invalidate();
         setThreads((current) => [...current, thread]);
-        threadId = thread.id;
+        submissionThreadId = thread.id;
+        const createdThreadKey = threadSubmissionKey(thread.id);
+        setSubmittingThreadKeys((current) => moveThreadSubmissionPending(current, activeSubmissionKey, createdThreadKey));
+        activeSubmissionKey = createdThreadKey;
         saveSelectedThreadId(thread.id);
         setSelectedThreadId(thread.id);
       }
-      const result = await sendThreadMessage(threadId, message);
-      setGoal("");
-      setLastReport(result.report || null);
+      const result = await sendThreadMessage(submissionThreadId, message);
+      if (threadSubmissionOwnsForeground(submissionThreadId, loadSelectedThreadId())) {
+        setGoal("");
+        setLastReport(result.report || null);
+      }
       await refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Chef could not start this work");
+      if (submissionThreadId === null || threadSubmissionOwnsForeground(submissionThreadId, loadSelectedThreadId())) {
+        setError(err instanceof Error ? err.message : "Chef could not start this work");
+      }
     } finally {
-      setSubmitting(false);
+      setSubmittingThreadKeys((current) => setThreadSubmissionPending(current, activeSubmissionKey, false));
     }
   }
 

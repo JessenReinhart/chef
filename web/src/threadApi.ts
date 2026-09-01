@@ -1,4 +1,5 @@
 import type { ChatMessage } from "./types";
+import { foregroundThreadId, resolveHomeThreadSelection } from "./threadSelection.ts";
 
 export interface UiThread {
   id: string;
@@ -42,6 +43,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export async function listThreads(): Promise<UiThread[]> {
   const response = await request<{ ok: boolean; data: UiThread[] }>("/api/threads");
+  const rememberedId = loadSelectedThreadId();
+  const resolvedId = foregroundThreadId(resolveHomeThreadSelection(response.data, rememberedId));
+  if (resolvedId !== rememberedId) saveSelectedThreadId(resolvedId);
   return response.data;
 }
 

@@ -12,6 +12,34 @@ export type HomeThreadSelection = {
   readOnly: boolean;
 };
 
+export const NEW_THREAD_SUBMISSION_KEY = "__chef-new-thread-submission__";
+
+export function threadSubmissionKey(threadId: string | null): string {
+  return threadId ?? NEW_THREAD_SUBMISSION_KEY;
+}
+
+export function setThreadSubmissionPending(
+  pending: ReadonlySet<string>,
+  key: string,
+  isPending: boolean,
+): Set<string> {
+  const next = new Set(pending);
+  if (isPending) next.add(key);
+  else next.delete(key);
+  return next;
+}
+
+export function moveThreadSubmissionPending(
+  pending: ReadonlySet<string>,
+  fromKey: string,
+  toKey: string,
+): Set<string> {
+  const next = new Set(pending);
+  next.delete(fromKey);
+  next.add(toKey);
+  return next;
+}
+
 export function resolveHomeThreadSelection(
   threads: readonly UiThread[],
   rememberedId: string | null,
@@ -27,6 +55,18 @@ export function resolveHomeThreadSelection(
     selectedThread,
     readOnly: selectedThread?.status === "archived",
   };
+}
+
+/** The resolved foreground Thread is the only valid target for new Simple Mode work. */
+export function foregroundThreadId(selection: HomeThreadSelection): string | null {
+  return selection.selectedThread?.id ?? null;
+}
+
+export function threadSubmissionOwnsForeground(
+  submittedThreadId: string | null,
+  selectedThreadId: string | null,
+): boolean {
+  return submittedThreadId !== null && submittedThreadId === selectedThreadId;
 }
 
 export function missionsForSelectedThread(
