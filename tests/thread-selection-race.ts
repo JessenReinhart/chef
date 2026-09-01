@@ -77,6 +77,21 @@ freshProjectSubmissions = moveThreadSubmissionPending(freshProjectSubmissions, n
 assert.equal(isThreadSubmissionPending(freshProjectSubmissions, null), false, "new-Thread ownership should leave the temporary key after creation");
 assert.equal(isThreadSubmissionPending(freshProjectSubmissions, "thread-created"), true, "the Thread Chef creates for the first request must inherit the pending state");
 assert.equal(isThreadSubmissionPending(freshProjectSubmissions, "thread-unrelated"), false, "an unrelated Thread must remain usable while the created Thread is still starting");
+assert.equal(
+  threadSubmissionOwnsForeground(null, "thread-created", "thread-created"),
+  true,
+  "the first fresh-project request should still own completion feedback after Chef creates/selects its Thread",
+);
+assert.equal(
+  threadSubmissionOwnsForeground(null, "thread-unrelated", "thread-created"),
+  false,
+  "fresh-project completion feedback must not overwrite an unrelated Thread selected before settlement",
+);
+assert.equal(
+  threadSubmissionOwnsForeground("thread-a", "thread-a", "thread-created"),
+  true,
+  "concrete Thread submissions must keep their original owner even when a transferred id is supplied",
+);
 freshProjectSubmissions = setThreadSubmissionPending(freshProjectSubmissions, threadSubmissionKey("thread-created"), false);
 assert.equal(isThreadSubmissionPending(freshProjectSubmissions, "thread-created"), false, "settling the original first request should release only the created Thread composer");
 
@@ -203,4 +218,4 @@ const missingSelection = resolveHomeThreadSelection(threads, "missing");
 assert.equal(missingSelection.selectedThread?.id, "active-a", "a stale remembered id should recover to an active Thread");
 assert.equal(foregroundThreadId(missingSelection), "active-a", "a stale persisted id must resolve to the same Thread the user sees before new work starts");
 
-console.log("thread-selection-race: ok — Thread switching, explicit first-Thread startup ownership, concurrent submissions, Mission activity, and terminal summaries stay isolated");
+console.log("thread-selection-race: ok — Thread switching, first-Thread startup/completion ownership, concurrent submissions, Mission activity, and terminal summaries stay isolated");
