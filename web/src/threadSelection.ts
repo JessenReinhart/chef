@@ -57,6 +57,11 @@ export function resolveHomeThreadSelection(
   };
 }
 
+/** The resolved foreground Thread is the only valid target for new Simple Mode work. */
+export function foregroundThreadId(selection: HomeThreadSelection): string | null {
+  return selection.selectedThread?.id ?? null;
+}
+
 export function threadSubmissionOwnsForeground(
   submittedThreadId: string | null,
   selectedThreadId: string | null,
