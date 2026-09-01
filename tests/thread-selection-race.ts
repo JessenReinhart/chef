@@ -1,6 +1,7 @@
 import { strict as assert } from "node:assert";
 import {
   createThreadHistoryLoader,
+  foregroundThreadId,
   latestAssistantThreadNote,
   missionsForSelectedThread,
   moveThreadSubmissionPending,
@@ -177,13 +178,16 @@ const rememberedArchive = resolveHomeThreadSelection(threads, "archived-a");
 assert.deepEqual(rememberedArchive.activeThreads.map((thread) => thread.id), ["active-a"]);
 assert.deepEqual(rememberedArchive.archivedThreads.map((thread) => thread.id), ["archived-a"]);
 assert.equal(rememberedArchive.selectedThread?.id, "archived-a", "refresh should preserve a remembered archived Thread so its history stays discoverable");
+assert.equal(foregroundThreadId(rememberedArchive), "archived-a", "the persisted archived selection remains the resolved foreground continuity boundary");
 assert.equal(rememberedArchive.readOnly, true, "archived Thread selection must be read-only for new work");
 
 const defaultSelection = resolveHomeThreadSelection(threads, null);
 assert.equal(defaultSelection.selectedThread?.id, "active-a", "Home should still prefer an active Thread when there is no remembered selection");
+assert.equal(foregroundThreadId(defaultSelection), "active-a", "fresh Simple Mode should persist and submit against the active Thread it visibly selected");
 assert.equal(defaultSelection.readOnly, false);
 
 const missingSelection = resolveHomeThreadSelection(threads, "missing");
 assert.equal(missingSelection.selectedThread?.id, "active-a", "a stale remembered id should recover to an active Thread");
+assert.equal(foregroundThreadId(missingSelection), "active-a", "a stale persisted id must resolve to the same Thread the user sees before new work starts");
 
 console.log("thread-selection-race: ok — Thread switching, concurrent submissions, Mission activity, and terminal summaries stay isolated");
