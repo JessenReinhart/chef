@@ -14,6 +14,9 @@ import { api } from "./api";
 import { loadSelectedThreadId, SELECTED_THREAD_EVENT, threadMessages } from "./threadApi";
 import {
   createThreadHistoryLoader,
+  isThreadSubmissionPending,
+  moveThreadSubmissionPending,
+  NEW_THREAD_SUBMISSION_KEY,
   setThreadSubmissionPending,
   threadSubmissionKey,
 } from "./threadSelection";
@@ -277,8 +280,9 @@ export function LivingWorkspaceFeature() {
   const [directSending, setDirectSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const firstThreadSubmissionOwnerRef = useRef<string | null>(null);
   const threadHistoryLoader = useMemo(() => createThreadHistoryLoader(threadMessages), []);
-  const sending = submittingThreadKeys.has(threadSubmissionKey(selectedThreadId));
+  const sending = isThreadSubmissionPending(submittingThreadKeys, selectedThreadId);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -339,6 +343,13 @@ export function LivingWorkspaceFeature() {
     const onThreadChanged = (event: Event) => {
       const detail = (event as CustomEvent<{ threadId?: string | null }>).detail;
       const nextThreadId = detail?.threadId ?? loadSelectedThreadId();
+      if (nextThreadId) {
+        setSubmittingThreadKeys((current) => {
+          if (!current.has(NEW_THREAD_SUBMISSION_KEY)) return current;
+          firstThreadSubmissionOwnerRef.current = nextThreadId;
+          return moveThreadSubmissionPending(current, NEW_THREAD_SUBMISSION_KEY, threadSubmissionKey(nextThreadId));
+        });
+      }
       setSelectedThreadId(nextThreadId);
       setOptimisticGoal("");
       loadThreadNote(nextThreadId);
@@ -385,10 +396,6 @@ export function LivingWorkspaceFeature() {
         })
       : snapshot.nodes;
 
-    // One task can be represented by multiple runtime canvas objects (for
-    // example a blueprint plus a proxy). The friendly workspace shows one
-    // canonical visual object per task and leaves the full topology to
-    // Advanced mode.
     const byTask = new Map<string, UiCanvasNode>();
     const standalone: UiCanvasNode[] = [];
     for (const node of candidates) {
@@ -541,7 +548,8 @@ export function LivingWorkspaceFeature() {
     const text = (preset ?? input).trim();
     const submittedThreadId = loadSelectedThreadId();
     const submissionKey = threadSubmissionKey(submittedThreadId);
-    if (!text || submittingThreadKeys.has(submissionKey)) return;
+    if (!text || isThreadSubmissionPending(submittingThreadKeys, submittedThreadId)) return;
+    if (submittedThreadId === null) firstThreadSubmissionOwnerRef.current = null;
     setInput("");
     setOptimisticGoal(text);
     setChefNote(missionSubmissionAcknowledgement());
@@ -560,7 +568,15 @@ export function LivingWorkspaceFeature() {
       if (loadSelectedThreadId() !== submittedThreadId) return;
       setChefNote(reason instanceof Error ? reason.message : "Chef could not start the work.");
     } finally {
-      setSubmittingThreadKeys((current) => setThreadSubmissionPending(current, submissionKey, false));
+      const transferredOwnerId = submittedThreadId === null ? firstThreadSubmissionOwnerRef.current : null;
+      setSubmittingThreadKeys((current) => {
+        let next = setThreadSubmissionPending(current, submissionKey, false);
+        if (transferredOwnerId) {
+          next = setThreadSubmissionPending(next, threadSubmissionKey(transferredOwnerId), false);
+        }
+        return next;
+      });
+      if (submittedThreadId === null) firstThreadSubmissionOwnerRef.current = null;
     }
   }, [input, submittingThreadKeys, refresh]);
 

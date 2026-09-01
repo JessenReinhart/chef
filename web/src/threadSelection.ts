@@ -18,6 +18,13 @@ export function threadSubmissionKey(threadId: string | null): string {
   return threadId ?? NEW_THREAD_SUBMISSION_KEY;
 }
 
+export function isThreadSubmissionPending(
+  pending: ReadonlySet<string>,
+  threadId: string | null,
+): boolean {
+  return pending.has(threadSubmissionKey(threadId));
+}
+
 export function setThreadSubmissionPending(
   pending: ReadonlySet<string>,
   key: string,
