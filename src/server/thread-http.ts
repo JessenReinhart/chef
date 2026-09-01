@@ -91,7 +91,7 @@ export function createThreadServer(runtime: ChefRuntime, baseServer: Server): Se
 
   const persistAssistantTurn = (input: {
     threadId: string;
-    missionId: string;
+    missionId?: string;
     content: string;
     taskIds: string[];
     ok: boolean;
@@ -102,7 +102,11 @@ export function createThreadServer(runtime: ChefRuntime, baseServer: Server): Se
         threadId: input.threadId,
         role: "assistant",
         content: input.content,
-        metadata: { missionId: input.missionId, taskIds: input.taskIds, ok: input.ok },
+        metadata: {
+          ...(input.missionId ? { missionId: input.missionId } : {}),
+          taskIds: input.taskIds,
+          ok: input.ok,
+        },
       });
     } catch (error) {
       // The HTTP acknowledgement deliberately outlives request execution. During
@@ -183,7 +187,15 @@ export function createThreadServer(runtime: ChefRuntime, baseServer: Server): Se
             recentMessages,
           });
         } catch (error) {
-          linkOriginatingMission();
+          const mission = linkOriginatingMission();
+          const detail = error instanceof Error ? error.message : String(error);
+          persistAssistantTurn({
+            threadId: thread.id,
+            missionId: mission?.id,
+            content: `Chef could not start that work: ${detail}`,
+            taskIds: [],
+            ok: false,
+          });
           throw error;
         }
 
