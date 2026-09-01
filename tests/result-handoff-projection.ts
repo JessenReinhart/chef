@@ -93,4 +93,35 @@ assert.deepEqual(
   "a stale previous-Thread partial result and its recovery warning must remain hidden after Thread selection changes",
 );
 
-console.log("result-handoff-projection: ok — incomplete and terminal handoffs stay truthful for missing and partial results and remain selected-Thread scoped");
+const otherScope = { missionId: "mission-other", taskIds: ["task-other"], threadId: "thread-other" };
+const otherResult: LivingArtifact = {
+  ...result,
+  id: "other-result",
+  name: "other-output",
+  taskId: "task-other",
+  metadata: {
+    ...result.metadata,
+    missionId: "mission-other",
+    content: "Created another output",
+  },
+};
+
+assert.deepEqual(
+  missionResultHandoffProjection([result, otherResult], otherScope, "thread-other", "completed"),
+  { artifacts: [otherResult], notice: null },
+  "switching to Thread B must project only B's current Mission result",
+);
+
+assert.deepEqual(
+  missionResultHandoffProjection([result, otherResult], scope, "thread-current", "completed"),
+  { artifacts: [result], notice: null },
+  "returning to Thread A must restore A's result without leaking B's newer workspace result",
+);
+
+assert.deepEqual(
+  missionResultHandoffProjection([result, otherResult], null, "thread-other", "completed"),
+  { artifacts: [], notice: null },
+  "a selected Thread with no Mission must not inherit a workspace-global result",
+);
+
+console.log("result-handoff-projection: ok — incomplete and terminal handoffs stay truthful and A → B → A switching keeps results selected-Thread scoped");

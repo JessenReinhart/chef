@@ -10,6 +10,7 @@ import {
   canDownload,
   copyRunCommand,
   metadataRows,
+  missionResultHandoffProjection,
   missingResultHandoffNotice,
   previewText,
   provenanceLabel,
@@ -19,6 +20,8 @@ import {
   type RunCommandCopyResult,
 } from "./artifactProjection";
 import { projectMissionActivity } from "./missionActivityProjection";
+import { loadSelectedThreadId, SELECTED_THREAD_EVENT } from "./threadApi";
+import { latestMissionForSelectedThread } from "./threadSelection";
 import "./living-artifact.css";
 import "./artifact-preview.css";
 
@@ -44,12 +47,13 @@ function artifactLabel(type: ArtifactType): string {
   }
 }
 
-type MissionResultScope = { missionId: string; taskIds: string[]; status: string } | null;
+type MissionResultScope = { missionId: string; taskIds: string[]; status: string; threadId?: string } | null;
 
 export function LivingArtifactFeature() {
   const [enabled, setEnabled] = useState(() => localStorage.getItem("chef:view-mode") !== "power");
   const [artifacts, setArtifacts] = useState<LivingArtifact[]>([]);
   const [missionScope, setMissionScope] = useState<MissionResultScope | undefined>(undefined);
+  const [selectedThreadId, setSelectedThreadId] = useState<string | null>(() => loadSelectedThreadId());
   const [target, setTarget] = useState<Element | null>(null);
   const [shelfOpen, setShelfOpen] = useState(false);
   const [selectedArtifactId, setSelectedArtifactId] = useState<string | null>(null);
@@ -76,6 +80,16 @@ export function LivingArtifactFeature() {
     return () => window.clearInterval(timer);
   }, [enabled]);
 
+  useEffect(() => {
+    if (!enabled) return;
+    const onThreadChanged = (event: Event) => {
+      const detail = (event as CustomEvent<{ threadId?: string | null }>).detail;
+      setSelectedThreadId(detail?.threadId ?? loadSelectedThreadId());
+    };
+    window.addEventListener(SELECTED_THREAD_EVENT, onThreadChanged);
+    return () => window.removeEventListener(SELECTED_THREAD_EVENT, onThreadChanged);
+  }, [enabled]);
+
   const refresh = useCallback(async () => {
     if (!enabled) return;
 
@@ -91,6 +105,17 @@ export function LivingArtifactFeature() {
 
     try {
       const state = await api.stateRaw();
+      if (selectedThreadId) {
+        const mission = latestMissionForSelectedThread(state.missions ?? [], selectedThreadId);
+        setMissionScope(mission ? {
+          missionId: mission.id,
+          taskIds: mission.taskIds,
+          status: mission.status,
+          threadId: selectedThreadId,
+        } : null);
+        return;
+      }
+
       const activity = projectMissionActivity({
         missions: state.missions ?? [],
         tasks: state.tasks,
@@ -104,7 +129,7 @@ export function LivingArtifactFeature() {
     } catch {
       // Keep the previous authoritative scope rather than guessing from artifact chronology.
     }
-  }, [enabled]);
+  }, [enabled, selectedThreadId]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -124,11 +149,27 @@ export function LivingArtifactFeature() {
     () => artifactsForCurrentMission(artifacts, missionScope),
     [artifacts, missionScope],
   );
-  const visibleArtifacts = useMemo(
-    () => recentArtifacts(currentMissionArtifacts, MAX_VISIBLE_RESULTS),
-    [currentMissionArtifacts],
+  const selectedThreadProjection = useMemo(
+    () => selectedThreadId
+      ? missionResultHandoffProjection(
+          artifacts,
+          missionScope,
+          selectedThreadId,
+          missionScope?.status,
+          MAX_VISIBLE_RESULTS,
+        )
+      : null,
+    [artifacts, missionScope, selectedThreadId],
   );
-  const resultNotice = missingResultHandoffNotice(missionScope?.status, currentMissionArtifacts.length);
+  const visibleArtifacts = useMemo(
+    () => selectedThreadProjection?.artifacts ?? recentArtifacts(currentMissionArtifacts, MAX_VISIBLE_RESULTS),
+    [selectedThreadProjection, currentMissionArtifacts],
+  );
+  const resultNotice = selectedThreadProjection?.notice
+    ?? (selectedThreadId ? null : missingResultHandoffNotice(missionScope?.status, currentMissionArtifacts.length));
+  const visibleResultCount = selectedThreadId && missionScope?.threadId !== selectedThreadId
+    ? 0
+    : currentMissionArtifacts.length;
   const shelfArtifacts = useMemo(
     () => recentArtifacts(artifacts, MAX_SHELF_RESULTS),
     [artifacts],
@@ -157,7 +198,7 @@ export function LivingArtifactFeature() {
     <section className="chef-result-cluster" aria-label="Workspace results">
       <div className="chef-result-cluster__label">
         <span>Results</span>
-        <small>{currentMissionArtifacts.length}</small>
+        <small>{visibleResultCount}</small>
       </div>
       {resultNotice && (
         <p className="chef-result-cluster__notice" role="status">{resultNotice}</p>
