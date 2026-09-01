@@ -115,7 +115,11 @@ function scopeMissionActivity(events: UiRuntimeEvent[], mission: UiMission): {
 }
 
 function isMissionOngoing(mission: UiMission): boolean {
-  return mission.status !== "completed" && mission.status !== "cancelled" && mission.status !== "failed";
+  return mission.status === "planning"
+    || mission.status === "active"
+    || mission.status === "verifying"
+    || mission.status === "waiting_for_approval"
+    || mission.status === "paused";
 }
 
 export function selectLivingWorkspaceMission(missions: UiMission[]): UiMission | null {
