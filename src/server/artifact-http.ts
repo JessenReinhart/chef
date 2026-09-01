@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { createReadStream } from "node:fs";
 import { realpath, stat } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { dirname, isAbsolute, relative, resolve, sep, win32 } from "node:path";
+import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
@@ -115,13 +115,14 @@ export function artifactRevealCommand(
   isDirectory: boolean,
   platform: NodeJS.Platform = process.platform,
 ): ArtifactRevealCommand {
-  const target = isDirectory
-    ? filePath
-    : platform === "win32"
-      ? win32.dirname(filePath)
-      : dirname(filePath);
-  if (platform === "win32") return { command: "explorer.exe", args: [target] };
-  if (platform === "linux") return { command: "xdg-open", args: [target] };
+  if (platform === "win32") {
+    return isDirectory
+      ? { command: "explorer.exe", args: [filePath] }
+      : { command: "explorer.exe", args: [`/select,${filePath}`] };
+  }
+  if (platform === "linux") {
+    return { command: "xdg-open", args: [isDirectory ? filePath : dirname(filePath)] };
+  }
   throw new Error("showing artifact locations is not supported on this platform");
 }
 
