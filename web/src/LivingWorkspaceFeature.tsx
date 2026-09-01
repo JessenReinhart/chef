@@ -19,6 +19,7 @@ import {
   NEW_THREAD_SUBMISSION_KEY,
   setThreadSubmissionPending,
   threadSubmissionKey,
+  threadSubmissionOwnsForeground,
 } from "./threadSelection";
 import { missionSubmissionAcknowledgement } from "./missionSubmissionFeedback";
 import type {
@@ -557,7 +558,7 @@ export function LivingWorkspaceFeature() {
     setToolsOpen(false);
     try {
       const result = await api.chat(text);
-      if (loadSelectedThreadId() !== submittedThreadId) return;
+      if (!threadSubmissionOwnsForeground(submittedThreadId, loadSelectedThreadId(), firstThreadSubmissionOwnerRef.current)) return;
       if (!result.ok) {
         setChefNote(result.report || "I couldn't start that work yet.");
       } else if (result.report) {
@@ -565,7 +566,7 @@ export function LivingWorkspaceFeature() {
       }
       void refresh();
     } catch (reason) {
-      if (loadSelectedThreadId() !== submittedThreadId) return;
+      if (!threadSubmissionOwnsForeground(submittedThreadId, loadSelectedThreadId(), firstThreadSubmissionOwnerRef.current)) return;
       setChefNote(reason instanceof Error ? reason.message : "Chef could not start the work.");
     } finally {
       const transferredOwnerId = submittedThreadId === null ? firstThreadSubmissionOwnerRef.current : null;
