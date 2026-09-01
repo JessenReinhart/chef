@@ -7,6 +7,7 @@ import { createChef } from "../src/main.ts";
 import { createHttpServer } from "../src/server/http-server.ts";
 import { createArtifactServer } from "../src/server/artifact-http.ts";
 import { canRevealArtifact, isFileUriArtifact } from "../web/src/artifactHandoff.ts";
+import { artifactRevealLabel, revealArtifact } from "../web/src/resultActions.ts";
 
 const projectDir = await mkdtemp(join(tmpdir(), "chef-local-result-reveal-"));
 const outsideDir = await mkdtemp(join(tmpdir(), "chef-local-result-reveal-outside-"));
@@ -16,6 +17,17 @@ const outsidePath = join(outsideDir, "outside.html");
 await mkdir(resultDir, { recursive: true });
 await writeFile(resultPath, "<main>todo</main>");
 await writeFile(outsidePath, "outside");
+
+assert.equal(artifactRevealLabel("idle"), "Show result", "result reveal must describe the user outcome rather than a platform-specific folder action");
+assert.equal(artifactRevealLabel("opening"), "Opening…", "an in-flight reveal must remain visibly acknowledged");
+assert.equal(artifactRevealLabel("opened"), "Result shown", "successful reveal must not falsely claim only a folder was opened");
+assert.equal(artifactRevealLabel("error"), "Show result", "failed reveal should return to a truthful retry action");
+
+const fallbackReveal = await revealArtifact("result-with-error", async () => ({
+  ok: false,
+  json: async () => { throw new Error("non-json response"); },
+}));
+assert.deepEqual(fallbackReveal, { ok: false, error: "Could not show this result" }, "reveal failure fallback must remain platform-neutral");
 
 const runtime = createChef({ dbPath: join(projectDir, "chef.sqlite"), projectDir });
 const revealed: Array<{ path: string; isDirectory: boolean }> = [];
@@ -126,7 +138,7 @@ try {
   assert.match(outsideReveal.body.error ?? "", /outside the project root/);
   assert.equal(revealed.length, 3, "rejected result locations must never invoke the OS opener");
 
-  console.log("artifact-local-result-reveal: ok — opaque artifacts retain safe project-scoped reveal and file-URI actions stay scheme-case invariant");
+  console.log("artifact-local-result-reveal: ok — result reveal stays safe, project-scoped, and platform-neutral in Simple Mode");
 } finally {
   if (server.listening) await new Promise<void>((resolve) => server.close(() => resolve()));
   await runtime.close();
