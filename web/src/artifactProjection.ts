@@ -89,10 +89,8 @@ export function visibleArtifactsForSelectedThreadMission<T extends MissionLinked
 export function shouldOfferArtifactShelf(
   workspaceArtifactCount: number,
   visibleResultCount: number,
-  visibleLimit = MAX_VISIBLE_RESULTS,
 ): boolean {
-  if (workspaceArtifactCount <= 0) return false;
-  return visibleResultCount === 0 || workspaceArtifactCount > visibleLimit;
+  return workspaceArtifactCount > visibleResultCount;
 }
 
 export function missingResultHandoffNotice(missionStatus: string | undefined, resultCount: number): string | null {
@@ -112,7 +110,7 @@ export function missingResultHandoffNotice(missionStatus: string | undefined, re
   }
   if (missionStatus === "cancelled") {
     return resultCount > 0
-      ? "Chef saved a partial result, but this Mission was stopped before the handoff was complete."
+      ? "Chef saved a partial result, but this Mission was stopped before the handoff is complete."
       : "No durable result is available because this Mission was stopped.";
   }
   return null;
