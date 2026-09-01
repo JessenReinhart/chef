@@ -10,6 +10,8 @@ export type ArtifactRevealResult =
   | { ok: true }
   | { ok: false; error: string };
 
+export type ArtifactRevealDisplayState = "idle" | "opening" | "opened" | "error";
+
 type RevealRequester = (
   input: RequestInfo | URL,
   init?: RequestInit,
@@ -38,6 +40,12 @@ export async function copyRunCommand(
   }
 }
 
+export function artifactRevealLabel(state: ArtifactRevealDisplayState): string {
+  if (state === "opening") return "Opening…";
+  if (state === "opened") return "Result shown";
+  return "Show result";
+}
+
 /** Ask Chef to reveal a durable artifact location without accepting a client path or command. */
 export async function revealArtifact(
   artifactId: string,
@@ -52,7 +60,7 @@ export async function revealArtifact(
     });
     if (response.ok) return { ok: true };
 
-    let message = "Could not show this result in its folder";
+    let message = "Could not show this result";
     try {
       const body = await response.json() as { error?: unknown };
       if (typeof body.error === "string" && body.error.trim()) message = body.error.trim();
@@ -65,7 +73,7 @@ export async function revealArtifact(
       ok: false,
       error: cause instanceof Error && cause.message
         ? cause.message
-        : "Could not show this result in its folder",
+        : "Could not show this result",
     };
   }
 }
