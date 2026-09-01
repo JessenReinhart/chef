@@ -2,6 +2,7 @@ import { strict as assert } from "node:assert";
 import {
   createThreadHistoryLoader,
   foregroundThreadId,
+  isThreadSubmissionPending,
   latestAssistantThreadNote,
   missionsForSelectedThread,
   moveThreadSubmissionPending,
@@ -51,25 +52,35 @@ assert.deepEqual(await staleFailure, { current: false }, "a stale Thread failure
 // submissions must not clear one another when they finish out of order.
 let pendingSubmissions = new Set<string>();
 pendingSubmissions = setThreadSubmissionPending(pendingSubmissions, threadSubmissionKey("thread-a"), true);
-assert.equal(pendingSubmissions.has(threadSubmissionKey("thread-a")), true, "Thread A should show its own starting state");
-assert.equal(pendingSubmissions.has(threadSubmissionKey("thread-b")), false, "switching to Thread B must not inherit Thread A's starting state");
+assert.equal(isThreadSubmissionPending(pendingSubmissions, "thread-a"), true, "Thread A should show its own starting state");
+assert.equal(isThreadSubmissionPending(pendingSubmissions, "thread-b"), false, "switching to Thread B must not inherit Thread A's starting state");
 assert.equal(!pendingSubmissions.has(threadSubmissionKey("thread-b")), true, "Thread B should remain eligible for an independent submission while A starts");
-assert.equal(pendingSubmissions.has(threadSubmissionKey("thread-a")), true, "switching back to Thread A before completion must restore its pending state");
+assert.equal(isThreadSubmissionPending(pendingSubmissions, "thread-a"), true, "switching back to Thread A before completion must restore its pending state");
 assert.equal(!pendingSubmissions.has(threadSubmissionKey("thread-a")), false, "returning to Thread A must not make a duplicate submission eligible while its first request is pending");
 
 pendingSubmissions = setThreadSubmissionPending(pendingSubmissions, threadSubmissionKey("thread-b"), true);
-assert.equal(pendingSubmissions.has(threadSubmissionKey("thread-a")), true, "Thread A can keep working in the background");
-assert.equal(pendingSubmissions.has(threadSubmissionKey("thread-b")), true, "Thread B can start independent work while Thread A is still running");
+assert.equal(isThreadSubmissionPending(pendingSubmissions, "thread-a"), true, "Thread A can keep working in the background");
+assert.equal(isThreadSubmissionPending(pendingSubmissions, "thread-b"), true, "Thread B can start independent work while Thread A is still running");
 
 pendingSubmissions = setThreadSubmissionPending(pendingSubmissions, threadSubmissionKey("thread-a"), false);
-assert.equal(pendingSubmissions.has(threadSubmissionKey("thread-a")), false, "Thread A completion should clear only Thread A's transient state");
-assert.equal(pendingSubmissions.has(threadSubmissionKey("thread-b")), true, "Thread A completion must not clear Thread B's in-flight state");
+assert.equal(isThreadSubmissionPending(pendingSubmissions, "thread-a"), false, "Thread A completion should clear only Thread A's transient state");
+assert.equal(isThreadSubmissionPending(pendingSubmissions, "thread-b"), true, "Thread A completion must not clear Thread B's in-flight state");
 
+// A fresh project has no selected Thread when the first request starts. Chef can
+// create/select the initial Thread before that request settles. The temporary
+// new-Thread key must therefore continue to disable the newly selected Thread
+// until the original request clears it, without changing normal A -> B ownership.
 const newThreadKey = threadSubmissionKey(null);
+let freshProjectSubmissions = setThreadSubmissionPending(new Set<string>(), newThreadKey, true);
+assert.equal(isThreadSubmissionPending(freshProjectSubmissions, null), true, "the first fresh-project request should be pending before a Thread exists");
+assert.equal(isThreadSubmissionPending(freshProjectSubmissions, "thread-created"), true, "the Thread Chef creates for the first request must stay pending while that request is unresolved");
+freshProjectSubmissions = setThreadSubmissionPending(freshProjectSubmissions, newThreadKey, false);
+assert.equal(isThreadSubmissionPending(freshProjectSubmissions, "thread-created"), false, "settling the original first request should release the created Thread composer");
+
 pendingSubmissions = setThreadSubmissionPending(new Set(), newThreadKey, true);
 pendingSubmissions = moveThreadSubmissionPending(pendingSubmissions, newThreadKey, threadSubmissionKey("thread-created"));
-assert.equal(pendingSubmissions.has(newThreadKey), false, "new-Thread submission state should leave the temporary key after creation");
-assert.equal(pendingSubmissions.has(threadSubmissionKey("thread-created")), true, "the created Thread should inherit its own in-flight state");
+assert.equal(pendingSubmissions.has(newThreadKey), false, "new-Thread submission state should leave the temporary key after explicit ownership transfer");
+assert.equal(pendingSubmissions.has(threadSubmissionKey("thread-created")), true, "the created Thread should inherit its own in-flight state after explicit ownership transfer");
 
 // A task submission may finish after the user has moved to another Thread.
 // The background work still belongs to its original Thread, but its late UI
@@ -194,4 +205,4 @@ const missingSelection = resolveHomeThreadSelection(threads, "missing");
 assert.equal(missingSelection.selectedThread?.id, "active-a", "a stale remembered id should recover to an active Thread");
 assert.equal(foregroundThreadId(missingSelection), "active-a", "a stale persisted id must resolve to the same Thread the user sees before new work starts");
 
-console.log("thread-selection-race: ok — Thread switching, concurrent submissions, Mission activity, and terminal summaries stay isolated");
+console.log("thread-selection-race: ok — Thread switching, first-Thread startup, concurrent submissions, Mission activity, and terminal summaries stay isolated");
