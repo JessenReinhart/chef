@@ -137,13 +137,18 @@ assert.equal(
 );
 assert.equal(
   shouldOfferArtifactShelf(4, 1),
-  false,
-  "when the current Thread already shows every workspace artifact, Simple Mode should stay compact instead of duplicating a shelf affordance",
+  true,
+  "a current result must not hide other workspace artifacts merely because the workspace has four or fewer outputs",
 );
 assert.equal(
-  shouldOfferArtifactShelf(5, 1),
+  shouldOfferArtifactShelf(4, 4),
+  false,
+  "when the current Thread already shows the entire workspace result set, Simple Mode should stay compact instead of duplicating a shelf affordance",
+);
+assert.equal(
+  shouldOfferArtifactShelf(5, 4),
   true,
-  "workspace overflow must continue exposing the shelf while the current Thread has a foreground result",
+  "workspace overflow must continue exposing the shelf when one result is outside the visible handoff",
 );
 assert.equal(
   shouldOfferArtifactShelf(0, 0),
@@ -151,4 +156,4 @@ assert.equal(
   "an empty workspace must not render an empty artifact shelf affordance",
 );
 
-console.log("result-handoff-projection: ok — incomplete handoffs stay truthful, Thread switching stays scoped, and durable workspace artifacts remain rediscoverable from idle Threads");
+console.log("result-handoff-projection: ok — incomplete handoffs stay truthful, Thread switching stays scoped, and durable workspace artifacts remain rediscoverable whenever results are hidden");
