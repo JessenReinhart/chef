@@ -36,8 +36,13 @@ const revealInit: RequestInit = {
 try {
   assert.deepEqual(
     artifactRevealCommand("C:\\work\\todo-app\\index.html", false, "win32"),
+    { command: "explorer.exe", args: ["/select,C:\\work\\todo-app\\index.html"] },
+    "Windows file reveal must select the exact result without shell interpolation",
+  );
+  assert.deepEqual(
+    artifactRevealCommand("C:\\work\\todo-app", true, "win32"),
     { command: "explorer.exe", args: ["C:\\work\\todo-app"] },
-    "Windows reveal must use explorer without shell interpolation and open the containing folder",
+    "Windows directory reveal must continue opening the result directory itself",
   );
   assert.deepEqual(
     artifactRevealCommand("/work/todo-app/index.html", false, "linux"),
