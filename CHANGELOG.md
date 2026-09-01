@@ -2,6 +2,9 @@
 
 ## 2026-09-01
 
+- **Simple Mode mission focus now stays with the selected Thread (#309):** Switching conversations no longer lets a newer Mission from another Thread take over the visible goal or status. A selected Thread with no Mission stays truthfully idle instead of inheriting workspace-global activity.
+- **Synchronous startup failures now remain visible after reload (#311):** If Chef cannot start work immediately, it now persists a clear assistant failure response in the originating Thread. Existing Mission lineage is preserved when available, and Chef does not invent one when startup fails before Mission creation.
+- **Project handoff now blocks legacy chat submissions too (#313):** While Chef is switching projects, compatibility `POST /api/chat` requests are refused alongside Thread work so no task can accidentally start in the project the user is leaving.
 - **The first task in a fresh project now keeps its final completion feedback (#303):** When Chef creates the first Thread while the initial request is still starting, the final success or error report stays owned by that created Thread instead of being silently discarded. Switching to an unrelated Thread still prevents stale feedback from overwriting the foreground conversation.
 - **Approval acknowledgement no longer pretends work has resumed (#305):** Accepting an approval remains visible, but Chef now waits for a real task or Mission lifecycle signal before showing long-running heartbeat feedback again. This avoids misleading `Chef is still working` messages while execution is still paused after approval.
 - **Result reveal wording now matches the actual platform behavior (#307):** Simple Mode now uses `Show result`, `Opening…`, and `Result shown` instead of claiming every reveal opens a folder. Windows can highlight the generated file while Linux can open its containing location without the UI describing either outcome incorrectly.
