@@ -108,6 +108,15 @@ try {
   });
   assert.equal(blockedChat.status, 409, "the canonical task must not start against the old project during runtime handoff");
 
+  const blockedLegacyChat = await fetch(`${origin}/api/chat`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ message: "Create a simple todo app" }),
+  });
+  assert.equal(blockedLegacyChat.status, 409, "legacy chat must not start work against the old project during runtime handoff");
+  const blockedLegacyChatBody = await blockedLegacyChat.json() as { error?: string };
+  assert.match(blockedLegacyChatBody.error ?? "", /selected project is active/i);
+
   await new Promise((resolve) => setTimeout(resolve, 150));
   assert.equal(opened, next);
 
