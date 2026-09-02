@@ -20,6 +20,15 @@ import {
   threadSubmissionOwnsForeground,
 } from "./threadSelection";
 import {
+  clearMissionSubmissionFailure,
+  missionSubmissionFailureRecovery,
+  missionSubmissionStarted,
+  missionSubmissionSucceeded,
+  rememberMissionSubmissionFailure,
+  takeMissionSubmissionFailure,
+  type MissionSubmissionFeedback,
+} from "./missionSubmissionFeedback";
+import {
   deriveMissionHomeState,
   summarizeMissionProgressForMission,
   type MissionHomeState,
@@ -95,6 +104,7 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(() => loadSelectedThreadId());
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [goal, setGoal] = useState("");
+  const [optimisticGoal, setOptimisticGoal] = useState("");
   const [submittingThreadKeys, setSubmittingThreadKeys] = useState<Set<string>>(() => new Set());
   const [creatingThread, setCreatingThread] = useState(false);
   const [managingThread, setManagingThread] = useState(false);
@@ -102,6 +112,12 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
   const [error, setError] = useState<string | null>(null);
   const [lastReport, setLastReport] = useState<string | null>(null);
   const threadHistory = useMemo(() => createThreadHistoryLoader(threadMessages), []);
+
+  const applySubmissionFeedback = useCallback((feedback: MissionSubmissionFeedback) => {
+    setGoal(feedback.input);
+    setOptimisticGoal(feedback.optimisticGoal);
+    setLastReport(feedback.chefNote);
+  }, []);
 
   const refresh = useCallback(async () => {
     const selectionSnapshot = threadHistory.snapshot();
@@ -134,6 +150,15 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
     const timer = window.setInterval(() => void refresh(), 1800);
     return () => window.clearInterval(timer);
   }, [refresh]);
+
+  useEffect(() => {
+    const ownerKey = threadSubmissionKey(selectedThreadId);
+    const recovery = takeMissionSubmissionFailure(ownerKey);
+    if (!recovery) return;
+    applySubmissionFeedback(recovery);
+    setError(null);
+    clearMissionSubmissionFailure(ownerKey);
+  }, [applySubmissionFeedback, selectedThreadId]);
 
   const threadNavigation = useMemo(
     () => resolveHomeThreadSelection(threads, selectedThreadId),
@@ -294,6 +319,7 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
   async function selectThread(threadId: string) {
     saveSelectedThreadId(threadId);
     setSelectedThreadId(threadId);
+    setOptimisticGoal("");
     setLastReport(null);
     try {
       const result = await threadHistory.load(threadId);
@@ -316,6 +342,7 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
       saveSelectedThreadId(thread.id);
       setSelectedThreadId(thread.id);
       setMessages([]);
+      setOptimisticGoal("");
       setLastReport(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Chef could not create a Thread");
@@ -359,6 +386,7 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
         threadHistory.invalidate();
         setMessages([]);
       }
+      setOptimisticGoal("");
       setLastReport(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Chef could not archive this Thread");
@@ -376,7 +404,7 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
       return;
     }
     setSubmittingThreadKeys((current) => setThreadSubmissionPending(current, initialSubmissionKey, true));
-    setLastReport(null);
+    applySubmissionFeedback(missionSubmissionStarted(message));
     setError(null);
     let submissionThreadId = selectedThreadId;
     let activeSubmissionKey = initialSubmissionKey;
@@ -394,13 +422,20 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
       }
       const result = await sendThreadMessage(submissionThreadId, message);
       if (threadSubmissionOwnsForeground(submissionThreadId, loadSelectedThreadId())) {
-        setGoal("");
-        setLastReport(result.report || null);
+        applySubmissionFeedback(missionSubmissionSucceeded(result.report));
+        clearMissionSubmissionFailure(activeSubmissionKey);
       }
       await refresh();
     } catch (err) {
-      if (submissionThreadId === null || threadSubmissionOwnsForeground(submissionThreadId, loadSelectedThreadId())) {
-        setError(err instanceof Error ? err.message : "Chef could not start this work");
+      const recovery = missionSubmissionFailureRecovery(
+        message,
+        err instanceof Error ? err.message : "Chef could not start this work",
+      );
+      rememberMissionSubmissionFailure(activeSubmissionKey, recovery);
+      if (threadSubmissionOwnsForeground(submissionThreadId, loadSelectedThreadId())) {
+        applySubmissionFeedback(recovery);
+        setError(null);
+        clearMissionSubmissionFailure(activeSubmissionKey);
       }
     } finally {
       setSubmittingThreadKeys((current) => setThreadSubmissionPending(current, activeSubmissionKey, false));
@@ -707,7 +742,7 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
                 <div className="min-w-0">
                   <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-600">Current work</div>
                   <h2 className="mt-2 truncate text-base font-semibold text-zinc-100">
-                    {latestMission?.goal ?? (submitting ? goal.trim() : "Thread activity")}
+                    {latestMission?.goal ?? (submitting ? optimisticGoal : "Thread activity")}
                   </h2>
                 </div>
                 <div className="flex shrink-0 items-center gap-2 rounded-full border border-white/[0.07] px-2.5 py-1 text-[10px] text-zinc-500">
