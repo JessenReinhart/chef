@@ -115,4 +115,35 @@ assert.ok(
   "the completion transition should retain the worker-finished update that justifies Verifying",
 );
 
-console.log("mission-progress-lineage: ok — fast-path Task lineage keeps worker progress, heartbeat, and the pre-completion verifying state truthful while Mission task IDs lag");
+const failedFastTask: UiTask = {
+  ...completedFastTask,
+  status: "failed",
+  completedAt: undefined,
+};
+const failureEvents = [
+  ...events,
+  runtimeEvent("task-failed", 5, "task.failed", {
+    missionId,
+    taskId,
+    error: "Worker exited before producing a runnable result",
+  }),
+  runtimeEvent("unrelated-completed", 15, "task.completed", { taskId: "task-other" }),
+];
+const failedProjection = projectMissionActivity({
+  missions: [laggingMission],
+  tasks: [failedFastTask, unrelatedCompletedTask],
+  events: failureEvents,
+}, [{ id: "codex", name: "Codex", type: "cli", available: true }], 6_000);
+assert.ok(failedProjection, "the failed lagging fast-path Mission should remain visible");
+assert.equal(
+  failedProjection.mission.status,
+  "failed",
+  "a recovered failed Task must move Simple Mode out of stale Working state while Mission status persistence lags",
+);
+assert.equal(failedProjection.missionState, "Needs attention");
+assert.ok(
+  failedProjection.feed.some((item) => item.includes("Worker exited before producing a runnable result")),
+  "the failure transition must keep the real worker failure visible for recovery",
+);
+
+console.log("mission-progress-lineage: ok — fast-path Task lineage keeps worker progress, heartbeat, verifying, and failure states truthful while Mission task IDs/status lag");
