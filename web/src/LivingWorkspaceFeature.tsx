@@ -26,6 +26,9 @@ import {
 import {
   missionSubmissionAcknowledgement,
   missionSubmissionFailureRecovery,
+  rememberMissionSubmissionFailure,
+  takeMissionSubmissionFailure,
+  type MissionSubmissionFailureRecovery,
 } from "./missionSubmissionFeedback";
 import type {
   HarnessInfo,
@@ -287,6 +290,7 @@ export function LivingWorkspaceFeature() {
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const firstThreadSubmissionOwnerRef = useRef<string | null>(null);
+  const failedSubmissionRecoveriesRef = useRef<Map<string, MissionSubmissionFailureRecovery>>(new Map());
   const threadHistoryLoader = useMemo(() => createThreadHistoryLoader(threadMessages), []);
   const sending = isThreadSubmissionPending(submittingThreadKeys, selectedThreadId);
 
@@ -356,9 +360,20 @@ export function LivingWorkspaceFeature() {
           return moveThreadSubmissionPending(current, NEW_THREAD_SUBMISSION_KEY, threadSubmissionKey(nextThreadId));
         });
       }
+      const storedFailure = takeMissionSubmissionFailure(
+        failedSubmissionRecoveriesRef.current,
+        threadSubmissionKey(nextThreadId),
+      );
+      failedSubmissionRecoveriesRef.current = storedFailure.remaining;
       setSelectedThreadId(nextThreadId);
-      setOptimisticGoal("");
-      loadThreadNote(nextThreadId);
+      setOptimisticGoal(storedFailure.recovery?.optimisticGoal ?? "");
+      if (storedFailure.recovery) {
+        threadHistoryLoader.invalidate();
+        setInput(storedFailure.recovery.input);
+        setChefNote(storedFailure.recovery.chefNote);
+      } else {
+        loadThreadNote(nextThreadId);
+      }
       void refresh();
     };
     window.addEventListener(SELECTED_THREAD_EVENT, onThreadChanged);
@@ -563,22 +578,44 @@ export function LivingWorkspaceFeature() {
     setToolsOpen(false);
     try {
       const result = await api.chat(text);
-      if (!threadSubmissionOwnsForeground(submittedThreadId, loadSelectedThreadId(), firstThreadSubmissionOwnerRef.current)) return;
+      const transferredOwnerId = submittedThreadId === null ? firstThreadSubmissionOwnerRef.current : null;
+      const ownsForeground = threadSubmissionOwnsForeground(
+        submittedThreadId,
+        loadSelectedThreadId(),
+        transferredOwnerId,
+      );
       if (!result.ok) {
         const recovery = missionSubmissionFailureRecovery(text, result.report);
+        if (!ownsForeground) {
+          failedSubmissionRecoveriesRef.current = rememberMissionSubmissionFailure(
+            failedSubmissionRecoveriesRef.current,
+            threadSubmissionKey(submittedThreadId ?? transferredOwnerId),
+            recovery,
+          );
+          return;
+        }
         setInput(recovery.input);
         setOptimisticGoal(recovery.optimisticGoal);
         setChefNote(recovery.chefNote);
-      } else if (result.report) {
-        setChefNote(result.report);
+      } else {
+        if (!ownsForeground) return;
+        if (result.report) setChefNote(result.report);
       }
       void refresh();
     } catch (reason) {
-      if (!threadSubmissionOwnsForeground(submittedThreadId, loadSelectedThreadId(), firstThreadSubmissionOwnerRef.current)) return;
+      const transferredOwnerId = submittedThreadId === null ? firstThreadSubmissionOwnerRef.current : null;
       const recovery = missionSubmissionFailureRecovery(
         text,
         reason instanceof Error ? reason.message : "Chef could not start the work.",
       );
+      if (!threadSubmissionOwnsForeground(submittedThreadId, loadSelectedThreadId(), transferredOwnerId)) {
+        failedSubmissionRecoveriesRef.current = rememberMissionSubmissionFailure(
+          failedSubmissionRecoveriesRef.current,
+          threadSubmissionKey(submittedThreadId ?? transferredOwnerId),
+          recovery,
+        );
+        return;
+      }
       setInput(recovery.input);
       setOptimisticGoal(recovery.optimisticGoal);
       setChefNote(recovery.chefNote);
