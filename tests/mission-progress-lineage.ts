@@ -18,6 +18,7 @@ const runtimeEvent = (
   source: { type: "runtime", id: "workspace-1" },
   type,
   payload,
+  taskId: typeof payload.taskId === "string" ? payload.taskId : undefined,
 });
 
 const missionId = "mission-fast-path";
