@@ -1,6 +1,10 @@
-export type MissionSubmissionFailureRecovery = {
+export type MissionSubmissionFeedback = {
   input: string;
   optimisticGoal: string;
+  chefNote: string | null;
+};
+
+export type MissionSubmissionFailureRecovery = MissionSubmissionFeedback & {
   chefNote: string;
 };
 
@@ -19,6 +23,23 @@ export function missionSubmissionAcknowledgement(): string {
   const ownerKey = currentSubmissionOwnerKey();
   if (ownerKey) pendingMissionSubmissionFailures.delete(ownerKey);
   return "Got it. I’m starting this now.";
+}
+
+export function missionSubmissionStarted(submittedText: string): MissionSubmissionFeedback {
+  return {
+    input: "",
+    optimisticGoal: submittedText,
+    chefNote: missionSubmissionAcknowledgement(),
+  };
+}
+
+export function missionSubmissionSucceeded(report?: string | null): MissionSubmissionFeedback {
+  const note = report?.trim();
+  return {
+    input: "",
+    optimisticGoal: "",
+    chefNote: note || null,
+  };
 }
 
 export function missionSubmissionFailureRecovery(

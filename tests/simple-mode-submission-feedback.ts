@@ -4,6 +4,8 @@ import {
   clearMissionSubmissionFailure,
   missionSubmissionAcknowledgement,
   missionSubmissionFailureRecovery,
+  missionSubmissionStarted,
+  missionSubmissionSucceeded,
   rememberMissionSubmissionFailure,
   takeMissionSubmissionFailure,
 } from "../web/src/missionSubmissionFeedback.ts";
@@ -22,6 +24,33 @@ assert.doesNotMatch(
 );
 
 const submittedText = "Create a simple todo app";
+const started = missionSubmissionStarted(submittedText);
+assert.deepEqual(
+  started,
+  {
+    input: "",
+    optimisticGoal: submittedText,
+    chefNote: "Got it. I’m starting this now.",
+  },
+  "starting Simple Mode work must immediately clear the composer, preserve the visible goal, and acknowledge receipt before durable work exists",
+);
+
+const successful = missionSubmissionSucceeded("  Mission started.  ");
+assert.deepEqual(
+  successful,
+  {
+    input: "",
+    optimisticGoal: "",
+    chefNote: "Mission started.",
+  },
+  "a successful start must retire optimistic submission state once the server has a truthful report",
+);
+assert.deepEqual(
+  missionSubmissionSucceeded("   "),
+  { input: "", optimisticGoal: "", chefNote: null },
+  "a successful start without a server report must not preserve a stale optimistic acknowledgement",
+);
+
 const reportedFailure = missionSubmissionFailureRecovery(submittedText, "Provider unavailable");
 assert.deepEqual(
   reportedFailure,
