@@ -23,7 +23,10 @@ import {
   threadSubmissionKey,
   threadSubmissionOwnsForeground,
 } from "./threadSelection";
-import { missionSubmissionAcknowledgement } from "./missionSubmissionFeedback";
+import {
+  missionSubmissionAcknowledgement,
+  missionSubmissionFailureRecovery,
+} from "./missionSubmissionFeedback";
 import type {
   HarnessInfo,
   MissionStatus,
@@ -562,14 +565,23 @@ export function LivingWorkspaceFeature() {
       const result = await api.chat(text);
       if (!threadSubmissionOwnsForeground(submittedThreadId, loadSelectedThreadId(), firstThreadSubmissionOwnerRef.current)) return;
       if (!result.ok) {
-        setChefNote(result.report || "I couldn't start that work yet.");
+        const recovery = missionSubmissionFailureRecovery(text, result.report);
+        setInput(recovery.input);
+        setOptimisticGoal(recovery.optimisticGoal);
+        setChefNote(recovery.chefNote);
       } else if (result.report) {
         setChefNote(result.report);
       }
       void refresh();
     } catch (reason) {
       if (!threadSubmissionOwnsForeground(submittedThreadId, loadSelectedThreadId(), firstThreadSubmissionOwnerRef.current)) return;
-      setChefNote(reason instanceof Error ? reason.message : "Chef could not start the work.");
+      const recovery = missionSubmissionFailureRecovery(
+        text,
+        reason instanceof Error ? reason.message : "Chef could not start the work.",
+      );
+      setInput(recovery.input);
+      setOptimisticGoal(recovery.optimisticGoal);
+      setChefNote(recovery.chefNote);
     } finally {
       const transferredOwnerId = submittedThreadId === null ? firstThreadSubmissionOwnerRef.current : null;
       setSubmittingThreadKeys((current) => {
