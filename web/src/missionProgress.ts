@@ -44,12 +44,14 @@ function missionStatusText(status: string): MissionProgressItem["tone"] {
 function belongsToMission(event: UiRuntimeEvent, missionId: string, taskIds: Set<string>): boolean {
   const payload = objectPayload(event);
   const payloadMissionId = stringValue(payload, "missionId");
+  const payloadTaskId = stringValue(payload, "taskId");
   const payloadTaskIds = stringArray(payload, "taskIds");
 
   return (event.source.type === "mission" && event.source.id === missionId)
     || event.correlationId === missionId
     || payloadMissionId === missionId
     || (event.taskId !== undefined && taskIds.has(event.taskId))
+    || (payloadTaskId !== undefined && taskIds.has(payloadTaskId))
     || payloadTaskIds.some((taskId) => taskIds.has(taskId));
 }
 
@@ -61,6 +63,8 @@ function scopeMissionEvents(
   const ownedTaskIds = new Set(taskIds);
   const seedScoped = events.filter((event) => belongsToMission(event, missionId, ownedTaskIds));
   for (const event of seedScoped) {
+    const taskId = stringValue(objectPayload(event), "taskId");
+    if (taskId) ownedTaskIds.add(taskId);
     for (const taskId of stringArray(objectPayload(event), "taskIds")) ownedTaskIds.add(taskId);
   }
 
