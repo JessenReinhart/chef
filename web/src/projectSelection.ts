@@ -3,8 +3,14 @@ export type ProjectSelectionInfo = {
   path: string;
 };
 
+export type ProjectSelectionTransition = {
+  busy: boolean;
+  pendingPath?: string | null;
+};
+
 export type ProjectSelectionSummary = {
   selected: boolean;
+  transitioning: boolean;
   label: string;
   status: string | null;
   ariaLabel: string;
@@ -17,6 +23,12 @@ function normalizedProjectPath(path: string): string {
   }
   const windowsPath = /^[A-Za-z]:\//.test(normalized) || normalized.startsWith("//");
   return windowsPath ? normalized.toLowerCase() : normalized;
+}
+
+function projectNameFromPath(path: string): string | null {
+  const normalized = path.replace(/\\/g, "/").replace(/\/+$/, "");
+  const name = normalized.split("/").filter(Boolean).at(-1)?.trim();
+  return name || null;
 }
 
 export function sameSelectedProjectPath(left: string, right: string): boolean {
@@ -41,10 +53,26 @@ export async function waitForSelectedProject(
   throw new Error(`Chef reopened, but the selected project did not become active: ${expectedPath}`);
 }
 
-export function projectSelectionSummary(project: ProjectSelectionInfo | null): ProjectSelectionSummary {
+export function projectSelectionSummary(
+  project: ProjectSelectionInfo | null,
+  transition: ProjectSelectionTransition = { busy: false },
+): ProjectSelectionSummary {
+  if (transition.busy) {
+    const pendingPath = transition.pendingPath?.trim() || null;
+    const pendingName = pendingPath ? projectNameFromPath(pendingPath) : null;
+    return {
+      selected: false,
+      transitioning: true,
+      label: pendingName ? `Opening ${pendingName}` : "Opening project",
+      status: "Switching",
+      ariaLabel: pendingPath ? `Opening project: ${pendingPath}` : "Opening project",
+    };
+  }
+
   if (!project) {
     return {
       selected: false,
+      transitioning: false,
       label: "Open project",
       status: null,
       ariaLabel: "Open project",
@@ -53,6 +81,7 @@ export function projectSelectionSummary(project: ProjectSelectionInfo | null): P
 
   return {
     selected: true,
+    transitioning: false,
     label: project.name,
     status: "Selected",
     ariaLabel: `Selected project: ${project.name} (${project.path})`,
