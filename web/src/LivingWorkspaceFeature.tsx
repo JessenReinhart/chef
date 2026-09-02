@@ -24,11 +24,11 @@ import {
   threadSubmissionOwnsForeground,
 } from "./threadSelection";
 import {
+  MISSION_SUBMISSION_FAILURE_EVENT,
   missionSubmissionAcknowledgement,
   missionSubmissionFailureRecovery,
   rememberMissionSubmissionFailure,
   takeMissionSubmissionFailure,
-  type MissionSubmissionFailureRecovery,
 } from "./missionSubmissionFeedback";
 import type {
   HarnessInfo,
@@ -290,7 +290,6 @@ export function LivingWorkspaceFeature() {
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const firstThreadSubmissionOwnerRef = useRef<string | null>(null);
-  const failedSubmissionRecoveriesRef = useRef<Map<string, MissionSubmissionFailureRecovery>>(new Map());
   const threadHistoryLoader = useMemo(() => createThreadHistoryLoader(threadMessages), []);
   const sending = isThreadSubmissionPending(submittingThreadKeys, selectedThreadId);
 
@@ -349,7 +348,19 @@ export function LivingWorkspaceFeature() {
       }).catch(() => undefined);
     };
 
-    loadThreadNote(loadSelectedThreadId());
+    const applyStoredFailure = (ownerKey: string): boolean => {
+      const recovery = takeMissionSubmissionFailure(ownerKey);
+      if (!recovery) return false;
+      threadHistoryLoader.invalidate();
+      setInput(recovery.input);
+      setOptimisticGoal(recovery.optimisticGoal);
+      setChefNote(recovery.chefNote);
+      return true;
+    };
+
+    const initialThreadId = loadSelectedThreadId();
+    if (!applyStoredFailure(threadSubmissionKey(initialThreadId))) loadThreadNote(initialThreadId);
+
     const onThreadChanged = (event: Event) => {
       const detail = (event as CustomEvent<{ threadId?: string | null }>).detail;
       const nextThreadId = detail?.threadId ?? loadSelectedThreadId();
@@ -360,26 +371,25 @@ export function LivingWorkspaceFeature() {
           return moveThreadSubmissionPending(current, NEW_THREAD_SUBMISSION_KEY, threadSubmissionKey(nextThreadId));
         });
       }
-      const storedFailure = takeMissionSubmissionFailure(
-        failedSubmissionRecoveriesRef.current,
-        threadSubmissionKey(nextThreadId),
-      );
-      failedSubmissionRecoveriesRef.current = storedFailure.remaining;
       setSelectedThreadId(nextThreadId);
-      setOptimisticGoal(storedFailure.recovery?.optimisticGoal ?? "");
-      if (storedFailure.recovery) {
-        threadHistoryLoader.invalidate();
-        setInput(storedFailure.recovery.input);
-        setChefNote(storedFailure.recovery.chefNote);
-      } else {
-        loadThreadNote(nextThreadId);
-      }
+      setOptimisticGoal("");
+      if (!applyStoredFailure(threadSubmissionKey(nextThreadId))) loadThreadNote(nextThreadId);
       void refresh();
     };
+
+    const onSubmissionFailure = (event: Event) => {
+      const detail = (event as CustomEvent<{ ownerKey?: string }>).detail;
+      if (!detail?.ownerKey) return;
+      if (detail.ownerKey !== threadSubmissionKey(loadSelectedThreadId())) return;
+      applyStoredFailure(detail.ownerKey);
+    };
+
     window.addEventListener(SELECTED_THREAD_EVENT, onThreadChanged);
+    window.addEventListener(MISSION_SUBMISSION_FAILURE_EVENT, onSubmissionFailure);
     return () => {
       threadHistoryLoader.invalidate();
       window.removeEventListener(SELECTED_THREAD_EVENT, onThreadChanged);
+      window.removeEventListener(MISSION_SUBMISSION_FAILURE_EVENT, onSubmissionFailure);
     };
   }, [enabled, refresh, threadHistoryLoader]);
 
@@ -576,49 +586,27 @@ export function LivingWorkspaceFeature() {
     setChefNote(missionSubmissionAcknowledgement());
     setSubmittingThreadKeys((current) => setThreadSubmissionPending(current, submissionKey, true));
     setToolsOpen(false);
+
+    const publishFailure = (report?: string | null) => {
+      const transferredOwnerId = submittedThreadId === null ? firstThreadSubmissionOwnerRef.current : null;
+      const ownerKey = threadSubmissionKey(submittedThreadId ?? transferredOwnerId);
+      rememberMissionSubmissionFailure(ownerKey, missionSubmissionFailureRecovery(text, report));
+      window.dispatchEvent(new CustomEvent(MISSION_SUBMISSION_FAILURE_EVENT, { detail: { ownerKey } }));
+    };
+
     try {
       const result = await api.chat(text);
       const transferredOwnerId = submittedThreadId === null ? firstThreadSubmissionOwnerRef.current : null;
-      const ownsForeground = threadSubmissionOwnsForeground(
-        submittedThreadId,
-        loadSelectedThreadId(),
-        transferredOwnerId,
-      );
       if (!result.ok) {
-        const recovery = missionSubmissionFailureRecovery(text, result.report);
-        if (!ownsForeground) {
-          failedSubmissionRecoveriesRef.current = rememberMissionSubmissionFailure(
-            failedSubmissionRecoveriesRef.current,
-            threadSubmissionKey(submittedThreadId ?? transferredOwnerId),
-            recovery,
-          );
-          return;
-        }
-        setInput(recovery.input);
-        setOptimisticGoal(recovery.optimisticGoal);
-        setChefNote(recovery.chefNote);
-      } else {
-        if (!ownsForeground) return;
-        if (result.report) setChefNote(result.report);
-      }
-      void refresh();
-    } catch (reason) {
-      const transferredOwnerId = submittedThreadId === null ? firstThreadSubmissionOwnerRef.current : null;
-      const recovery = missionSubmissionFailureRecovery(
-        text,
-        reason instanceof Error ? reason.message : "Chef could not start the work.",
-      );
-      if (!threadSubmissionOwnsForeground(submittedThreadId, loadSelectedThreadId(), transferredOwnerId)) {
-        failedSubmissionRecoveriesRef.current = rememberMissionSubmissionFailure(
-          failedSubmissionRecoveriesRef.current,
-          threadSubmissionKey(submittedThreadId ?? transferredOwnerId),
-          recovery,
-        );
+        publishFailure(result.report);
+        void refresh();
         return;
       }
-      setInput(recovery.input);
-      setOptimisticGoal(recovery.optimisticGoal);
-      setChefNote(recovery.chefNote);
+      if (!threadSubmissionOwnsForeground(submittedThreadId, loadSelectedThreadId(), transferredOwnerId)) return;
+      if (result.report) setChefNote(result.report);
+      void refresh();
+    } catch (reason) {
+      publishFailure(reason instanceof Error ? reason.message : "Chef could not start the work.");
     } finally {
       const transferredOwnerId = submittedThreadId === null ? firstThreadSubmissionOwnerRef.current : null;
       setSubmittingThreadKeys((current) => {
