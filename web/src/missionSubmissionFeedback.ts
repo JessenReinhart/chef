@@ -6,9 +6,18 @@ export type MissionSubmissionFailureRecovery = {
 
 export const MISSION_SUBMISSION_FAILURE_EVENT = "chef:mission-submission-failure";
 
+const SELECTED_THREAD_KEY = "chef:selected-thread";
+const NEW_THREAD_SUBMISSION_KEY = "__chef-new-thread-submission__";
 const pendingMissionSubmissionFailures = new Map<string, MissionSubmissionFailureRecovery>();
 
+function currentSubmissionOwnerKey(): string | null {
+  if (typeof localStorage === "undefined") return null;
+  return localStorage.getItem(SELECTED_THREAD_KEY) ?? NEW_THREAD_SUBMISSION_KEY;
+}
+
 export function missionSubmissionAcknowledgement(): string {
+  const ownerKey = currentSubmissionOwnerKey();
+  if (ownerKey) pendingMissionSubmissionFailures.delete(ownerKey);
   return "Got it. I’m starting this now.";
 }
 
@@ -32,7 +41,9 @@ export function rememberMissionSubmissionFailure(
 }
 
 export function takeMissionSubmissionFailure(ownerKey: string): MissionSubmissionFailureRecovery | null {
-  const recovery = pendingMissionSubmissionFailures.get(ownerKey) ?? null;
-  if (recovery) pendingMissionSubmissionFailures.delete(ownerKey);
-  return recovery;
+  return pendingMissionSubmissionFailures.get(ownerKey) ?? null;
+}
+
+export function clearMissionSubmissionFailure(ownerKey: string): void {
+  pendingMissionSubmissionFailures.delete(ownerKey);
 }
