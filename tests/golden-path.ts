@@ -1,11 +1,13 @@
 import { strict as assert } from "node:assert";
 import { once } from "node:events";
 import { spawn } from "node:child_process";
+import { createServer as createHttpServer } from "node:http";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { GenericTerminalHarness } from "../src/harness/generic.ts";
 import { createChef } from "../src/main.ts";
+import { createProjectServer } from "../src/server/project-http.ts";
 import { artifactHandoff } from "../web/src/artifactHandoff.ts";
 import type { LivingArtifact } from "../web/src/artifactProjection.ts";
 import type {
@@ -202,6 +204,43 @@ async function assertGeneratedAppRuns(appPath: string): Promise<void> {
   }
 }
 
+async function assertProjectSelectionBeforeTask(
+  chef: ReturnType<typeof createChef>,
+  projectDir: string,
+): Promise<void> {
+  const base = createHttpServer((_req, res) => {
+    res.writeHead(404);
+    res.end("not found");
+  });
+  const server = createProjectServer(chef, base, {
+    recentProjectsPath: join(projectDir, ".chef-golden-recent.json"),
+    pickDirectory: async () => projectDir,
+    canPickDirectory: async () => true,
+    onOpenProject: async () => {
+      assert.fail("selecting the already-active golden project must not relaunch Chef");
+    },
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address === "object", "project selection server must listen on TCP");
+
+  try {
+    const response = await fetch(`http://127.0.0.1:${address.port}/api/project/open`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path: projectDir }),
+    });
+    assert.equal(response.status, 200, "golden path must explicitly select its local project before task submission");
+    const body = await response.json() as { ok?: boolean; data?: { path?: string; current?: boolean } };
+    assert.equal(body.ok, true, "project selection must clearly report success");
+    assert.equal(body.data?.path, projectDir, "project selection must confirm the requested local project");
+    assert.equal(body.data?.current, true, "project selection must settle as the active project before task submission");
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+}
+
 function eventStatus(event: RuntimeEvent): unknown {
   if (typeof event.payload !== "object" || event.payload === null) return undefined;
   return (event.payload as Record<string, unknown>).status;
@@ -271,8 +310,9 @@ function resultHandoff(artifact: LivingArtifact, appPath: string): ReturnType<ty
 
 /**
  * P0 golden path: the permanent boring acceptance task traverses the real
- * Mission -> Plan -> Task -> PTY lifecycle, produces a discoverable result in
- * the selected project, runs successfully, and survives close/reopen.
+ * project selection -> Mission -> Plan -> Task -> PTY lifecycle, produces a
+ * discoverable result in the selected project, runs successfully, and survives
+ * close/reopen.
  */
 async function main(): Promise<void> {
   const projectDir = await mkdtemp(join(tmpdir(), "chef-golden-project-"));
@@ -291,6 +331,8 @@ async function main(): Promise<void> {
 
     assert.ok(chef.workspaceId, "start() must expose the selected workspace id");
     const workspaceId = chef.workspaceId;
+    await assertProjectSelectionBeforeTask(chef, projectDir);
+
     const liveEvents: RuntimeEvent[] = [];
     const unsubscribe = chef.subscribeEvents((event) => liveEvents.push(event));
     let sendSettled = false;
