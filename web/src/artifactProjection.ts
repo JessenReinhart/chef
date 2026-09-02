@@ -1,3 +1,5 @@
+export { artifactHandoff, type ArtifactHandoff } from "./artifactHandoff";
+
 export type ArtifactType = "file" | "document" | "code" | "image" | "research" | "result";
 
 export type LivingArtifact = {
@@ -11,12 +13,6 @@ export type LivingArtifact = {
   taskId?: string;
   sessionId?: string;
   metadata: Record<string, unknown>;
-};
-
-export type ArtifactHandoff = {
-  summary: string | null;
-  runCommand: string | null;
-  verifiedBy: string | null;
 };
 
 export type MissionArtifactScope = {
@@ -41,7 +37,6 @@ export const MAX_VISIBLE_RESULTS = 4;
 export const MAX_SHELF_RESULTS = 24;
 export const SPATIAL_RESULT_SLOTS = ["near", "upper", "outer", "lower"] as const;
 const MAX_PREVIEW_LENGTH = 800;
-const MAX_HANDOFF_SUMMARY_LENGTH = 280;
 const MAX_METADATA_ROWS = 8;
 
 export function recentArtifacts<T>(artifacts: T[], limit: number): T[] {
@@ -140,27 +135,6 @@ export function canDownload(artifact: LivingArtifact): boolean {
 export function provenanceLabel(artifact: LivingArtifact): string {
   const task = artifact.taskId ? ` · task ${artifact.taskId.slice(0, 8)}` : "";
   return `v${artifact.version} · by ${artifact.createdBy}${task}`;
-}
-
-function metadataText(metadata: Record<string, unknown>, keys: readonly string[]): string | null {
-  for (const key of keys) {
-    const value = metadata[key];
-    if (typeof value === "string" && value.trim().length > 0) return value.trim();
-  }
-  return null;
-}
-
-export function artifactHandoff(artifact: LivingArtifact): ArtifactHandoff {
-  const rawSummary = metadataText(artifact.metadata, ["summary", "description", "content", "preview"]);
-  const summary = rawSummary && rawSummary.length > MAX_HANDOFF_SUMMARY_LENGTH
-    ? `${rawSummary.slice(0, MAX_HANDOFF_SUMMARY_LENGTH)}…`
-    : rawSummary;
-
-  return {
-    summary,
-    runCommand: metadataText(artifact.metadata, ["run", "runCommand"]),
-    verifiedBy: metadataText(artifact.metadata, ["verifiedBy", "verification"]),
-  };
 }
 
 export async function copyRunCommand(
