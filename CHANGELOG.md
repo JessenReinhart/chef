@@ -2,6 +2,7 @@
 
 ## 2026-09-02
 
+- **Simple Mode results now show the full handoff and can be opened directly (#333):** Result cards now show where the generated output lives, how to run it, and what verified it using the same canonical handoff model as Chef's acceptance checks. File-backed results also expose the existing safe **Show result** action with truthful opening, success, and retryable error feedback.
 - **Mission status now catches up with fast worker completion and failure (#331):** Simple Mode now uses the recovered current-attempt Task lineage to leave stale Working state while Mission persistence catches up, showing Verifying on completion and the real attention state on failure without letting unrelated Task activity leak in.
 - **Newer follow-up work now stays in the foreground (#327):** In a Thread with multiple Missions, a late background update from older work can no longer pull Simple Mode back to the wrong request. The newest user-created Mission remains foreground while other Thread activity stays excluded.
 - **Fast-path worker progress stays visible while Mission state catches up (#329):** Simple Mode now keeps worker activity and heartbeat feedback attached to the right Mission even when the Mission's durable task list briefly lags behind runtime events. Unrelated Task activity is still filtered out.
