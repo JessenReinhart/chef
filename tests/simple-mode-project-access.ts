@@ -35,7 +35,10 @@ assert.equal(windowsSelection.label, "todo-app");
 assert.equal(windowsSelection.status, "Selected");
 assert.equal(windowsSelection.ariaLabel, "Selected project: todo-app (C:\\dev\\todo-app)");
 
-const picking = projectSelectionSummary(linuxSelection.selected ? { name: "old-project", path: "/home/alice/old-project" } : null, { busy: true });
+const picking = projectSelectionSummary(
+  { name: "old-project", path: "/home/alice/old-project" },
+  { busy: true },
+);
 assert.equal(picking.selected, false, "the old active runtime must not look settled while a new project is being chosen");
 assert.equal(picking.transitioning, true);
 assert.equal(picking.label, "Opening project");
