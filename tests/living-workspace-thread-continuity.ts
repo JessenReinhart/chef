@@ -1,6 +1,7 @@
 import { strict as assert } from "node:assert";
 import { Api } from "../web/src/api.ts";
 import { projectMissionActivity } from "../web/src/missionActivityProjection.ts";
+import { latestMissionForSelectedThread } from "../web/src/threadSelection.ts";
 import {
   scopeStateToThread,
   threadChatPath,
@@ -44,6 +45,19 @@ const runtimeEvent = (
 
 const selectedMission = mission("mission-a", "thread-a", "task-a", "active", 100);
 const otherMission = mission("mission-b", "thread-b", "task-b", "active", 200);
+const newerSelectedMission = mission("mission-a-follow-up", "thread-a", "task-a-follow-up", "planning", 300);
+const olderMissionWithLateBackgroundUpdate = { ...selectedMission, updatedAt: 500 };
+assert.equal(
+  latestMissionForSelectedThread([olderMissionWithLateBackgroundUpdate, newerSelectedMission, otherMission], "thread-a")?.id,
+  "mission-a-follow-up",
+  "a late background update from older work must not steal Simple Mode foreground from the Thread's newer user request",
+);
+assert.equal(
+  latestMissionForSelectedThread([otherMission, newerSelectedMission], "thread-a")?.id,
+  "mission-a-follow-up",
+  "another Thread's newer Mission must not become the selected Thread foreground",
+);
+
 const state: ThreadScopedState = {
   missions: [selectedMission, otherMission],
   tasks: [task("task-a", "running"), task("task-b", "running")],
@@ -197,4 +211,4 @@ try {
   else delete (globalThis as { localStorage?: unknown }).localStorage;
 }
 
-console.log("living-workspace-thread-continuity: ok — Simple Mode submission, history, Mission/Task/Session runtime evidence, approvals, graph state, and results stay in the selected Thread lineage");
+console.log("living-workspace-thread-continuity: ok — Simple Mode keeps the newest user Mission foreground while submission, history, Mission/Task/Session runtime evidence, approvals, graph state, and results stay in the selected Thread lineage");
