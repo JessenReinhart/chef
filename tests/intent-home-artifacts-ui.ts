@@ -104,7 +104,12 @@ const goldenTodoResult = artifact("golden-todo", 16, "task-todo", "file:///tmp/t
   run: "node /tmp/todo-app.mjs",
   verifiedBy: "golden-path",
 });
-assert.deepEqual(artifactHandoff(goldenTodoResult), { summary: "Created runnable todo app at /tmp/todo-app.mjs", runCommand: "node /tmp/todo-app.mjs", verifiedBy: "golden-path" }, "the Living Workspace must preserve the canonical artifact contract for what changed, how to run it, and what verified it");
+assert.deepEqual(artifactHandoff(goldenTodoResult), {
+  summary: "Created runnable todo app at /tmp/todo-app.mjs",
+  location: "/tmp/todo-app.mjs",
+  runCommand: "node /tmp/todo-app.mjs",
+  verification: "Verified by golden-path",
+}, "the Living Workspace must preserve the canonical artifact contract for what changed, where it is, how to run it, and what verified it");
 
 let copiedCommand = "";
 assert.equal(await copyRunCommand("node /tmp/todo-app.mjs", async (command) => { copiedCommand = command; }), "copied", "a durable run command should be directly actionable from the result handoff");
@@ -146,7 +151,12 @@ await Promise.all([firstReveal, duplicateReveal]);
 await singleFlightReveal("golden-todo");
 assert.equal(revealCalls, 2, "after the prior reveal settles, a later user retry must be allowed to open the result again");
 
-assert.deepEqual(artifactHandoff(artifact("legacy-result", 17, "task-legacy", "chef:legacy", { description: "Generated report", runCommand: "npm start", verification: "runtime smoke" })), { summary: "Generated report", runCommand: "npm start", verifiedBy: "runtime smoke" }, "result handoff should remain useful for older/custom artifact metadata aliases");
+assert.deepEqual(artifactHandoff(artifact("legacy-result", 17, "task-legacy", "chef:legacy", { description: "Generated report", runCommand: "npm start", verification: "runtime smoke" })), {
+  summary: "Generated report",
+  location: null,
+  runCommand: "npm start",
+  verification: "runtime smoke",
+}, "result handoff should remain useful for older/custom artifact metadata aliases");
 
 let requestedLiveResultStream = "";
 let liveResultRefreshCount = 0;

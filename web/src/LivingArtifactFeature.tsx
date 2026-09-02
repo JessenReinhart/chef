@@ -5,7 +5,6 @@ import {
   MAX_SHELF_RESULTS,
   MAX_VISIBLE_RESULTS,
   SPATIAL_RESULT_SLOTS,
-  artifactHandoff,
   artifactsForCurrentMission,
   canDownload,
   copyRunCommand,
@@ -20,11 +19,15 @@ import {
   type LivingArtifact,
   type RunCommandCopyResult,
 } from "./artifactProjection";
+import { artifactHandoff, canRevealArtifact } from "./artifactHandoff";
+import { artifactRevealLabel, createSingleFlightArtifactRevealer, type ArtifactRevealDisplayState } from "./resultActions";
 import { projectMissionActivity } from "./missionActivityProjection";
 import { loadSelectedThreadId, SELECTED_THREAD_EVENT } from "./threadApi";
 import { latestMissionForSelectedThread } from "./threadSelection";
 import "./living-artifact.css";
 import "./artifact-preview.css";
+
+const revealArtifactOnce = createSingleFlightArtifactRevealer();
 
 function artifactIcon(type: ArtifactType): string {
   switch (type) {
@@ -59,6 +62,8 @@ export function LivingArtifactFeature() {
   const [shelfOpen, setShelfOpen] = useState(false);
   const [selectedArtifactId, setSelectedArtifactId] = useState<string | null>(null);
   const [runCopyState, setRunCopyState] = useState<Record<string, RunCommandCopyResult>>({});
+  const [revealState, setRevealState] = useState<Record<string, ArtifactRevealDisplayState>>({});
+  const [revealError, setRevealError] = useState<Record<string, string>>({});
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -73,6 +78,8 @@ export function LivingArtifactFeature() {
       setShelfOpen(false);
       setSelectedArtifactId(null);
       setRunCopyState({});
+      setRevealState({});
+      setRevealError({});
       return;
     }
     const findTarget = () => setTarget(document.querySelector(".chef-living-stage"));
@@ -196,6 +203,22 @@ export function LivingArtifactFeature() {
     setRunCopyState((current) => ({ ...current, [artifactId]: result }));
   };
 
+  const revealResult = async (artifactId: string) => {
+    setRevealState((current) => ({ ...current, [artifactId]: "opening" }));
+    setRevealError((current) => {
+      const next = { ...current };
+      delete next[artifactId];
+      return next;
+    });
+    const result = await revealArtifactOnce(artifactId);
+    if (result.ok) {
+      setRevealState((current) => ({ ...current, [artifactId]: "opened" }));
+      return;
+    }
+    setRevealState((current) => ({ ...current, [artifactId]: "error" }));
+    setRevealError((current) => ({ ...current, [artifactId]: result.error }));
+  };
+
   return createPortal(
     <section className="chef-result-cluster" aria-label="Workspace results">
       <div className="chef-result-cluster__label">
@@ -208,6 +231,7 @@ export function LivingArtifactFeature() {
       {visibleArtifacts.map((artifact, index) => {
         const handoff = artifactHandoff(artifact);
         const copyState = runCopyState[artifact.id];
+        const currentRevealState = revealState[artifact.id] ?? "idle";
         return (
           <article
             key={`${artifact.id}:${artifact.version}`}
@@ -221,12 +245,26 @@ export function LivingArtifactFeature() {
                 <span className="chef-result-card__eyebrow">{artifactLabel(artifact.type)}</span>
                 <strong title={artifact.name}>{artifact.name}</strong>
                 {handoff.summary && <small title={handoff.summary}>{handoff.summary}</small>}
+                {handoff.location && <small title={handoff.location}>Location: <code>{handoff.location}</code></small>}
                 <small title={provenanceLabel(artifact)}>{provenanceLabel(artifact)}</small>
                 {handoff.runCommand && <small title={handoff.runCommand}>Run: <code>{handoff.runCommand}</code></small>}
-                {handoff.verifiedBy && <small title={handoff.verifiedBy}>Verified: {handoff.verifiedBy}</small>}
+                {handoff.verification && <small title={handoff.verification}>{handoff.verification}</small>}
+                {revealError[artifact.id] && <small role="status">{revealError[artifact.id]}</small>}
               </div>
             </button>
             <div className="chef-result-card__actions">
+              {canRevealArtifact(artifact) && (
+                <button
+                  className="chef-result-card__action chef-result-card__reveal"
+                  type="button"
+                  onClick={() => void revealResult(artifact.id)}
+                  disabled={currentRevealState === "opening"}
+                  title={revealError[artifact.id] ?? artifactRevealLabel(currentRevealState)}
+                  aria-label={`${artifactRevealLabel(currentRevealState)} ${artifact.name}`}
+                >
+                  {artifactRevealLabel(currentRevealState)}
+                </button>
+              )}
               {handoff.runCommand && (
                 <button
                   className="chef-result-card__action chef-result-card__copy"
@@ -247,7 +285,7 @@ export function LivingArtifactFeature() {
                 >
                   ↓
                 </a>
-              ) : !handoff.runCommand ? (
+              ) : !handoff.runCommand && !canRevealArtifact(artifact) ? (
                 <span className="chef-result-card__ready" title="Stored in Chef">✓</span>
               ) : null}
             </div>
