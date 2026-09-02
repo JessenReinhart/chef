@@ -1,6 +1,7 @@
 import { strict as assert } from "node:assert";
 import {
   missionResultHandoffProjection,
+  shouldOfferArtifactShelf,
   type LivingArtifact,
 } from "../web/src/artifactProjection.ts";
 
@@ -124,4 +125,35 @@ assert.deepEqual(
   "a selected Thread with no Mission must not inherit a workspace-global result",
 );
 
-console.log("result-handoff-projection: ok — incomplete and terminal handoffs stay truthful and A → B → A switching keeps results selected-Thread scoped");
+assert.equal(
+  shouldOfferArtifactShelf(1, 0),
+  true,
+  "an idle selected Thread must keep the workspace artifact shelf reachable when a durable result exists elsewhere",
+);
+assert.equal(
+  shouldOfferArtifactShelf(4, 0),
+  true,
+  "a small workspace history must remain reachable even when there are too few artifacts to trigger overflow behavior",
+);
+assert.equal(
+  shouldOfferArtifactShelf(4, 1),
+  true,
+  "a current result must not hide other workspace artifacts merely because the workspace has four or fewer outputs",
+);
+assert.equal(
+  shouldOfferArtifactShelf(4, 4),
+  false,
+  "when the current Thread already shows the entire workspace result set, Simple Mode should stay compact instead of duplicating a shelf affordance",
+);
+assert.equal(
+  shouldOfferArtifactShelf(5, 4),
+  true,
+  "workspace overflow must continue exposing the shelf when one result is outside the visible handoff",
+);
+assert.equal(
+  shouldOfferArtifactShelf(0, 0),
+  false,
+  "an empty workspace must not render an empty artifact shelf affordance",
+);
+
+console.log("result-handoff-projection: ok — incomplete handoffs stay truthful, Thread switching stays scoped, and durable workspace artifacts remain rediscoverable whenever results are hidden");

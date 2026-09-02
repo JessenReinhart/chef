@@ -15,6 +15,7 @@ import {
   previewText,
   provenanceLabel,
   recentArtifacts,
+  shouldOfferArtifactShelf,
   type ArtifactType,
   type LivingArtifact,
   type RunCommandCopyResult,
@@ -170,6 +171,7 @@ export function LivingArtifactFeature() {
   const visibleResultCount = selectedThreadId && missionScope?.threadId !== selectedThreadId
     ? 0
     : currentMissionArtifacts.length;
+  const offerArtifactShelf = shouldOfferArtifactShelf(artifacts.length, visibleArtifacts.length);
   const shelfArtifacts = useMemo(
     () => recentArtifacts(artifacts, MAX_SHELF_RESULTS),
     [artifacts],
@@ -179,7 +181,7 @@ export function LivingArtifactFeature() {
     [artifacts, selectedArtifactId],
   );
 
-  if (!enabled || !target || (visibleArtifacts.length === 0 && !resultNotice)) return null;
+  if (!enabled || !target || (visibleArtifacts.length === 0 && !resultNotice && !offerArtifactShelf)) return null;
 
   const inspectArtifact = (artifact: LivingArtifact) => {
     setShelfOpen(true);
@@ -253,7 +255,7 @@ export function LivingArtifactFeature() {
         );
       })}
 
-      {artifacts.length > MAX_VISIBLE_RESULTS && (
+      {offerArtifactShelf && (
         <button
           className="chef-result-cluster__more"
           type="button"
