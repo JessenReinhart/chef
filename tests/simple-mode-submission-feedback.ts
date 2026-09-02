@@ -45,39 +45,20 @@ assert.deepEqual(
 
 const threadAKey = "thread-a";
 const threadBKey = "thread-b";
-const hiddenFailure = rememberMissionSubmissionFailure(new Map(), threadAKey, reportedFailure);
+rememberMissionSubmissionFailure(threadAKey, reportedFailure);
 assert.equal(
-  hiddenFailure.get(threadAKey)?.input,
-  submittedText,
-  "a failure that completes off-foreground must stay owned by the Thread that submitted it",
-);
-assert.equal(
-  hiddenFailure.get(threadBKey),
-  undefined,
-  "an off-foreground failure must not leak into the currently selected Thread",
-);
-
-const wrongThreadRead = takeMissionSubmissionFailure(hiddenFailure, threadBKey);
-assert.equal(
-  wrongThreadRead.recovery,
+  takeMissionSubmissionFailure(threadBKey),
   null,
-  "selecting another Thread must not consume a failed request owned elsewhere",
+  "a failure that completes off-foreground must not leak into another Thread",
 );
-assert.equal(
-  wrongThreadRead.remaining.get(threadAKey)?.input,
-  submittedText,
-  "failed retry state must remain available until its owning Thread becomes foreground again",
-);
-
-const restoredThreadA = takeMissionSubmissionFailure(wrongThreadRead.remaining, threadAKey);
 assert.deepEqual(
-  restoredThreadA.recovery,
+  takeMissionSubmissionFailure(threadAKey),
   reportedFailure,
-  "returning to the submitting Thread must restore its exact retry text and truthful failure",
+  "the owning Thread must recover its exact retry text and truthful failure after a remount",
 );
 assert.equal(
-  restoredThreadA.remaining.has(threadAKey),
-  false,
+  takeMissionSubmissionFailure(threadAKey),
+  null,
   "restored failure state must be consumed once so a later successful retry cannot resurrect stale failure UI",
 );
 
