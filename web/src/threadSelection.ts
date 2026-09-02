@@ -91,7 +91,9 @@ export function latestMissionForSelectedThread(
   missions: readonly UiMission[],
   threadId: string | null,
 ): UiMission | undefined {
-  return [...missionsForSelectedThread(missions, threadId)].sort((a, b) => b.updatedAt - a.updatedAt)[0];
+  return [...missionsForSelectedThread(missions, threadId)].sort((a, b) =>
+    b.createdAt - a.createdAt || b.updatedAt - a.updatedAt
+  )[0];
 }
 
 export function missionStatusForSelectedThread(
