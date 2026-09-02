@@ -2,6 +2,7 @@
 
 ## 2026-09-02
 
+- **Mission status now catches up with fast worker completion and failure (#331):** Simple Mode now uses the recovered current-attempt Task lineage to leave stale Working state while Mission persistence catches up, showing Verifying on completion and the real attention state on failure without letting unrelated Task activity leak in.
 - **Newer follow-up work now stays in the foreground (#327):** In a Thread with multiple Missions, a late background update from older work can no longer pull Simple Mode back to the wrong request. The newest user-created Mission remains foreground while other Thread activity stays excluded.
 - **Fast-path worker progress stays visible while Mission state catches up (#329):** Simple Mode now keeps worker activity and heartbeat feedback attached to the right Mission even when the Mission's durable task list briefly lags behind runtime events. Unrelated Task activity is still filtered out.
 - **Failed Simple Mode starts now recover cleanly (#325):** If Chef cannot start a submitted task, the optimistic active-work state is cleared, the exact request returns to the composer for retry, and the real failure stays visible. The recovery remains owned by the originating Thread so switching conversations cannot leak retry text or failure state.
