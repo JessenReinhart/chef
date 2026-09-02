@@ -2,6 +2,7 @@
 
 ## 2026-09-02
 
+- **Workspace results stay reachable from an idle Thread (#321):** Switching to a fresh conversation no longer hides the workspace artifact shelf when durable results exist elsewhere. Foreground result cards still stay scoped to the selected Thread, so older work remains discoverable without being presented as the current conversation's result.
 - **Switching Threads now clears stale Simple Mode activity immediately (#319):** Simple Mode remounts its Thread-scoped workspace, activity, and result surfaces as soon as the selected Thread changes, so the previous conversation cannot linger while asynchronous refreshes catch up. Power Mode keeps its workspace-wide presentation.
 
 ## 2026-09-01
