@@ -1,6 +1,7 @@
 import { strict as assert } from "node:assert";
 
 import {
+  clearMissionSubmissionFailure,
   missionSubmissionAcknowledgement,
   missionSubmissionFailureRecovery,
   rememberMissionSubmissionFailure,
@@ -56,10 +57,16 @@ assert.deepEqual(
   reportedFailure,
   "the owning Thread must recover its exact retry text and truthful failure after a remount",
 );
+assert.deepEqual(
+  takeMissionSubmissionFailure(threadAKey),
+  reportedFailure,
+  "the outgoing Thread surface must not consume retry state before the remounted owning surface can read it",
+);
+clearMissionSubmissionFailure(threadAKey);
 assert.equal(
   takeMissionSubmissionFailure(threadAKey),
   null,
-  "restored failure state must be consumed once so a later successful retry cannot resurrect stale failure UI",
+  "starting the next submission must clear prior retry state so stale failure UI cannot resurrect later",
 );
 
 console.log("Simple Mode submission feedback behavior passed.");
