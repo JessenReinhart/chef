@@ -2,6 +2,8 @@
 
 ## 2026-09-03
 
+- **The permanent todo journey now proves project selection before work starts (#339):** Chef's cross-platform golden path now confirms the requested local project through the real project-selection boundary before submitting the todo task, while preserving planning, worker progress, verification, result handoff, generated-app execution, and reopen checks.
+- **Simple Mode now acknowledges work immediately and restores failed requests (#341):** Sending a valid request now gives an immediate truthful starting acknowledgement and keeps the submitted goal visible while startup is pending. If startup fails, the exact request returns for retry and the failure stays with the Thread that owns it.
 - **Real worker activity now proves Simple Mode heartbeat feedback (#337):** Chef's normal test suite now runs a real Mission, Task, and PTY worker and verifies that unresolved work produces a truthful human-readable heartbeat after a silent interval, while the existing Windows and Linux canonical todo checks stay green.
 - **Chef now proves the full todo journey on Linux CI too (#335):** The permanent `Create a simple todo app` acceptance now runs on Ubuntu as well as Windows, covering project selection, visible progress, completion, result handoff, and the generated app actually starting successfully on both supported platforms.
 
