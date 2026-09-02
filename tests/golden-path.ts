@@ -8,6 +8,7 @@ import { dirname, join } from "node:path";
 import { GenericTerminalHarness } from "../src/harness/generic.ts";
 import { createChef } from "../src/main.ts";
 import { createProjectServer } from "../src/server/project-http.ts";
+import { createThreadServer } from "../src/server/thread-http.ts";
 import { artifactHandoff } from "../web/src/artifactHandoff.ts";
 import type { LivingArtifact } from "../web/src/artifactProjection.ts";
 import type {
@@ -79,6 +80,9 @@ class TodoAcceptanceDecisionProvider implements DecisionProvider {
 
   async proposePlan(input: PlanProposalContext): Promise<Plan & { routingMode: "single-worker" }> {
     this.#workspaceId = input.workspaceId;
+    // Keep planning open briefly so the Thread HTTP acknowledgement is
+    // deterministically observable before worker execution can finish.
+    await new Promise((resolve) => setTimeout(resolve, 200));
     const taskId = crypto.randomUUID();
     return {
       id: crypto.randomUUID(),
@@ -204,15 +208,16 @@ async function assertGeneratedAppRuns(appPath: string): Promise<void> {
   }
 }
 
-async function assertProjectSelectionBeforeTask(
+async function startJourneyServer(
   chef: ReturnType<typeof createChef>,
   projectDir: string,
-): Promise<void> {
+): Promise<{ server: ReturnType<typeof createProjectServer>; baseUrl: string }> {
   const base = createHttpServer((_req, res) => {
     res.writeHead(404);
     res.end("not found");
   });
-  const server = createProjectServer(chef, base, {
+  const threadServer = createThreadServer(chef, base);
+  const server = createProjectServer(chef, threadServer, {
     recentProjectsPath: join(projectDir, ".chef-golden-recent.json"),
     pickDirectory: async () => projectDir,
     canPickDirectory: async () => true,
@@ -223,22 +228,80 @@ async function assertProjectSelectionBeforeTask(
 
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
-  assert.ok(address && typeof address === "object", "project selection server must listen on TCP");
+  assert.ok(address && typeof address === "object", "golden journey server must listen on TCP");
+  return { server, baseUrl: `http://127.0.0.1:${address.port}` };
+}
 
-  try {
-    const response = await fetch(`http://127.0.0.1:${address.port}/api/project/open`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ path: projectDir }),
-    });
-    assert.equal(response.status, 200, "golden path must explicitly select its local project before task submission");
-    const body = await response.json() as { ok?: boolean; data?: { path?: string; current?: boolean } };
-    assert.equal(body.ok, true, "project selection must clearly report success");
-    assert.equal(body.data?.path, projectDir, "project selection must confirm the requested local project");
-    assert.equal(body.data?.current, true, "project selection must settle as the active project before task submission");
-  } finally {
-    await new Promise<void>((resolve) => server.close(() => resolve()));
+async function assertProjectSelectionBeforeTask(baseUrl: string, projectDir: string): Promise<void> {
+  const response = await fetch(`${baseUrl}/api/project/open`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ path: projectDir }),
+  });
+  assert.equal(response.status, 200, "golden path must explicitly select its local project before task submission");
+  const body = await response.json() as { ok?: boolean; data?: { path?: string; current?: boolean } };
+  assert.equal(body.ok, true, "project selection must clearly report success");
+  assert.equal(body.data?.path, projectDir, "project selection must confirm the requested local project");
+  assert.equal(body.data?.current, true, "project selection must settle as the active project before task submission");
+}
+
+async function submitTodoThroughThreadHttp(
+  baseUrl: string,
+  workspaceId: string,
+): Promise<{ threadId: string; missionId: string }> {
+  const threadResponse = await fetch(`${baseUrl}/api/threads`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ title: "Todo golden path" }),
+  });
+  assert.equal(threadResponse.status, 201, "golden path must create the same durable Thread surface used by Simple Mode");
+  const threadBody = await threadResponse.json() as {
+    ok?: boolean;
+    data?: { id?: string; workspaceId?: string; status?: string };
+  };
+  assert.equal(threadBody.ok, true, "Thread creation must succeed");
+  assert.equal(threadBody.data?.workspaceId, workspaceId, "Thread must belong to the selected project workspace");
+  assert.equal(threadBody.data?.status, "active", "canonical Thread must be writable");
+  assert.ok(threadBody.data?.id, "Thread creation must return a durable id");
+  const threadId = threadBody.data.id;
+
+  const chatResponse = await fetch(`${baseUrl}/api/threads/${encodeURIComponent(threadId)}/chat`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ message: TODO_REQUEST }),
+  });
+  assert.equal(chatResponse.status, 202, "Thread submission must acknowledge accepted work without waiting for completion");
+  const chatBody = await chatResponse.json() as {
+    ok?: boolean;
+    data?: { accepted?: boolean; threadId?: string; missionId?: string };
+  };
+  assert.equal(chatBody.ok, true, "Thread submission acknowledgement must be successful");
+  assert.equal(chatBody.data?.accepted, true, "Thread submission must explicitly report accepted work");
+  assert.equal(chatBody.data?.threadId, threadId, "acknowledgement must retain the originating Thread identity");
+  assert.ok(chatBody.data?.missionId, "acknowledgement must expose the created Mission identity");
+  return { threadId, missionId: chatBody.data.missionId };
+}
+
+async function waitForThreadCompletionMessage(
+  baseUrl: string,
+  threadId: string,
+  missionId: string,
+): Promise<{ content: string; metadata?: Record<string, unknown> }> {
+  const deadline = Date.now() + 2_000;
+  while (Date.now() < deadline) {
+    const response = await fetch(`${baseUrl}/api/threads/${encodeURIComponent(threadId)}/messages`);
+    assert.equal(response.status, 200, "Thread history must stay readable during canonical work");
+    const body = await response.json() as {
+      ok?: boolean;
+      data?: Array<{ role?: string; content?: string; metadata?: Record<string, unknown> }>;
+    };
+    const completion = body.data?.find((message) =>
+      message.role === "assistant" && message.metadata?.missionId === missionId && message.metadata?.ok === true
+    );
+    if (completion?.content) return { content: completion.content, metadata: completion.metadata };
+    await new Promise((resolve) => setTimeout(resolve, 20));
   }
+  assert.fail("completed canonical Mission must persist its assistant handoff into the originating Thread");
 }
 
 function eventStatus(event: RuntimeEvent): unknown {
@@ -310,14 +373,15 @@ function resultHandoff(artifact: LivingArtifact, appPath: string): ReturnType<ty
 
 /**
  * P0 golden path: the permanent boring acceptance task traverses the real
- * project selection -> Mission -> Plan -> Task -> PTY lifecycle, produces a
- * discoverable result in the selected project, runs successfully, and survives
- * close/reopen.
+ * project selection -> Thread HTTP -> Mission -> Plan -> Task -> PTY lifecycle,
+ * produces a discoverable result in the selected project, runs successfully,
+ * and survives close/reopen.
  */
 async function main(): Promise<void> {
   const projectDir = await mkdtemp(join(tmpdir(), "chef-golden-project-"));
   const dbPath = join(projectDir, "chef.sqlite");
   const appPath = join(projectDir, TODO_APP);
+  let journeyServer: ReturnType<typeof createProjectServer> | null = null;
 
   try {
     const workerScript = await writeTodoWorker(projectDir);
@@ -331,12 +395,13 @@ async function main(): Promise<void> {
 
     assert.ok(chef.workspaceId, "start() must expose the selected workspace id");
     const workspaceId = chef.workspaceId;
-    await assertProjectSelectionBeforeTask(chef, projectDir);
+    const journey = await startJourneyServer(chef, projectDir);
+    journeyServer = journey.server;
+    await assertProjectSelectionBeforeTask(journey.baseUrl, projectDir);
 
     const liveEvents: RuntimeEvent[] = [];
     const unsubscribe = chef.subscribeEvents((event) => liveEvents.push(event));
-    let sendSettled = false;
-    const sendPromise = chef.sendUserMessage(TODO_REQUEST).finally(() => { sendSettled = true; });
+    const acknowledgement = await submitTodoThroughThreadHttp(journey.baseUrl, workspaceId);
 
     const planningEvent = await waitForObservableEvent(
       liveEvents,
@@ -344,36 +409,54 @@ async function main(): Promise<void> {
       500,
       "planning acknowledgement",
     );
-    assert.equal(sendSettled, false, "planning acknowledgement must be observable before request completion");
-    const missionId = planningEvent.source.id;
+    assert.equal(planningEvent.source.id, acknowledgement.missionId, "Thread acknowledgement must name the observable planning Mission");
+    assert.equal(
+      liveEvents.some((event) => event.source.id === acknowledgement.missionId && event.type === "mission.status" && eventStatus(event) === "completed"),
+      false,
+      "Thread HTTP acknowledgement must arrive before canonical work completes",
+    );
+
     await waitForObservableEvent(
       liveEvents,
-      (event) => event.source.id === missionId && event.type === "mission.status" && eventStatus(event) === "active",
+      (event) => event.source.id === acknowledgement.missionId && event.type === "mission.status" && eventStatus(event) === "active",
       2_000,
       "active working state",
     );
-    assert.equal(sendSettled, false, "active working state must be observable while the request is still running");
-
-    const result = await sendPromise;
+    await waitForObservableEvent(
+      liveEvents,
+      (event) => event.source.id === acknowledgement.missionId && event.type === "mission.status" && eventStatus(event) === "completed",
+      10_000,
+      "completed canonical Mission",
+    );
     unsubscribe();
-
-    assert.equal(result.workspaceId, workspaceId);
-    assert.equal(result.ok, true, `orchestrator failed: ${result.report}`);
-    assert.equal(result.taskIds.length, 1, "simple todo acceptance task should execute as one worker task");
-    assert.match(result.report, /todo app/i, "completion report must identify the requested result");
-    assertObservableMissionLifecycle(liveEvents, result.taskIds);
-    assertRoutingModeIsDurable(liveEvents);
 
     const snapshot = await chef.inspectState();
     assert.equal(snapshot.workspaceId, workspaceId);
+    const mission = snapshot.missions.find((candidate) => candidate.id === acknowledgement.missionId);
+    assert.ok(mission, "Thread acknowledgement Mission must persist in the selected workspace");
+    assert.equal(mission.metadata.threadId, acknowledgement.threadId, "Mission must remain durably linked to its originating Thread");
+    assert.equal(mission.status, "completed", "canonical Mission must complete successfully");
+    assert.equal(mission.taskIds.length, 1, "simple todo acceptance task should execute as one worker task");
+    const resultTaskIds = mission.taskIds;
+
+    const completionMessage = await waitForThreadCompletionMessage(
+      journey.baseUrl,
+      acknowledgement.threadId,
+      acknowledgement.missionId,
+    );
+    assert.match(completionMessage.content, /todo app/i, "Thread completion handoff must identify the requested result");
+    assert.deepEqual(completionMessage.metadata?.taskIds, resultTaskIds, "Thread completion handoff must retain Mission task lineage");
+
     assert.equal(snapshot.tasks.length, 1, "golden path should persist its worker task");
     assert.ok(snapshot.tasks.every((task) => task.status === "completed"), "golden path tasks must complete");
     assert.equal(snapshot.plans.length, 1, "the executed plan must be persisted");
     assert.equal(snapshot.plans[0].goal, TODO_REQUEST, "persisted plan must retain the canonical user request");
     assert.equal(snapshot.plans[0].status, "completed", "the executed plan must complete durably");
-    assert.deepEqual(snapshot.plans[0].taskIds, result.taskIds, "plan must retain task lineage");
+    assert.deepEqual(snapshot.plans[0].taskIds, resultTaskIds, "plan must retain task lineage");
     assert.ok(snapshot.events.some((event) => event.type.startsWith("task.")), "task lifecycle events must be recorded");
-    assertObservableMissionLifecycle(snapshot.events, result.taskIds);
+    assertObservableMissionLifecycle(liveEvents, resultTaskIds);
+    assertRoutingModeIsDurable(liveEvents);
+    assertObservableMissionLifecycle(snapshot.events, resultTaskIds);
     assertRoutingModeIsDurable(snapshot.events);
     assert.equal(snapshot.artifacts.length, 1, "worker must produce one durable result artifact");
     assert.equal(snapshot.artifacts[0].name, "todo-app", "artifact must make the generated result discoverable");
@@ -390,6 +473,8 @@ async function main(): Promise<void> {
     const messagesBeforeClose = chef.repository.listMessages(workspaceId);
     assert.ok(messagesBeforeClose.length > 0, "structured agent/message history must be persisted");
 
+    await new Promise<void>((resolve) => journeyServer!.close(() => resolve()));
+    journeyServer = null;
     await chef.close();
 
     const reopened = createChef({ dbPath, projectDir });
@@ -399,8 +484,10 @@ async function main(): Promise<void> {
     const restored = await reopened.inspectState();
     assert.equal(restored.tasks.length, snapshot.tasks.length, "task history must survive reopen");
     assert.equal(restored.events.length, snapshot.events.length, "event history must survive reopen");
-    assertObservableMissionLifecycle(restored.events, result.taskIds);
+    assertObservableMissionLifecycle(restored.events, resultTaskIds);
     assertRoutingModeIsDurable(restored.events);
+    const restoredMission = restored.missions.find((candidate) => candidate.id === acknowledgement.missionId);
+    assert.equal(restoredMission?.metadata.threadId, acknowledgement.threadId, "Thread -> Mission lineage must survive reopen");
     assert.equal(restored.artifacts.length, snapshot.artifacts.length, "result location must survive reopen");
     assert.deepEqual(resultHandoff(restored.artifacts[0] as LivingArtifact, appPath), handoff, "result location, summary, run command, and verification handoff must survive reopen");
     assert.equal(restored.sessions.length, snapshot.sessions.length, "session history must survive reopen");
@@ -412,6 +499,7 @@ async function main(): Promise<void> {
 
     await reopened.close();
   } finally {
+    if (journeyServer) await new Promise<void>((resolve) => journeyServer!.close(() => resolve()));
     await rm(projectDir, { recursive: true, force: true });
   }
 }
