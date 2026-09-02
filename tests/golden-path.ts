@@ -409,22 +409,22 @@ async function main(): Promise<void> {
       500,
       "planning acknowledgement",
     );
-    assert.equal(planningEvent.source.id, acknowledgement.missionId, "Thread acknowledgement must name the observable planning Mission");
-    assert.equal(
-      liveEvents.some((event) => event.source.id === acknowledgement.missionId && event.type === "mission.status" && eventStatus(event) === "completed"),
-      false,
-      "Thread HTTP acknowledgement must arrive before canonical work completes",
+    const acknowledgedMission = chef.repository.listMissions(workspaceId).find(
+      (candidate) => candidate.id === acknowledgement.missionId,
     );
+    assert.ok(acknowledgedMission, "Thread acknowledgement must name a durable Mission in the selected workspace");
+    assert.equal(acknowledgedMission.metadata.threadId, acknowledgement.threadId, "acknowledged Mission must already be linked to its originating Thread");
+    assert.equal(acknowledgedMission.status, "planning", "Thread HTTP acknowledgement must arrive while canonical work is still planning");
 
     await waitForObservableEvent(
       liveEvents,
-      (event) => event.source.id === acknowledgement.missionId && event.type === "mission.status" && eventStatus(event) === "active",
+      (event) => event.source.id === planningEvent.source.id && event.type === "mission.status" && eventStatus(event) === "active",
       2_000,
       "active working state",
     );
     await waitForObservableEvent(
       liveEvents,
-      (event) => event.source.id === acknowledgement.missionId && event.type === "mission.status" && eventStatus(event) === "completed",
+      (event) => event.source.id === planningEvent.source.id && event.type === "mission.status" && eventStatus(event) === "completed",
       10_000,
       "completed canonical Mission",
     );
