@@ -184,6 +184,9 @@ function projectedMissionStatus(
   if (ownedTaskIds.length === 0) return mission.status;
   const missionTasks = ownedTaskIds.map((taskId) => tasksById.get(taskId));
   if (missionTasks.some((task) => task === undefined)) return mission.status;
+  if (missionTasks.some((task) => task?.status === "failed")) return "failed";
+  if (missionTasks.some((task) => task?.status === "blocked")) return "blocked";
+  if (missionTasks.some((task) => task?.status === "cancelled")) return "cancelled";
   return missionTasks.every((task) => task?.status === "completed") ? "verifying" : mission.status;
 }
 
