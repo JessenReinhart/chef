@@ -2,6 +2,7 @@
 
 ## 2026-09-02
 
+- **Project switching now stays truthful while reopening (#323):** When Chef is moving from one local project to another, the persistent Simple Mode project control now shows the requested target as `Switching` instead of continuing to present the old project as settled. Typed paths, Recent selections, and an already-open Project menu all reflect the handoff until the requested runtime project actually becomes active.
 - **Workspace results stay reachable from an idle Thread (#321):** Switching to a fresh conversation no longer hides the workspace artifact shelf when durable results exist elsewhere. Foreground result cards still stay scoped to the selected Thread, so older work remains discoverable without being presented as the current conversation's result.
 - **Switching Threads now clears stale Simple Mode activity immediately (#319):** Simple Mode remounts its Thread-scoped workspace, activity, and result surfaces as soon as the selected Thread changes, so the previous conversation cannot linger while asynchronous refreshes catch up. Power Mode keeps its workspace-wide presentation.
 
