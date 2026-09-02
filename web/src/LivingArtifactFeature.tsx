@@ -5,7 +5,6 @@ import {
   MAX_SHELF_RESULTS,
   MAX_VISIBLE_RESULTS,
   SPATIAL_RESULT_SLOTS,
-  artifactHandoff,
   artifactsForCurrentMission,
   canDownload,
   copyRunCommand,
@@ -20,6 +19,7 @@ import {
   type LivingArtifact,
   type RunCommandCopyResult,
 } from "./artifactProjection";
+import { artifactHandoff } from "./artifactHandoff";
 import { projectMissionActivity } from "./missionActivityProjection";
 import { loadSelectedThreadId, SELECTED_THREAD_EVENT } from "./threadApi";
 import { latestMissionForSelectedThread } from "./threadSelection";
@@ -221,9 +221,10 @@ export function LivingArtifactFeature() {
                 <span className="chef-result-card__eyebrow">{artifactLabel(artifact.type)}</span>
                 <strong title={artifact.name}>{artifact.name}</strong>
                 {handoff.summary && <small title={handoff.summary}>{handoff.summary}</small>}
+                {handoff.location && <small title={handoff.location}>Location: <code>{handoff.location}</code></small>}
                 <small title={provenanceLabel(artifact)}>{provenanceLabel(artifact)}</small>
                 {handoff.runCommand && <small title={handoff.runCommand}>Run: <code>{handoff.runCommand}</code></small>}
-                {handoff.verifiedBy && <small title={handoff.verifiedBy}>Verified: {handoff.verifiedBy}</small>}
+                {handoff.verification && <small title={handoff.verification}>{handoff.verification}</small>}
               </div>
             </button>
             <div className="chef-result-card__actions">
