@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-09-03
+
+- **Chef now proves the full todo journey on Linux CI too (#335):** The permanent `Create a simple todo app` acceptance now runs on Ubuntu as well as Windows, covering project selection, visible progress, completion, result handoff, and the generated app actually starting successfully on both supported platforms.
+
 ## 2026-09-02
 
 - **Simple Mode results now show the full handoff and can be opened directly (#333):** Result cards now show where the generated output lives, how to run it, and what verified it using the same canonical handoff model as Chef's acceptance checks. File-backed results also expose the existing safe **Show result** action with truthful opening, success, and retryable error feedback.
