@@ -17,14 +17,10 @@ function retryErrorMessage(error: unknown): string {
   return message;
 }
 
-function terminalMissionRecoveryMessage(status: string): string {
-  if (status === "failed") {
-    return "This Mission has already failed, so its history is final. Continue it as new work instead of retrying this step in place.";
-  }
-  if (status === "cancelled") {
-    return "This Mission was cancelled, so its history is final. Continue it as new work instead of retrying this step in place.";
-  }
-  return "This Mission is already complete, so its history is final. Start new work instead of retrying this step in place.";
+function terminalMissionRecoveryMessage(status: "completed" | "cancelled"): string {
+  return status === "cancelled"
+    ? "This Mission was cancelled, so its history is final. Continue it as new work instead of retrying this step in place."
+    : "This Mission is already complete, so its history is final. Start new work instead of retrying this step in place.";
 }
 
 /**
@@ -57,7 +53,7 @@ export function createRecoveryServer(runtime: ChefRuntime, baseServer: Server): 
         if (task.missionId) {
           const mission = runtime.repository.getMission(task.missionId);
           if (mission && mission.workspaceId === runtime.workspaceId
-            && (mission.status === "failed" || mission.status === "cancelled" || mission.status === "completed")) {
+            && (mission.status === "cancelled" || mission.status === "completed")) {
             sendJson(res, 409, { error: terminalMissionRecoveryMessage(mission.status) });
             return;
           }
