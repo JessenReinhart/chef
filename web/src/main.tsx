@@ -5,6 +5,7 @@ import { ContextScopeFeature } from "./ContextScopeFeature";
 import { CanvasNodeDeleteFeature } from "./CanvasNodeDeleteFeature";
 import { LivingWorkspaceFeature } from "./LivingWorkspaceFeature";
 import { LivingArtifactFeature } from "./LivingArtifactFeature";
+import { HomeMissionArtifacts } from "./HomeMissionArtifacts";
 import { MissionArtifactsFeature } from "./MissionArtifactsFeature";
 import { SetupChrome } from "./SetupChrome";
 import { DecisionLibraryFeature } from "./DecisionLibraryFeature";
@@ -91,6 +92,7 @@ function ChefRoot() {
     {plan.livingWorkspace && <LivingWorkspaceFeature key={`workspace:${threadSurfaceGeneration}`} />}
     {plan.missionActivity && <MissionActivityRail key={`activity:${threadSurfaceGeneration}`} />}
     {plan.livingArtifacts && <LivingArtifactFeature key={`artifacts:${threadSurfaceGeneration}`} />}
+    {plan.homeMissionArtifacts && <HomeMissionArtifacts key={`home-results:${threadSurfaceGeneration}`} />}
 
     <SetupChrome surface="workbench" />
   </>;
