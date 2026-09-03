@@ -5,7 +5,7 @@ import { artifactHandoff, canRevealArtifact, isFileUriArtifact } from "./artifac
 import { missionResultHandoffProjection } from "./artifactProjection";
 import { artifactRevealLabel, copyRunCommand, createSingleFlightArtifactRevealer } from "./resultActions";
 import { selectLivingWorkspaceMission } from "./missionActivityProjection";
-import { subscribeMissionProgressRefresh } from "./missionProgressStream";
+import { createMissionProgressRefreshQueue, subscribeMissionProgressRefresh } from "./missionProgressStream";
 import { missionTaskIdsFromEvents } from "./threadScope";
 import type { UiMission, UiRuntimeEvent } from "./types";
 
@@ -80,17 +80,19 @@ export function HomeMissionArtifacts() {
   }, []);
 
   useEffect(() => {
-    void refresh();
-    const timer = window.setInterval(() => void refresh(), 1800);
-    const onThreadChanged = () => void refresh();
+    const refreshQueue = createMissionProgressRefreshQueue(refresh);
+    refreshQueue.trigger();
+    const timer = window.setInterval(refreshQueue.trigger, 1800);
+    const unsubscribe = subscribeMissionProgressRefresh(refreshQueue.trigger);
+    const onThreadChanged = () => refreshQueue.trigger();
     window.addEventListener(SELECTED_THREAD_EVENT, onThreadChanged);
     return () => {
       window.clearInterval(timer);
       window.removeEventListener(SELECTED_THREAD_EVENT, onThreadChanged);
+      unsubscribe();
+      refreshQueue.close();
     };
   }, [refresh]);
-
-  useEffect(() => subscribeMissionProgressRefresh(refresh), [refresh]);
 
   const resultHandoff = useMemo(() => {
     if (!mission) return { artifacts: [] as HomeArtifact[], notice: null as string | null };
