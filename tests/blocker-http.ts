@@ -5,10 +5,11 @@ import { tmpdir } from "node:os";
 import { createChef } from "../src/main.ts";
 import { createHttpServer } from "../src/server/http-server.ts";
 import { createBlockerServer } from "../src/server/blocker-http.ts";
+import { createRecoveryServer } from "../src/server/recovery-http.ts";
 
 const dir = await mkdtemp(join(tmpdir(), "chef-blocker-http-"));
 const runtime = createChef({ dbPath: join(dir, "chef.sqlite"), projectDir: dir });
-const server = createBlockerServer(runtime, createHttpServer(runtime));
+const server = createRecoveryServer(runtime, createBlockerServer(runtime, createHttpServer(runtime)));
 
 const request = async (path: string, method = "GET") => {
   const address = server.address();
@@ -49,7 +50,7 @@ try {
     status: "failed",
     missionId: mission.id,
     error: "verification failed",
-    retryCount: 2,
+    retryCount: 1,
   });
   runtime.repository.insertApproval({
     id: "approval-resolved",
@@ -100,7 +101,7 @@ try {
   assert.equal(data.blockedTasks[0].approvalId, "approval-publish");
   assert.deepEqual(data.failedTasks.map((task) => task.id), ["task-failed"]);
   assert.equal(data.failedTasks[0].error, "verification failed");
-  assert.equal(data.failedTasks[0].retryCount, 2);
+  assert.equal(data.failedTasks[0].retryCount, 1);
   assert.equal(data.failedTasks[0].missionId, mission.id);
   assert.ok(!JSON.stringify(data).includes("approval-other"));
   assert.ok(!JSON.stringify(data).includes("task-other"));
@@ -113,7 +114,7 @@ try {
   assert.ok(retriedTask);
   assert.notEqual(retriedTask.status, "failed");
   assert.equal(retriedTask.error, undefined);
-  assert.ok(retriedTask.retryCount > 2);
+  assert.equal(retriedTask.retryCount, 2);
 
   const afterRetry = await request("/api/blockers");
   assert.equal(afterRetry.status, 200);
