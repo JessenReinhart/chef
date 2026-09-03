@@ -2,6 +2,7 @@
 
 ## 2026-09-03
 
+- **Failed Simple Mode work now retries without carrying the old failure forward (#349):** The normal recovery path now proves a failed Mission task can be surfaced, retried through the production endpoint, leave failed-blocker state, and clear its stale error only after the retry actually starts, while workspace isolation and retry limits remain intact.
 - **Canonical todo results now prove the Show result boundary (#347):** Chef's result acceptance now passes a canonical generated todo artifact through the production Show result HTTP route, verifies it resolves to the generated file inside the selected project, and keeps CI independent of a real desktop shell.
 - **Completed Mission results are now visible directly in Simple Mode (#345):** The normal workspace now exposes the existing durable result handoff without requiring Power Mode, including result location, run instructions, verification details, file download, and the safe Show result action while keeping Power Mode from duplicating the same surface.
 - **The canonical todo journey now crosses the real Thread HTTP boundary (#343):** Chef's permanent Windows and Linux todo acceptance now creates a real Thread, submits the request through the same Thread HTTP endpoint used by Simple Mode, proves the immediate acknowledgement names the correct Mission before work finishes, and preserves Thread, Mission, task, result, generated-app, and reopen behavior through completion.
