@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "./api";
 import { projectMissionActivity, selectLivingWorkspaceMission, type MissionActivitySnapshot } from "./missionActivityProjection";
-import { subscribeMissionProgressRefresh } from "./missionProgressStream";
+import { createMissionProgressRefreshQueue, subscribeMissionProgressRefresh } from "./missionProgressStream";
 import { loadSelectedThreadId, threadMessages } from "./threadApi";
 import { latestAssistantThreadNote, missionsForSelectedThread } from "./threadSelection";
 import type { HarnessInfo } from "./types";
@@ -48,12 +48,17 @@ export function MissionActivityRail() {
   }, []);
 
   useEffect(() => {
-    void refresh();
-    const timer = window.setInterval(() => void refresh(), 1200);
-    return () => window.clearInterval(timer);
-  }, [refresh]);
+    const refreshQueue = createMissionProgressRefreshQueue(refresh);
+    refreshQueue.trigger();
+    const timer = window.setInterval(refreshQueue.trigger, 1200);
+    const unsubscribe = subscribeMissionProgressRefresh(refreshQueue.trigger);
 
-  useEffect(() => subscribeMissionProgressRefresh(() => void refresh()), [refresh]);
+    return () => {
+      window.clearInterval(timer);
+      unsubscribe();
+      refreshQueue.close();
+    };
+  }, [refresh]);
 
   useEffect(() => {
     void api.harnesses().then(setHarnesses).catch(() => setHarnesses([]));
