@@ -10,13 +10,19 @@ export const MISSION_PROGRESS_EVENT_TYPES = [
 export type MissionProgressEventStream = Pick<EventSource, "onmessage" | "close">;
 export type MissionProgressEventStreamFactory = (url: string) => MissionProgressEventStream;
 export type MissionProgressRefresh = () => void | Promise<void>;
+export type MissionProgressRefreshQueue = { trigger: () => void; close: () => void };
 
 /** Keep human-readable Mission progress subscribed to every runtime family it can translate. */
 export function missionProgressEventStreamUrl(): string {
   return `/api/events?types=${MISSION_PROGRESS_EVENT_TYPES.join(",")}`;
 }
 
-function coalescedRefresh(onRefresh: MissionProgressRefresh): { trigger: () => void; close: () => void } {
+/**
+ * Give every refresh source one shared one-in-flight + one-trailing budget.
+ * Timers, live invalidations, and mount-time reads can all trigger this queue without
+ * multiplying authoritative state requests while a slower refresh is still running.
+ */
+export function createMissionProgressRefreshQueue(onRefresh: MissionProgressRefresh): MissionProgressRefreshQueue {
   let closed = false;
   let refreshing = false;
   let queued = false;
@@ -65,7 +71,7 @@ export function createMissionProgressRefreshHub(
   };
 
   return (onRefresh) => {
-    const refresh = coalescedRefresh(onRefresh);
+    const refresh = createMissionProgressRefreshQueue(onRefresh);
     listeners.add(refresh.trigger);
     ensureStream();
 
@@ -109,7 +115,7 @@ export function subscribeMissionProgressProjection<T>(
   createStream?: MissionProgressEventStreamFactory,
 ): () => void {
   let closed = false;
-  const projectionRefresh = coalescedRefresh(async () => {
+  const projectionRefresh = createMissionProgressRefreshQueue(async () => {
     const projection = await loadProjection();
     if (!closed) applyProjection(projection);
   });
