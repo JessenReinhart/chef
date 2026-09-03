@@ -5,6 +5,7 @@ export interface WorkspaceSurfacePlan {
   livingWorkspace: boolean;
   missionActivity: boolean;
   livingArtifacts: boolean;
+  homeMissionArtifacts: boolean;
   runtimeApp: boolean;
   contextScopes: boolean;
   canvasDeletion: boolean;
@@ -29,6 +30,7 @@ export function workspaceSurfacePlan(depth: WorkspaceDepth): WorkspaceSurfacePla
       livingWorkspace: false,
       missionActivity: false,
       livingArtifacts: false,
+      homeMissionArtifacts: false,
       runtimeApp: true,
       contextScopes: true,
       canvasDeletion: true,
@@ -44,6 +46,7 @@ export function workspaceSurfacePlan(depth: WorkspaceDepth): WorkspaceSurfacePla
     livingWorkspace: true,
     missionActivity: true,
     livingArtifacts: true,
+    homeMissionArtifacts: true,
     runtimeApp: false,
     contextScopes: false,
     canvasDeletion: false,
