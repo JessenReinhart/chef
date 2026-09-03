@@ -5,6 +5,7 @@ import {
   isThreadSubmissionPending,
   latestAssistantThreadNote,
   latestMissionForSelectedThread,
+  loadForSelectedThread,
   missionsForSelectedThread,
   missionStatusForSelectedThread,
   moveThreadSubmissionPending,
@@ -157,6 +158,49 @@ notePending.get("thread-old")?.resolve(oldAssistant);
 assert.deepEqual(await selectedThreadNote, { current: true, messages: selectedAssistant }, "the selected Thread assistant note should stay authoritative");
 assert.deepEqual(await oldThreadNote, { current: false }, "a late assistant note from the previous Thread must be ignored");
 
+// The live activity rail has its own authoritative workspace state read. A slow
+// read begun for the previous Thread must obey the same foreground ownership
+// boundary as history and submission feedback.
+let selectedActivityThread: string | null = "thread-a";
+let resolveActivityState: ((value: { marker: string }) => void) | null = null;
+const delayedActivityState = new Promise<{ marker: string }>((resolve) => {
+  resolveActivityState = resolve;
+});
+const staleActivityRefresh = loadForSelectedThread(
+  "thread-a",
+  () => selectedActivityThread,
+  () => delayedActivityState,
+);
+selectedActivityThread = "thread-b";
+resolveActivityState?.({ marker: "thread-a-state" });
+assert.deepEqual(
+  await staleActivityRefresh,
+  { current: false },
+  "a slow Simple Mode activity read must be discarded after the foreground Thread changes",
+);
+
+let currentActivityLoads = 0;
+assert.deepEqual(
+  await loadForSelectedThread(
+    "thread-b",
+    () => selectedActivityThread,
+    async () => {
+      currentActivityLoads += 1;
+      return { marker: "thread-b-state" };
+    },
+  ),
+  { current: true, value: { marker: "thread-b-state" } },
+  "the selected Thread should still receive its own authoritative activity snapshot",
+);
+assert.equal(currentActivityLoads, 1, "a current activity refresh should perform exactly one authoritative read");
+
+selectedActivityThread = null;
+assert.deepEqual(
+  await loadForSelectedThread(null, () => selectedActivityThread, async () => ({ marker: "workspace-state" })),
+  { current: true, value: { marker: "workspace-state" } },
+  "workspace-level activity should remain valid when no Thread is selected",
+);
+
 const missionResults = [
   { role: "user", content: "Create a todo app", timestamp: 7 },
   { role: "assistant", content: "Older Mission finished", timestamp: 8, metadata: { missionId: "mission-old", ok: true } },
@@ -253,4 +297,4 @@ const missingSelection = resolveHomeThreadSelection(threads, "missing");
 assert.equal(missingSelection.selectedThread?.id, "active-a", "a stale remembered id should recover to an active Thread");
 assert.equal(foregroundThreadId(missingSelection), "active-a", "a stale persisted id must resolve to the same Thread the user sees before new work starts");
 
-console.log("thread-selection-race: ok — Thread switching, first-Thread startup/completion ownership, concurrent submissions, Mission activity, and terminal summaries stay isolated");
+console.log("thread-selection-race: ok — Thread switching, submission feedback, live activity, Mission state, and terminal summaries stay isolated");
