@@ -59,7 +59,7 @@ export function createRecoveryServer(runtime: ChefRuntime, baseServer: Server): 
           return;
         }
 
-        const updated = runtime.repository.getTask(taskId);
+        let updated = runtime.repository.getTask(taskId);
         if (!updated || updated.workspaceId !== runtime.workspaceId) {
           sendJson(res, 500, { error: `task disappeared after retry: ${taskId}` });
           return;
@@ -67,6 +67,13 @@ export function createRecoveryServer(runtime: ChefRuntime, baseServer: Server): 
         if (updated.status === "failed" || updated.status === "blocked") {
           sendJson(res, 409, { error: "retry could not start yet; the task remains blocked" });
           return;
+        }
+
+        // Repository patches use `undefined` to mean "leave this field alone".
+        // Once a retry genuinely starts, explicitly clear the previous failure
+        // so recovered work cannot remain visually attached to a stale error.
+        if (updated.error !== undefined) {
+          updated = runtime.repository.updateTask(taskId, { error: null as never });
         }
 
         sendJson(res, 200, { ok: true, data: updated });
