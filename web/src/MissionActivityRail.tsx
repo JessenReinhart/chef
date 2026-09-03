@@ -3,8 +3,7 @@ import { api } from "./api";
 import { projectMissionActivity, selectLivingWorkspaceMission, type MissionActivitySnapshot } from "./missionActivityProjection";
 import { createMissionProgressRefreshQueue, subscribeMissionProgressRefresh } from "./missionProgressStream";
 import { loadSelectedThreadId, SELECTED_THREAD_EVENT, threadMessages } from "./threadApi";
-import { loadForSelectedThread } from "./threadScopedRefresh";
-import { latestAssistantThreadNote, missionsForSelectedThread } from "./threadSelection";
+import { latestAssistantThreadNote, loadForSelectedThread, missionsForSelectedThread } from "./threadSelection";
 import type { HarnessInfo } from "./types";
 
 const EMPTY: MissionActivitySnapshot = { missions: [], tasks: [], events: [] };
