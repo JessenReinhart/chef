@@ -32,8 +32,6 @@ jobs:
         run: npm test
       - name: Run Simple Mode submission feedback test
         run: node --experimental-strip-types tests/simple-mode-submission-feedback.ts
-      - name: Run project picker HTTP acceptance test
-        run: node --experimental-strip-types tests/project-http.ts
       - name: Run artifact HTTP acceptance test
         run: node --experimental-strip-types tests/artifact-http.ts
       - name: Run Mission plan HTTP acceptance test
@@ -66,6 +64,8 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm install
+      - name: Run project-open handoff acceptance
+        run: node --experimental-strip-types tests/project-http.ts
       - name: Run bounded Thread to worker startup acceptance
         run: node --experimental-strip-types tests/thread-worker-startup.ts
       - name: Run canonical todo golden path
