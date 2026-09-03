@@ -33,6 +33,7 @@ import {
   summarizeMissionProgressForMission,
   type MissionHomeState,
 } from "./missionProgress";
+import { canRetryMissionTask } from "./missionRecovery";
 import type { ChatMessage, UiMission, UiRuntimeEvent, UiTask } from "./types";
 
 type Approval = { id: string; reason: string; taskId: string; status: string };
@@ -479,7 +480,12 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
 
   function renderMissionTask(task: UiTask) {
     const presentation = taskPresentation(task.status);
-    const canRetry = !archivedThreadSelected && (task.status === "failed" || (task.status === "blocked" && !approvalTaskIds.has(task.id)));
+    const canRetry = canRetryMissionTask({
+      missionStatus: missionByTaskId.get(task.id)?.status,
+      taskStatus: task.status,
+      blockedByApproval: approvalTaskIds.has(task.id),
+      readOnly: archivedThreadSelected,
+    });
     return (
       <div key={task.id} className="flex items-center gap-3 rounded-xl px-3 py-2.5 transition hover:bg-white/[0.025]">
         <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${presentation.dot}`} />
