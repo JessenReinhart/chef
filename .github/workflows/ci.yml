@@ -30,6 +30,8 @@ jobs:
         run: '[void][scriptblock]::Create((Get-Content -Raw scripts/ensure-windows-launcher.ps1))'
       - name: Run runtime tests
         run: npm test
+      - name: Run selected-Thread activity refresh test
+        run: node --experimental-strip-types tests/thread-scoped-refresh.ts
       - name: Run Simple Mode submission feedback test
         run: node --experimental-strip-types tests/simple-mode-submission-feedback.ts
       - name: Run artifact HTTP acceptance test
