@@ -136,6 +136,11 @@ try {
   const blockedLegacyChatBody = await blockedLegacyChat.json() as { error?: string };
   assert.match(blockedLegacyChatBody.error ?? "", /selected project is active/i);
 
+  const blockedRetry = await fetch(`${origin}/api/nodes/task-old/retry`, { method: "POST" });
+  assert.equal(blockedRetry.status, 409, "Retry must not restart old-project work after another project is selected");
+  const blockedRetryBody = await blockedRetry.json() as { error?: string };
+  assert.match(blockedRetryBody.error ?? "", /selected project is active/i);
+
   await new Promise((resolve) => setTimeout(resolve, 150));
   assert.equal(opened, next);
   assert.deepEqual(openAttempts, [next], "duplicate/conflicting project selections must schedule exactly one runtime handoff");
@@ -162,11 +167,21 @@ try {
     });
     assert.equal(reopen.status, 202);
     assert.equal((await fetch(`${failingOrigin}/api/threads`, { method: "POST" })).status, 409);
+    assert.equal(
+      (await fetch(`${failingOrigin}/api/nodes/task-old/retry`, { method: "POST" })).status,
+      409,
+      "Retry must stay gated while the old runtime is attempting the selected-project handoff",
+    );
     await new Promise((resolve) => setTimeout(resolve, 150));
     assert.equal(
       (await fetch(`${failingOrigin}/api/threads`, { method: "POST" })).status,
       418,
       "a failed runtime reopen must release the old-project work gate so recovery remains possible",
+    );
+    assert.equal(
+      (await fetch(`${failingOrigin}/api/nodes/task-old/retry`, { method: "POST" })).status,
+      418,
+      "a failed runtime reopen must release Retry back to the old runtime instead of leaving recovery deadlocked",
     );
     const recoverySelection = await fetch(`${failingOrigin}/api/project/open`, {
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: other }),
