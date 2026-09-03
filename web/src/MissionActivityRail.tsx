@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "./api";
 import { projectMissionActivity, selectLivingWorkspaceMission, type MissionActivitySnapshot } from "./missionActivityProjection";
 import { createMissionProgressRefreshQueue, subscribeMissionProgressRefresh } from "./missionProgressStream";
-import { loadSelectedThreadId, threadMessages } from "./threadApi";
-import { latestAssistantThreadNote, missionsForSelectedThread } from "./threadSelection";
+import { loadSelectedThreadId, SELECTED_THREAD_EVENT, threadMessages } from "./threadApi";
+import { latestAssistantThreadNote, loadForSelectedThread, missionsForSelectedThread } from "./threadSelection";
 import type { HarnessInfo } from "./types";
 
 const EMPTY: MissionActivitySnapshot = { missions: [], tasks: [], events: [] };
@@ -18,7 +18,14 @@ export function MissionActivityRail() {
   const refresh = useCallback(async () => {
     try {
       const selectedThreadId = loadSelectedThreadId();
-      const state = await api.stateRaw();
+      const stateLoad = await loadForSelectedThread(
+        selectedThreadId,
+        loadSelectedThreadId,
+        () => api.stateRaw(),
+      );
+      if (!stateLoad.current) return;
+
+      const state = stateLoad.value;
       const nextSnapshot = {
         missions: missionsForSelectedThread(state.missions ?? [], selectedThreadId),
         tasks: state.tasks,
@@ -52,9 +59,17 @@ export function MissionActivityRail() {
     refreshQueue.trigger();
     const timer = window.setInterval(refreshQueue.trigger, 1200);
     const unsubscribe = subscribeMissionProgressRefresh(refreshQueue.trigger);
+    const onThreadChanged = () => {
+      summarizedMissionKey.current = null;
+      setResultNote(null);
+      setSnapshot(EMPTY);
+      refreshQueue.trigger();
+    };
+    window.addEventListener(SELECTED_THREAD_EVENT, onThreadChanged);
 
     return () => {
       window.clearInterval(timer);
+      window.removeEventListener(SELECTED_THREAD_EVENT, onThreadChanged);
       unsubscribe();
       refreshQueue.close();
     };

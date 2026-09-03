@@ -5,6 +5,10 @@ export type ThreadHistoryLoad =
   | { current: true; messages: ChatMessage[] }
   | { current: false };
 
+export type ThreadScopedRefreshResult<T> =
+  | { current: true; value: T }
+  | { current: false };
+
 export type HomeThreadSelection = {
   activeThreads: UiThread[];
   archivedThreads: UiThread[];
@@ -77,6 +81,21 @@ export function threadSubmissionOwnsForeground(
   if (submittedThreadId !== null) return submittedThreadId === selectedThreadId;
   if (transferredThreadId !== null) return transferredThreadId === selectedThreadId;
   return selectedThreadId === null;
+}
+
+/**
+ * Resolve an authoritative read only while the foreground Thread still owns it.
+ * Slow state reads may settle after a Thread switch; those results are background
+ * history, not valid Simple Mode foreground state.
+ */
+export async function loadForSelectedThread<T>(
+  requestThreadId: string | null,
+  selectedThreadId: () => string | null,
+  load: () => Promise<T>,
+): Promise<ThreadScopedRefreshResult<T>> {
+  const value = await load();
+  if (selectedThreadId() !== requestThreadId) return { current: false };
+  return { current: true, value };
 }
 
 export function missionsForSelectedThread(
