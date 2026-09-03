@@ -16,6 +16,7 @@ import type {
   WorkspaceId,
 } from "../src/core/types.ts";
 import { summarizeMissionProgressForMission } from "../web/src/missionProgress.ts";
+import { createMissionProgressRefreshQueue } from "../web/src/missionProgressStream.ts";
 import type { UiRuntimeEvent } from "../web/src/types.ts";
 
 const TODO_REQUEST = "Create a simple todo app";
@@ -94,7 +95,45 @@ async function waitForEvent(
   assert.fail(`${label} was not observable within ${timeoutMs} ms`);
 }
 
+async function proveSharedRefreshBudget(): Promise<void> {
+  let refreshCount = 0;
+  let releaseFirstRefresh!: () => void;
+  const firstRefresh = new Promise<void>((resolve) => { releaseFirstRefresh = resolve; });
+  const queue = createMissionProgressRefreshQueue(() => {
+    refreshCount += 1;
+    return refreshCount === 1 ? firstRefresh : Promise.resolve();
+  });
+
+  queue.trigger();
+  await Promise.resolve();
+  assert.equal(refreshCount, 1, "the initial Simple Mode activity refresh should start immediately");
+
+  queue.trigger();
+  queue.trigger();
+  queue.trigger();
+  assert.equal(
+    refreshCount,
+    1,
+    "timer and live invalidations must not start concurrent authoritative refreshes while one is in flight",
+  );
+
+  releaseFirstRefresh();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(
+    refreshCount,
+    2,
+    "bursty invalidations must retain exactly one trailing refresh so the newest activity is still observed",
+  );
+
+  queue.close();
+  queue.trigger();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(refreshCount, 2, "an unmounted activity rail must not schedule more refresh work");
+}
+
 async function main(): Promise<void> {
+  await proveSharedRefreshBudget();
+
   const projectDir = await mkdtemp(join(tmpdir(), "chef-heartbeat-runtime-"));
   const dbPath = join(projectDir, "chef.sqlite");
   const workerScript = join(projectDir, "heartbeat-worker.cjs");
