@@ -19,6 +19,7 @@ assert.deepEqual(simple, {
   livingWorkspace: true,
   missionActivity: true,
   livingArtifacts: true,
+  homeMissionArtifacts: true,
   runtimeApp: false,
   contextScopes: false,
   canvasDeletion: false,
@@ -26,7 +27,7 @@ assert.deepEqual(simple, {
   missionArtifacts: false,
   rooms: false,
   agentContext: false,
-}, "normal use should mount one project-grounded Living Workspace without hidden runtime surfaces");
+}, "normal use should mount one project-grounded Living Workspace with canonical Mission results and without hidden runtime surfaces");
 
 const power = workspaceSurfacePlan("power");
 assert.equal(power.livingWorkspace, false, "runtime detail must replace rather than duplicate the streaming Living Workspace");
