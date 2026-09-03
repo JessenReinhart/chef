@@ -10,10 +10,10 @@ const dir = await mkdtemp(join(tmpdir(), "chef-blocker-http-"));
 const runtime = createChef({ dbPath: join(dir, "chef.sqlite"), projectDir: dir });
 const server = createBlockerServer(runtime, createHttpServer(runtime));
 
-const request = async (path: string) => {
+const request = async (path: string, method = "GET") => {
   const address = server.address();
   assert.ok(address && typeof address === "object");
-  const response = await fetch(`http://127.0.0.1:${address.port}${path}`);
+  const response = await fetch(`http://127.0.0.1:${address.port}${path}`, { method });
   return { status: response.status, json: await response.json() as { ok?: boolean; data?: unknown; error?: string } };
 };
 
@@ -87,7 +87,7 @@ try {
     counts: { pendingApprovals: number; blockedTasks: number; failedTasks: number };
     pendingApprovals: Array<{ id: string; task: { id: string; title: string; missionId?: string }; mission: { id: string; goal: string; status: string } | null }>;
     blockedTasks: Array<{ id: string; approvalId?: string }>;
-    failedTasks: Array<{ id: string; error?: string; retryCount: number }>;
+    failedTasks: Array<{ id: string; error?: string; retryCount: number; missionId?: string }>;
   };
   assert.deepEqual(data.counts, { pendingApprovals: 1, blockedTasks: 1, failedTasks: 1 });
   assert.equal(data.pendingApprovals[0].id, "approval-publish");
@@ -101,8 +101,28 @@ try {
   assert.deepEqual(data.failedTasks.map((task) => task.id), ["task-failed"]);
   assert.equal(data.failedTasks[0].error, "verification failed");
   assert.equal(data.failedTasks[0].retryCount, 2);
+  assert.equal(data.failedTasks[0].missionId, mission.id);
   assert.ok(!JSON.stringify(data).includes("approval-other"));
   assert.ok(!JSON.stringify(data).includes("task-other"));
+
+  const retry = await request("/api/nodes/task-failed/retry", "POST");
+  assert.equal(retry.status, 200);
+  assert.equal(retry.json.ok, true);
+
+  const retriedTask = runtime.repository.getTask("task-failed");
+  assert.ok(retriedTask);
+  assert.notEqual(retriedTask.status, "failed");
+  assert.equal(retriedTask.error, undefined);
+  assert.ok(retriedTask.retryCount > 2);
+
+  const afterRetry = await request("/api/blockers");
+  assert.equal(afterRetry.status, 200);
+  const afterRetryData = afterRetry.json.data as {
+    counts: { pendingApprovals: number; blockedTasks: number; failedTasks: number };
+    failedTasks: Array<{ id: string }>;
+  };
+  assert.equal(afterRetryData.counts.failedTasks, 0);
+  assert.ok(!afterRetryData.failedTasks.some((task) => task.id === "task-failed"));
 
   const state = await request("/api/state");
   assert.equal(state.status, 200);
