@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "./api";
 import { projectMissionActivity, selectLivingWorkspaceMission, type MissionActivitySnapshot } from "./missionActivityProjection";
 import { createMissionProgressRefreshQueue, subscribeMissionProgressRefresh } from "./missionProgressStream";
-import { loadSelectedThreadId, threadMessages } from "./threadApi";
+import { loadSelectedThreadId, SELECTED_THREAD_EVENT, threadMessages } from "./threadApi";
 import { loadForSelectedThread } from "./threadScopedRefresh";
 import { latestAssistantThreadNote, missionsForSelectedThread } from "./threadSelection";
 import type { HarnessInfo } from "./types";
@@ -60,9 +60,17 @@ export function MissionActivityRail() {
     refreshQueue.trigger();
     const timer = window.setInterval(refreshQueue.trigger, 1200);
     const unsubscribe = subscribeMissionProgressRefresh(refreshQueue.trigger);
+    const onThreadChanged = () => {
+      summarizedMissionKey.current = null;
+      setResultNote(null);
+      setSnapshot(EMPTY);
+      refreshQueue.trigger();
+    };
+    window.addEventListener(SELECTED_THREAD_EVENT, onThreadChanged);
 
     return () => {
       window.clearInterval(timer);
+      window.removeEventListener(SELECTED_THREAD_EVENT, onThreadChanged);
       unsubscribe();
       refreshQueue.close();
     };
