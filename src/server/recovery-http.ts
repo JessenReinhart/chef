@@ -17,6 +17,16 @@ function retryErrorMessage(error: unknown): string {
   return message;
 }
 
+function terminalMissionRecoveryMessage(status: string): string {
+  if (status === "failed") {
+    return "This Mission has already failed, so its history is final. Continue it as new work instead of retrying this step in place.";
+  }
+  if (status === "cancelled") {
+    return "This Mission was cancelled, so its history is final. Continue it as new work instead of retrying this step in place.";
+  }
+  return "This Mission is already complete, so its history is final. Start new work instead of retrying this step in place.";
+}
+
 /**
  * Adds the normal user-facing recovery mutation for failed/blocked work.
  *
@@ -43,6 +53,14 @@ export function createRecoveryServer(runtime: ChefRuntime, baseServer: Server): 
         if (task.status !== "failed" && task.status !== "blocked") {
           sendJson(res, 409, { error: `task is not retryable from status ${task.status}` });
           return;
+        }
+        if (task.missionId) {
+          const mission = runtime.repository.getMission(task.missionId);
+          if (mission && mission.workspaceId === runtime.workspaceId
+            && (mission.status === "failed" || mission.status === "cancelled" || mission.status === "completed")) {
+            sendJson(res, 409, { error: terminalMissionRecoveryMessage(mission.status) });
+            return;
+          }
         }
         if (task.status === "blocked" && task.approvalId) {
           const approval = runtime.repository.getApproval(task.approvalId);
