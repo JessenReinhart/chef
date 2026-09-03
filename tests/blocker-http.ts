@@ -83,20 +83,20 @@ try {
   });
 
   const terminalMission = runtime.repository.insertMission({
-    id: "mission-terminal-failure",
+    id: "mission-terminal-cancelled",
     workspaceId: runtime.workspaceId,
-    goal: "Preserve failed Mission history",
-    status: "failed",
+    goal: "Preserve cancelled Mission history",
+    status: "cancelled",
   });
   runtime.repository.insertTask({
     id: "task-terminal-failure",
     workspaceId: runtime.workspaceId,
-    title: "Do not orphan retry",
-    description: "A failed task beneath terminal Mission history",
+    title: "Do not retry cancelled work",
+    description: "A failed task beneath cancelled Mission history",
     status: "failed",
     missionId: terminalMission.id,
     assignedTo: "retry-worker",
-    error: "terminal worker failure",
+    error: "worker failed before cancellation",
     retryCount: 0,
   });
 
@@ -147,13 +147,13 @@ try {
 
   const terminalRetry = await request("/api/nodes/task-terminal-failure/retry", "POST");
   assert.equal(terminalRetry.status, 409);
-  assert.match(terminalRetry.json.error ?? "", /Mission has already failed/i);
+  assert.match(terminalRetry.json.error ?? "", /Mission was cancelled/i);
   assert.match(terminalRetry.json.error ?? "", /Continue it as new work/i);
   const terminalTaskAfterRetry = runtime.repository.getTask("task-terminal-failure");
   assert.equal(terminalTaskAfterRetry?.status, "failed");
   assert.equal(terminalTaskAfterRetry?.retryCount, 0);
-  assert.equal(terminalTaskAfterRetry?.error, "terminal worker failure");
-  assert.equal(runtime.repository.getMission(terminalMission.id)?.status, "failed");
+  assert.equal(terminalTaskAfterRetry?.error, "worker failed before cancellation");
+  assert.equal(runtime.repository.getMission(terminalMission.id)?.status, "cancelled");
   assert.equal(runtime.repository.listSessions(runtime.workspaceId).some((session) => session.taskId === "task-terminal-failure"), false);
 
   const retry = await request("/api/nodes/task-failed/retry", "POST");
