@@ -73,7 +73,12 @@ export async function archiveThread(threadId: string): Promise<UiThread> {
 }
 
 export async function threadMessages(threadId: string): Promise<ChatMessage[]> {
+  const selectedThreadAtStart = loadSelectedThreadId();
+  const simpleModeAtStart = localStorage.getItem("chef:view-mode") !== "power";
   const response = await request<{ ok: boolean; data: ChatMessage[] }>(`/api/threads/${encodeURIComponent(threadId)}/messages`);
+  if (simpleModeAtStart && loadSelectedThreadId() !== selectedThreadAtStart) {
+    throw new Error("Thread selection changed while history was loading");
+  }
   return response.data;
 }
 
