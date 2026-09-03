@@ -82,6 +82,24 @@ try {
     resolvedAt: Date.now(),
   });
 
+  const terminalMission = runtime.repository.insertMission({
+    id: "mission-terminal-failure",
+    workspaceId: runtime.workspaceId,
+    goal: "Preserve failed Mission history",
+    status: "failed",
+  });
+  runtime.repository.insertTask({
+    id: "task-terminal-failure",
+    workspaceId: runtime.workspaceId,
+    title: "Do not orphan retry",
+    description: "A failed task beneath terminal Mission history",
+    status: "failed",
+    missionId: terminalMission.id,
+    assignedTo: "retry-worker",
+    error: "terminal worker failure",
+    retryCount: 0,
+  });
+
   const otherWorkspace = runtime.repository.createWorkspace({ name: "Other workspace" });
   runtime.repository.insertTask({
     id: "task-other",
@@ -109,7 +127,7 @@ try {
     blockedTasks: Array<{ id: string; approvalId?: string }>;
     failedTasks: Array<{ id: string; error?: string; retryCount: number; missionId?: string }>;
   };
-  assert.deepEqual(data.counts, { pendingApprovals: 1, blockedTasks: 1, failedTasks: 1 });
+  assert.deepEqual(data.counts, { pendingApprovals: 1, blockedTasks: 1, failedTasks: 2 });
   assert.equal(data.pendingApprovals[0].id, "approval-publish");
   assert.equal(data.pendingApprovals[0].task.id, "task-approval");
   assert.equal(data.pendingApprovals[0].task.title, "Publish result");
@@ -118,12 +136,25 @@ try {
   assert.equal(data.pendingApprovals[0].mission?.status, "waiting_for_approval");
   assert.deepEqual(data.blockedTasks.map((task) => task.id), ["task-approval"]);
   assert.equal(data.blockedTasks[0].approvalId, "approval-publish");
-  assert.deepEqual(data.failedTasks.map((task) => task.id), ["task-failed"]);
-  assert.equal(data.failedTasks[0].error, "verification failed");
-  assert.equal(data.failedTasks[0].retryCount, 1);
-  assert.equal(data.failedTasks[0].missionId, mission.id);
+  assert.deepEqual(data.failedTasks.map((task) => task.id).sort(), ["task-failed", "task-terminal-failure"]);
+  const retryableFailedTask = data.failedTasks.find((task) => task.id === "task-failed");
+  assert.ok(retryableFailedTask);
+  assert.equal(retryableFailedTask.error, "verification failed");
+  assert.equal(retryableFailedTask.retryCount, 1);
+  assert.equal(retryableFailedTask.missionId, mission.id);
   assert.ok(!JSON.stringify(data).includes("approval-other"));
   assert.ok(!JSON.stringify(data).includes("task-other"));
+
+  const terminalRetry = await request("/api/nodes/task-terminal-failure/retry", "POST");
+  assert.equal(terminalRetry.status, 409);
+  assert.match(terminalRetry.json.error ?? "", /Mission has already failed/i);
+  assert.match(terminalRetry.json.error ?? "", /Continue it as new work/i);
+  const terminalTaskAfterRetry = runtime.repository.getTask("task-terminal-failure");
+  assert.equal(terminalTaskAfterRetry?.status, "failed");
+  assert.equal(terminalTaskAfterRetry?.retryCount, 0);
+  assert.equal(terminalTaskAfterRetry?.error, "terminal worker failure");
+  assert.equal(runtime.repository.getMission(terminalMission.id)?.status, "failed");
+  assert.equal(runtime.repository.listSessions(runtime.workspaceId).some((session) => session.taskId === "task-terminal-failure"), false);
 
   const retry = await request("/api/nodes/task-failed/retry", "POST");
   assert.equal(retry.status, 200);
@@ -141,8 +172,9 @@ try {
     counts: { pendingApprovals: number; blockedTasks: number; failedTasks: number };
     failedTasks: Array<{ id: string }>;
   };
-  assert.equal(afterRetryData.counts.failedTasks, 0);
+  assert.equal(afterRetryData.counts.failedTasks, 1);
   assert.ok(!afterRetryData.failedTasks.some((task) => task.id === "task-failed"));
+  assert.ok(afterRetryData.failedTasks.some((task) => task.id === "task-terminal-failure"));
 
   const state = await request("/api/state");
   assert.equal(state.status, 200);
