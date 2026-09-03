@@ -46,6 +46,19 @@ const requestReveal = async (artifactId: string) => {
 };
 
 try {
+  const canonicalTodo = runtime.repository.insertArtifact({
+    id: "canonical-todo-result",
+    workspaceId: runtime.workspaceId,
+    type: "result",
+    name: "todo-app",
+    uri: pathToFileURL(resultPath).href,
+    createdBy: "todo-builder",
+    metadata: {
+      content: `Created runnable todo app at ${resultPath}`,
+      run: `${process.execPath} ${resultPath}`,
+      verifiedBy: "golden-path",
+    },
+  });
   const local = runtime.repository.insertArtifact({
     id: "opaque-local-result",
     workspaceId: runtime.workspaceId,
@@ -101,6 +114,7 @@ try {
     metadata: { resultLocation: outsidePath },
   });
 
+  assert.equal(canRevealArtifact(canonicalTodo), true, "the canonical todo result must advertise Show result in Simple Mode");
   assert.equal(canRevealArtifact(local), true, "Simple Mode should keep reveal available for an explicit durable local result path");
   assert.equal(canRevealArtifact(mixedCaseMetadataLocation), true, "mixed-case file URI metadata must remain revealable for opaque artifacts");
   assert.equal(canRevealArtifact(mixedCaseFileUri), true, "file URI schemes are case-insensitive and must remain revealable");
@@ -112,9 +126,13 @@ try {
 
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
 
+  const canonicalTodoReveal = await requestReveal(canonicalTodo.id);
+  assert.equal(canonicalTodoReveal.status, 200, "the canonical generated todo result must cross the production Show result endpoint");
+  assert.deepEqual(revealed, [{ path: resultPath, isDirectory: false }], "Show result must resolve the canonical todo artifact to its generated file inside the selected project");
+
   const localReveal = await requestReveal(local.id);
   assert.equal(localReveal.status, 200);
-  assert.deepEqual(revealed, [{ path: resultPath, isDirectory: false }], "server must resolve the persisted relative result location inside the active project");
+  assert.deepEqual(revealed.at(-1), { path: resultPath, isDirectory: false }, "server must resolve the persisted relative result location inside the active project");
 
   const metadataLocationReveal = await requestReveal(mixedCaseMetadataLocation.id);
   assert.equal(metadataLocationReveal.status, 200);
@@ -131,14 +149,14 @@ try {
   const remoteReveal = await requestReveal(remote.id);
   assert.equal(remoteReveal.status, 409);
   assert.match(remoteReveal.body.error ?? "", /not a local file/);
-  assert.equal(revealed.length, 3, "remote result locations must never be reinterpreted as project-relative filesystem paths");
+  assert.equal(revealed.length, 4, "remote result locations must never be reinterpreted as project-relative filesystem paths");
 
   const outsideReveal = await requestReveal(outside.id);
   assert.equal(outsideReveal.status, 403);
   assert.match(outsideReveal.body.error ?? "", /outside the project root/);
-  assert.equal(revealed.length, 3, "rejected result locations must never invoke the OS opener");
+  assert.equal(revealed.length, 4, "rejected result locations must never invoke the OS opener");
 
-  console.log("artifact-local-result-reveal: ok — result reveal stays safe, project-scoped, and platform-neutral in Simple Mode");
+  console.log("artifact-local-result-reveal: ok — canonical todo and local results stay safe, project-scoped, and platform-neutral in Simple Mode");
 } finally {
   if (server.listening) await new Promise<void>((resolve) => server.close(() => resolve()));
   await runtime.close();

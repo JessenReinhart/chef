@@ -9,6 +9,24 @@ import { createRecoveryServer } from "../src/server/recovery-http.ts";
 
 const dir = await mkdtemp(join(tmpdir(), "chef-blocker-http-"));
 const runtime = createChef({ dbPath: join(dir, "chef.sqlite"), projectDir: dir });
+runtime.registerHarness("retry-worker", {
+  id: "retry-worker",
+  command: process.execPath,
+  args: [],
+  cwd: dir,
+  taskCapable: true,
+  taskLaunch: () => ({ command: process.execPath, args: [] }),
+  spawn: async (options) => ({ id: options?.sessionId ?? "retry-session", pid: 1 }),
+  events: async function* () {},
+  send: async () => {},
+  interrupt: async () => {},
+  resize: async () => {},
+  terminate: async () => {},
+  forget: async () => {},
+  close: async () => {},
+  writeContextRefs: async () => "",
+  writeMessage: async () => "",
+});
 const server = createRecoveryServer(runtime, createBlockerServer(runtime, createHttpServer(runtime)));
 
 const request = async (path: string, method = "GET") => {
@@ -49,6 +67,7 @@ try {
     description: "Run verification",
     status: "failed",
     missionId: mission.id,
+    assignedTo: "retry-worker",
     error: "verification failed",
     retryCount: 1,
   });
