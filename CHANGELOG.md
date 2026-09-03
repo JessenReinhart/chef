@@ -2,6 +2,7 @@
 
 ## 2026-09-03
 
+- **Canonical todo results now prove the Show result boundary (#347):** Chef's result acceptance now passes a canonical generated todo artifact through the production Show result HTTP route, verifies it resolves to the generated file inside the selected project, and keeps CI independent of a real desktop shell.
 - **Completed Mission results are now visible directly in Simple Mode (#345):** The normal workspace now exposes the existing durable result handoff without requiring Power Mode, including result location, run instructions, verification details, file download, and the safe Show result action while keeping Power Mode from duplicating the same surface.
 - **The canonical todo journey now crosses the real Thread HTTP boundary (#343):** Chef's permanent Windows and Linux todo acceptance now creates a real Thread, submits the request through the same Thread HTTP endpoint used by Simple Mode, proves the immediate acknowledgement names the correct Mission before work finishes, and preserves Thread, Mission, task, result, generated-app, and reopen behavior through completion.
 - **The permanent todo journey now proves project selection before work starts (#339):** Chef's cross-platform golden path now confirms the requested local project through the real project-selection boundary before submitting the todo task, while preserving planning, worker progress, verification, result handoff, generated-app execution, and reopen checks.
