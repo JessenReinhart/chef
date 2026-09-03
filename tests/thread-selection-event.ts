@@ -21,7 +21,7 @@ const eventTarget = new EventTarget();
 Object.defineProperty(globalThis, "localStorage", { configurable: true, value: storage });
 Object.defineProperty(globalThis, "window", { configurable: true, value: eventTarget });
 
-const { SELECTED_THREAD_EVENT, loadSelectedThreadId, saveSelectedThreadId } = await import("../web/src/threadApi.ts");
+const { SELECTED_THREAD_EVENT, loadSelectedThreadId, saveSelectedThreadId, threadMessages } = await import("../web/src/threadApi.ts");
 const observed: Array<string | null> = [];
 eventTarget.addEventListener(SELECTED_THREAD_EVENT, (event) => {
   observed.push((event as CustomEvent<{ threadId: string | null }>).detail.threadId);
@@ -44,4 +44,39 @@ storage.setItem("chef:view-mode", "simple");
 saveSelectedThreadId("thread-c");
 assert.deepEqual(observed, ["thread-a", "thread-c"], "returning to Simple Mode should restore immediate Thread-selection invalidation");
 
-console.log("thread-selection-event: ok — Simple Mode selection changes signal immediately without disturbing Power Mode");
+// IntentHome waits for Thread history before committing its refreshed Mission,
+// Task, event, approval, and message projections. If the foreground Thread
+// changes during that await, the old refresh must fail before any of those
+// stale projections can be committed.
+const originalFetch = globalThis.fetch;
+let resolveHistory: ((response: Response) => void) | null = null;
+globalThis.fetch = async () => new Promise<Response>((resolve) => {
+  resolveHistory = resolve;
+});
+
+saveSelectedThreadId("thread-race-a");
+const staleHistory = threadMessages("thread-race-a");
+saveSelectedThreadId("thread-race-b");
+resolveHistory?.(new Response(JSON.stringify({
+  ok: true,
+  data: [{ role: "assistant", content: "Thread A is still working", timestamp: 10 }],
+}), { status: 200, headers: { "content-type": "application/json" } }));
+await assert.rejects(
+  staleHistory,
+  /Thread selection changed while history was loading/,
+  "a history request that crosses a Simple Mode Thread switch must stop the stale refresh transaction",
+);
+
+const selectedMessages = [{ role: "assistant", content: "Thread B is working", timestamp: 11 }];
+globalThis.fetch = async () => new Response(JSON.stringify({ ok: true, data: selectedMessages }), {
+  status: 200,
+  headers: { "content-type": "application/json" },
+});
+assert.deepEqual(
+  await threadMessages("thread-race-b"),
+  selectedMessages,
+  "history for the unchanged foreground Thread must still complete normally",
+);
+globalThis.fetch = originalFetch;
+
+console.log("thread-selection-event: ok — Simple Mode selection changes invalidate stale refresh/history work immediately without disturbing Power Mode");
