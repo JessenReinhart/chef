@@ -72,6 +72,11 @@ globalThis.fetch = async () => new Response(JSON.stringify({ ok: true, data: sel
   status: 200,
   headers: { "content-type": "application/json" },
 });
+await assert.rejects(
+  threadMessages("thread-race-a"),
+  /Thread selection changed while history was loading/,
+  "history that is already stale when its request starts must not commit into the current foreground Thread",
+);
 assert.deepEqual(
   await threadMessages("thread-race-b"),
   selectedMessages,
