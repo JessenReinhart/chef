@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { loadForSelectedThread } from "../web/src/threadScopedRefresh.ts";
+import { loadForSelectedThread } from "../web/src/threadSelection.ts";
 
 let selectedThreadId: string | null = "thread-a";
 let resolveState: ((value: { marker: string }) => void) | null = null;
