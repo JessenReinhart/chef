@@ -171,9 +171,12 @@ async function defaultPickDirectory(): Promise<string | null> {
   throw new Error("native directory picker is not available on this platform; enter the project path manually");
 }
 
-function startsNewThreadWork(method: string | undefined, pathname: string): boolean {
+function startsProjectWork(method: string | undefined, pathname: string): boolean {
   if (method !== "POST") return false;
-  return pathname === "/api/chat" || pathname === "/api/threads" || /^\/api\/threads\/[^/]+\/chat$/.test(pathname);
+  return pathname === "/api/chat"
+    || pathname === "/api/threads"
+    || /^\/api\/threads\/[^/]+\/chat$/.test(pathname)
+    || /^\/api\/nodes\/[^/]+\/retry$/.test(pathname);
 }
 
 export function createProjectServer(runtime: ChefRuntime, baseServer: Server, options: ProjectServerOptions): Server {
@@ -232,7 +235,7 @@ export function createProjectServer(runtime: ChefRuntime, baseServer: Server, op
         if (!selected) { sendJson(res, 200, { ok: true, data: { cancelled: true } }); return; }
         await openProject(selected, res); return;
       }
-      if (reopeningProjectPath && startsNewThreadWork(req.method, url.pathname)) {
+      if (reopeningProjectPath && startsProjectWork(req.method, url.pathname)) {
         sendJson(res, 409, {
           error: `Chef is switching to ${reopeningProjectPath}. Wait until the selected project is active before starting new work.`,
         });
