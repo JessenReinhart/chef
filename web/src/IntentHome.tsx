@@ -37,6 +37,7 @@ import {
   summarizeMissionProgressForMission,
   type MissionHomeState,
 } from "./missionProgress";
+import { createMissionProgressRefreshQueue } from "./missionProgressStream";
 import { canRetryMissionTask } from "./missionRecovery";
 import type { ChatMessage, UiMission, UiRuntimeEvent, UiTask } from "./types";
 
@@ -154,11 +155,15 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
     }
   }, [threadHistory]);
 
+  const refreshQueue = useMemo(() => createMissionProgressRefreshQueue(refresh), [refresh]);
+
+  useEffect(() => () => refreshQueue.close(), [refreshQueue]);
+
   useEffect(() => {
-    void refresh();
-    const timer = window.setInterval(() => void refresh(), 1800);
+    refreshQueue.trigger();
+    const timer = window.setInterval(refreshQueue.trigger, 1800);
     return () => window.clearInterval(timer);
-  }, [refresh]);
+  }, [refreshQueue]);
 
   useEffect(() => {
     const ownerKey = threadSubmissionKey(selectedThreadId);
@@ -461,7 +466,7 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
         }
         clearMissionSubmissionFailure(activeSubmissionKey);
       }
-      await refresh();
+      refreshQueue.trigger();
     } catch (err) {
       const recovery = missionSubmissionFailureRecovery(
         message,
@@ -481,7 +486,7 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
   async function decideApproval(id: string, decision: "accept" | "reject") {
     try {
       await api.approve(id, decision);
-      await refresh();
+      refreshQueue.trigger();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "Chef could not update the approval");
     }
@@ -493,7 +498,7 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
     setActionError(null);
     try {
       await api.retryNode(taskId);
-      await refresh();
+      refreshQueue.trigger();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "Chef could not retry this work");
     } finally {
