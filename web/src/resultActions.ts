@@ -29,6 +29,11 @@ type DownloadRequester = (
 type ArtifactRevealer = (artifactId: string) => Promise<ArtifactRevealResult>;
 type ArtifactDownloader = (artifactId: string) => Promise<ArtifactDownloadResult>;
 
+/** Scope transient UI feedback to the exact durable result version it describes. */
+export function artifactActionStateKey(artifactId: string, version: number): string {
+  return `${artifactId}:${version}`;
+}
+
 /** Copy the exact durable run instruction and report failure truthfully. */
 export async function copyRunCommand(
   command: string,
