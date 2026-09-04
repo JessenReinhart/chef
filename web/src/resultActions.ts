@@ -10,6 +10,10 @@ export type ArtifactRevealResult =
   | { ok: true }
   | { ok: false; error: string };
 
+export type ArtifactDownloadResult =
+  | { ok: true; blob: Blob; fileName: string }
+  | { ok: false; error: string };
+
 export type ArtifactRevealDisplayState = "idle" | "opening" | "opened" | "error";
 
 type RevealRequester = (
@@ -17,7 +21,13 @@ type RevealRequester = (
   init?: RequestInit,
 ) => Promise<Pick<Response, "ok" | "json">>;
 
+type DownloadRequester = (
+  input: RequestInfo | URL,
+  init?: RequestInit,
+) => Promise<Pick<Response, "ok" | "json" | "blob" | "headers">>;
+
 type ArtifactRevealer = (artifactId: string) => Promise<ArtifactRevealResult>;
+type ArtifactDownloader = (artifactId: string) => Promise<ArtifactDownloadResult>;
 
 /** Copy the exact durable run instruction and report failure truthfully. */
 export async function copyRunCommand(
@@ -78,6 +88,64 @@ export async function revealArtifact(
   }
 }
 
+function downloadFileName(headers: Pick<Headers, "get">): string {
+  const disposition = headers.get("content-disposition") ?? "";
+  const encoded = /filename\*=UTF-8''([^;]+)/i.exec(disposition)?.[1];
+  let candidate = "chef-result";
+  if (encoded) {
+    try {
+      candidate = decodeURIComponent(encoded);
+    } catch {
+      candidate = encoded;
+    }
+  } else {
+    const plain = /filename="?([^";]+)"?/i.exec(disposition)?.[1];
+    if (plain) candidate = plain;
+  }
+  return candidate.split(/[\\/]/).filter(Boolean).at(-1) || "chef-result";
+}
+
+/** Download a durable file result without navigating Simple Mode away on failure. */
+export async function downloadArtifact(
+  artifactId: string,
+  requester: DownloadRequester = fetch,
+): Promise<ArtifactDownloadResult> {
+  if (!artifactId.trim()) return { ok: false, error: "No result is available to save" };
+
+  try {
+    const response = await requester(`/api/artifacts/${encodeURIComponent(artifactId)}/download`, {
+      headers: { "x-chef-action": "download-artifact" },
+    });
+    if (!response.ok) {
+      let message = "Could not save this result";
+      try {
+        const body = await response.json() as { error?: unknown };
+        if (typeof body.error === "string" && body.error.trim()) {
+          message = /does not point to a file/i.test(body.error)
+            ? "This result is a folder. Use Show result to open it."
+            : body.error.trim();
+        }
+      } catch {
+        // Keep the stable user-facing fallback when the server response is not JSON.
+      }
+      return { ok: false, error: message };
+    }
+
+    return {
+      ok: true,
+      blob: await response.blob(),
+      fileName: downloadFileName(response.headers),
+    };
+  } catch (cause) {
+    return {
+      ok: false,
+      error: cause instanceof Error && cause.message
+        ? cause.message
+        : "Could not save this result",
+    };
+  }
+}
+
 /**
  * Keep one reveal action in flight per durable artifact.
  *
@@ -97,6 +165,26 @@ export function createSingleFlightArtifactRevealer(
 
     const request = Promise.resolve()
       .then(() => revealer(artifactId))
+      .finally(() => {
+        if (inFlight.get(artifactId) === request) inFlight.delete(artifactId);
+      });
+    inFlight.set(artifactId, request);
+    return request;
+  };
+}
+
+/** Keep one Save copy request in flight per artifact while allowing later retries. */
+export function createSingleFlightArtifactDownloader(
+  downloader: ArtifactDownloader = downloadArtifact,
+): ArtifactDownloader {
+  const inFlight = new Map<string, Promise<ArtifactDownloadResult>>();
+
+  return (artifactId) => {
+    const existing = inFlight.get(artifactId);
+    if (existing) return existing;
+
+    const request = Promise.resolve()
+      .then(() => downloader(artifactId))
       .finally(() => {
         if (inFlight.get(artifactId) === request) inFlight.delete(artifactId);
       });
