@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { loadSelectedThreadId, SELECTED_THREAD_EVENT } from "./threadApi";
 import { artifactHandoff, canRevealArtifact, isFileUriArtifact } from "./artifactHandoff";
-import { missionResultHandoffProjection } from "./artifactProjection";
+import { missionResultHandoffProjection, shouldRetainMissionResultOnRefreshFailure } from "./artifactProjection";
 import { artifactRevealLabel, copyRunCommand, createSingleFlightArtifactRevealer } from "./resultActions";
 import { selectLivingWorkspaceMission } from "./missionActivityProjection";
 import { createMissionProgressRefreshQueue, subscribeMissionProgressRefresh } from "./missionProgressStream";
@@ -33,6 +33,7 @@ export function HomeMissionArtifacts() {
   const [runCopyState, setRunCopyState] = useState<Record<string, RunCopyState>>({});
   const [revealState, setRevealState] = useState<Record<string, RevealState>>({});
   const refreshSequence = useRef(0);
+  const loadedThreadId = useRef<string | null>(null);
   const revealArtifactOnce = useRef(createSingleFlightArtifactRevealer()).current;
 
   const refresh = useCallback(async () => {
@@ -40,6 +41,7 @@ export function HomeMissionArtifacts() {
     setTarget(document.querySelector("main"));
     const selectedThreadId = loadSelectedThreadId();
     if (!selectedThreadId) {
+      loadedThreadId.current = null;
       setMission(null);
       setArtifacts([]);
       setError(null);
@@ -68,13 +70,16 @@ export function HomeMissionArtifacts() {
           }
         : null;
 
+      loadedThreadId.current = selectedThreadId;
       setMission(scopedMission);
       setArtifacts(artifactBody.ok && Array.isArray(artifactBody.data) ? artifactBody.data : []);
       setError(null);
     } catch (cause) {
       if (sequence !== refreshSequence.current || loadSelectedThreadId() !== selectedThreadId) return;
-      setMission(null);
-      setArtifacts([]);
+      if (!shouldRetainMissionResultOnRefreshFailure(loadedThreadId.current, selectedThreadId)) {
+        setMission(null);
+        setArtifacts([]);
+      }
       setError(cause instanceof Error ? cause.message : "Mission outputs are temporarily unavailable");
     }
   }, []);
@@ -137,97 +142,96 @@ export function HomeMissionArtifacts() {
         {missionArtifacts.length > 0 && <span className="text-[10px] text-zinc-600">{missionArtifacts.length} recent</span>}
       </div>
 
-      {error ? (
-        <p className="mt-3 text-xs text-amber-300">{error}</p>
-      ) : (
-        <>
-          {missingResultNotice && (
-            <p role="status" className="mt-3 rounded-xl border border-amber-500/20 bg-amber-500/5 px-3 py-2.5 text-xs leading-5 text-amber-200">
-              {missingResultNotice}
-            </p>
-          )}
-          {missionArtifacts.length > 0 && (
-            <div className="mt-3 grid gap-2 sm:grid-cols-2">
-              {missionArtifacts.map((artifact) => {
-                const handoff = artifactHandoff(artifact);
-                const copyState = runCopyState[artifact.id];
-                const reveal = revealState[artifact.id];
-                const revealable = canRevealArtifact(artifact);
-                return (
-                  <article key={`${artifact.id}:${artifact.version}`} className="rounded-xl border border-white/[0.07] bg-black/20 p-3">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="truncate text-xs font-medium text-zinc-200" title={artifact.name}>{artifact.name}</div>
-                        <div className="mt-1 text-[10px] capitalize text-zinc-600">{artifact.type}</div>
-                      </div>
-                      {revealable && (
-                        <div className="flex shrink-0 items-center gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => void handleRevealArtifact(artifact.id)}
-                            disabled={reveal?.status === "opening"}
-                            className="rounded-lg border border-white/10 px-2.5 py-1 text-[10px] font-medium text-zinc-400 transition hover:border-white/20 hover:text-zinc-100 disabled:cursor-wait disabled:opacity-60"
-                          >
-                            {artifactRevealLabel(reveal?.status ?? "idle")}
-                          </button>
-                          {isFileUriArtifact(artifact) && (
-                            <a
-                              href={`/api/artifacts/${encodeURIComponent(artifact.id)}/download`}
-                              download
-                              className="rounded-lg border border-white/10 px-2.5 py-1 text-[10px] font-medium text-zinc-400 transition hover:border-white/20 hover:text-zinc-100"
-                            >
-                              Save copy
-                            </a>
-                          )}
-                        </div>
+      {error && (
+        <p role="status" className="mt-3 rounded-xl border border-amber-500/20 bg-amber-500/5 px-3 py-2.5 text-xs leading-5 text-amber-200">
+          {error}{missionArtifacts.length > 0 ? " Showing the last known Mission result while Chef retries." : ""}
+        </p>
+      )}
+      {missingResultNotice && (
+        <p role="status" className="mt-3 rounded-xl border border-amber-500/20 bg-amber-500/5 px-3 py-2.5 text-xs leading-5 text-amber-200">
+          {missingResultNotice}
+        </p>
+      )}
+      {missionArtifacts.length > 0 && (
+        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+          {missionArtifacts.map((artifact) => {
+            const handoff = artifactHandoff(artifact);
+            const copyState = runCopyState[artifact.id];
+            const reveal = revealState[artifact.id];
+            const revealable = canRevealArtifact(artifact);
+            return (
+              <article key={`${artifact.id}:${artifact.version}`} className="rounded-xl border border-white/[0.07] bg-black/20 p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="truncate text-xs font-medium text-zinc-200" title={artifact.name}>{artifact.name}</div>
+                    <div className="mt-1 text-[10px] capitalize text-zinc-600">{artifact.type}</div>
+                  </div>
+                  {revealable && (
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => void handleRevealArtifact(artifact.id)}
+                        disabled={reveal?.status === "opening"}
+                        className="rounded-lg border border-white/10 px-2.5 py-1 text-[10px] font-medium text-zinc-400 transition hover:border-white/20 hover:text-zinc-100 disabled:cursor-wait disabled:opacity-60"
+                      >
+                        {artifactRevealLabel(reveal?.status ?? "idle")}
+                      </button>
+                      {isFileUriArtifact(artifact) && (
+                        <a
+                          href={`/api/artifacts/${encodeURIComponent(artifact.id)}/download`}
+                          download
+                          className="rounded-lg border border-white/10 px-2.5 py-1 text-[10px] font-medium text-zinc-400 transition hover:border-white/20 hover:text-zinc-100"
+                        >
+                          Save copy
+                        </a>
                       )}
                     </div>
-                    {reveal?.status === "error" && (
-                      <p role="status" className="mt-2 text-[10px] leading-4 text-amber-300">
-                        {reveal.message ?? "Could not show this result."}
-                      </p>
+                  )}
+                </div>
+                {reveal?.status === "error" && (
+                  <p role="status" className="mt-2 text-[10px] leading-4 text-amber-300">
+                    {reveal.message ?? "Could not show this result."}
+                  </p>
+                )}
+                {handoff.summary && <p className="mt-2 line-clamp-3 text-[11px] leading-4 text-zinc-500">{handoff.summary}</p>}
+                {(handoff.location || handoff.runCommand || handoff.verification) && (
+                  <dl className="mt-3 space-y-2 border-t border-white/[0.06] pt-3 text-[10px] leading-4">
+                    {handoff.location && (
+                      <div>
+                        <dt className="font-medium uppercase tracking-[0.12em] text-zinc-600">Result location</dt>
+                        <dd className="mt-0.5 break-all font-mono text-zinc-400" title={handoff.location}>{handoff.location}</dd>
+                      </div>
                     )}
-                    {handoff.summary && <p className="mt-2 line-clamp-3 text-[11px] leading-4 text-zinc-500">{handoff.summary}</p>}
-                    {(handoff.location || handoff.runCommand || handoff.verification) && (
-                      <dl className="mt-3 space-y-2 border-t border-white/[0.06] pt-3 text-[10px] leading-4">
-                        {handoff.location && (
-                          <div>
-                            <dt className="font-medium uppercase tracking-[0.12em] text-zinc-600">Result location</dt>
-                            <dd className="mt-0.5 break-all font-mono text-zinc-400" title={handoff.location}>{handoff.location}</dd>
-                          </div>
+                    {handoff.runCommand && (
+                      <div>
+                        <div className="flex items-center justify-between gap-2">
+                          <dt className="font-medium uppercase tracking-[0.12em] text-zinc-600">Run</dt>
+                          <button
+                            type="button"
+                            onClick={() => void handleCopyRunCommand(artifact.id, handoff.runCommand!)}
+                            className="rounded-md border border-white/10 px-2 py-0.5 font-medium text-zinc-400 transition hover:border-white/20 hover:text-zinc-100"
+                          >
+                            {copyState === "copied" ? "Copied" : "Copy run command"}
+                          </button>
+                        </div>
+                        <dd className="mt-0.5 break-all font-mono text-zinc-300" title={handoff.runCommand}>{handoff.runCommand}</dd>
+                        {copyState === "error" && (
+                          <p role="status" className="mt-1 text-amber-300">Could not copy. Select the command above instead.</p>
                         )}
-                        {handoff.runCommand && (
-                          <div>
-                            <div className="flex items-center justify-between gap-2">
-                              <dt className="font-medium uppercase tracking-[0.12em] text-zinc-600">Run</dt>
-                              <button
-                                type="button"
-                                onClick={() => void handleCopyRunCommand(artifact.id, handoff.runCommand!)}
-                                className="rounded-md border border-white/10 px-2 py-0.5 font-medium text-zinc-400 transition hover:border-white/20 hover:text-zinc-100"
-                              >
-                                {copyState === "copied" ? "Copied" : "Copy run command"}
-                              </button>
-                            </div>
-                            <dd className="mt-0.5 break-all font-mono text-zinc-300" title={handoff.runCommand}>{handoff.runCommand}</dd>
-                            {copyState === "error" && (
-                              <p role="status" className="mt-1 text-amber-300">Could not copy. Select the command above instead.</p>
-                            )}
-                          </div>
-                        )}
-                        {handoff.verification && (
-                          <div>
-                            <dt className="font-medium uppercase tracking-[0.12em] text-zinc-600">Verified</dt>
-                            <dd className="mt-0.5 text-zinc-400">{handoff.verification}</dd>
-                          </div>
-                        )}
-                      </dl>
+                      </div>
                     )}
-                  </article>
-                );
-              })}
-            </div>
-          )}
-        </>
+                    {handoff.verification && (
+                      <div>
+                        <dt className="font-medium uppercase tracking-[0.12em] text-zinc-600">Verified</dt>
+                        <dd className="mt-0.5 text-zinc-400">{handoff.verification}</dd>
+                      </div>
+                    )}
+                  </dl>
+                )}
+              </article>
+            );
+          })}
+        </div>
       )}
     </section>,
     target,

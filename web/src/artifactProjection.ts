@@ -81,6 +81,13 @@ export function visibleArtifactsForSelectedThreadMission<T extends MissionLinked
   return visibleArtifactsForCurrentMission(artifacts, scope, limit);
 }
 
+export function shouldRetainMissionResultOnRefreshFailure(
+  loadedThreadId: string | null | undefined,
+  selectedThreadId: string | null | undefined,
+): boolean {
+  return Boolean(loadedThreadId && selectedThreadId && loadedThreadId === selectedThreadId);
+}
+
 export function shouldOfferArtifactShelf(
   workspaceArtifactCount: number,
   visibleResultCount: number,
