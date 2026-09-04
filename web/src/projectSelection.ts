@@ -16,6 +16,11 @@ export type ProjectSelectionSummary = {
   ariaLabel: string;
 };
 
+export type ProjectPickResult = {
+  path?: string;
+  cancelled?: boolean;
+};
+
 function normalizedProjectPath(path: string): string {
   let normalized = path.replace(/\\/g, "/");
   while (normalized.length > 1 && normalized.endsWith("/") && !/^[A-Za-z]:\/$/.test(normalized)) {
@@ -35,12 +40,12 @@ export function sameSelectedProjectPath(left: string, right: string): boolean {
   return normalizedProjectPath(left) === normalizedProjectPath(right);
 }
 
-export async function waitForSelectedProject(
+export async function waitForSelectedProject<T extends ProjectSelectionInfo>(
   expectedPath: string,
-  loadProject: () => Promise<ProjectSelectionInfo>,
+  loadProject: () => Promise<T>,
   delay: () => Promise<void>,
   attempts = 40,
-): Promise<ProjectSelectionInfo> {
+): Promise<T> {
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     if (attempt > 0) await delay();
     try {
@@ -51,6 +56,22 @@ export async function waitForSelectedProject(
     }
   }
   throw new Error(`Chef reopened, but the selected project did not become active: ${expectedPath}`);
+}
+
+/**
+ * Project picker completion is only provisional. Runtime reopen can restart the
+ * project endpoint, so do not present/reload the new workspace until that same
+ * path is authoritative again.
+ */
+export async function confirmPickedProject<T extends ProjectSelectionInfo>(
+  pickProject: () => Promise<ProjectPickResult>,
+  loadProject: () => Promise<T>,
+  delay: () => Promise<void>,
+  attempts = 40,
+): Promise<T | null> {
+  const picked = await pickProject();
+  if (picked.cancelled || !picked.path) return null;
+  return waitForSelectedProject(picked.path, loadProject, delay, attempts);
 }
 
 export function projectSelectionSummary(
