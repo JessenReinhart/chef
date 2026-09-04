@@ -1,7 +1,9 @@
 import { strict as assert } from "node:assert";
 
 import {
+  acceptedMissionSubmissionIsPending,
   clearMissionSubmissionFailure,
+  missionSubmissionAccepted,
   missionSubmissionAcknowledgement,
   missionSubmissionFailureRecovery,
   missionSubmissionStarted,
@@ -35,6 +37,28 @@ assert.deepEqual(
   "starting Simple Mode work must immediately clear the composer, preserve the visible goal, and acknowledge receipt before durable work exists",
 );
 
+const accepted = missionSubmissionAccepted("thread-a", "mission-a", submittedText);
+assert.deepEqual(
+  accepted,
+  { threadId: "thread-a", missionId: "mission-a", goal: submittedText },
+  "the HTTP acknowledgement must preserve the exact Thread, Mission, and goal ownership needed for the provisional starting state",
+);
+assert.equal(
+  acceptedMissionSubmissionIsPending(accepted, "thread-a", []),
+  true,
+  "accepted work must remain visibly pending for its owning Thread until authoritative Mission state catches up",
+);
+assert.equal(
+  acceptedMissionSubmissionIsPending(accepted, "thread-b", []),
+  false,
+  "accepted work must not leak its provisional starting state into another Thread",
+);
+assert.equal(
+  acceptedMissionSubmissionIsPending(accepted, "thread-a", [{ id: "mission-a" }]),
+  false,
+  "the provisional starting state must retire as soon as authoritative Mission state contains the accepted Mission",
+);
+
 const successful = missionSubmissionSucceeded("  Mission started.  ");
 assert.deepEqual(
   successful,
@@ -48,7 +72,7 @@ assert.deepEqual(
 assert.deepEqual(
   missionSubmissionSucceeded("   "),
   { input: "", optimisticGoal: "", chefNote: null },
-  "a successful start without a server report must not preserve a stale optimistic acknowledgement",
+  "a successful start without a server report must not preserve a stale optimistic acknowledgement once authoritative work is visible",
 );
 
 const reportedFailure = missionSubmissionFailureRecovery(submittedText, "Provider unavailable");
