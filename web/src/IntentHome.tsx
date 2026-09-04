@@ -20,12 +20,15 @@ import {
   threadSubmissionOwnsForeground,
 } from "./threadSelection";
 import {
+  acceptedMissionSubmissionIsPending,
   clearMissionSubmissionFailure,
+  missionSubmissionAccepted,
   missionSubmissionFailureRecovery,
   missionSubmissionStarted,
   missionSubmissionSucceeded,
   rememberMissionSubmissionFailure,
   takeMissionSubmissionFailure,
+  type AcceptedMissionSubmission,
   type MissionSubmissionFeedback,
 } from "./missionSubmissionFeedback";
 import {
@@ -106,6 +109,7 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [goal, setGoal] = useState("");
   const [optimisticGoal, setOptimisticGoal] = useState("");
+  const [acceptedSubmission, setAcceptedSubmission] = useState<AcceptedMissionSubmission | null>(null);
   const [submittingThreadKeys, setSubmittingThreadKeys] = useState<Set<string>>(() => new Set());
   const [creatingThread, setCreatingThread] = useState(false);
   const [managingThread, setManagingThread] = useState(false);
@@ -161,6 +165,15 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
     clearMissionSubmissionFailure(ownerKey);
   }, [applySubmissionFeedback, selectedThreadId]);
 
+  useEffect(() => {
+    if (!acceptedSubmission || !missions.some((mission) => mission.id === acceptedSubmission.missionId)) return;
+    setAcceptedSubmission(null);
+    if (acceptedSubmission.threadId === selectedThreadId) {
+      setOptimisticGoal("");
+      setLastReport(null);
+    }
+  }, [acceptedSubmission, missions, selectedThreadId]);
+
   const threadNavigation = useMemo(
     () => resolveHomeThreadSelection(threads, selectedThreadId),
     [selectedThreadId, threads],
@@ -168,6 +181,12 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
   const { activeThreads, archivedThreads, selectedThread } = threadNavigation;
   const archivedThreadSelected = threadNavigation.readOnly;
   const submitting = submittingThreadKeys.has(threadSubmissionKey(selectedThreadId));
+  const acceptedSubmissionPending = acceptedMissionSubmissionIsPending(
+    acceptedSubmission,
+    selectedThreadId,
+    missions,
+  );
+  const showingStartingState = submitting || acceptedSubmissionPending;
 
   const threadMissionSummaries = useMemo(() => {
     const summaries = new Map<string, { count: number; active: boolean }>();
@@ -193,7 +212,7 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
     [threadMissions],
   );
 
-  const latestMission = missionChronology[0] ?? null;
+  const latestMission = acceptedSubmissionPending ? null : missionChronology[0] ?? null;
 
   const recentPriorMissions = useMemo(
     () => missionChronology
@@ -293,7 +312,7 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
   const lastMissionActivity = recentMissionActivity[0] ?? null;
 
   const homeState = useMemo<MissionHomeState>(() => deriveMissionHomeState({
-    submitting,
+    submitting: showingStartingState,
     needsAttention: missionApprovals.length > 0
       || latestMission?.status === "failed"
       || latestMission?.status === "blocked"
@@ -307,15 +326,15 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
       || missionTasks.some((task) => task.status === "running" || task.status === "assigned" || task.status === "spawning"),
     done: latestMission?.status === "completed"
       || (missionTasks.length > 0 && missionTasks.every((task) => task.status === "completed")),
-  }), [latestMission?.status, missionApprovals.length, missionTasks, submitting]);
+  }), [latestMission?.status, missionApprovals.length, missionTasks, showingStartingState]);
 
   const status = missionPresentation(homeState);
   const currentMissionAssistantMessage = useMemo(() => {
-    if (!latestMission || submitting) return null;
+    if (!latestMission || showingStartingState) return null;
     return [...messages].reverse().find(
       (message) => message.role === "assistant" && message.metadata?.missionId === latestMission.id,
     )?.content ?? null;
-  }, [latestMission, messages, submitting]);
+  }, [latestMission, messages, showingStartingState]);
 
   async function selectThread(threadId: string) {
     saveSelectedThreadId(threadId);
@@ -423,7 +442,12 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
       }
       const result = await sendThreadMessage(submissionThreadId, message);
       if (threadSubmissionOwnsForeground(submissionThreadId, loadSelectedThreadId())) {
-        applySubmissionFeedback(missionSubmissionSucceeded(result.report));
+        if (result.missionId) {
+          setAcceptedSubmission(missionSubmissionAccepted(submissionThreadId, result.missionId, message));
+          if (result.report.trim()) setLastReport(result.report.trim());
+        } else {
+          applySubmissionFeedback(missionSubmissionSucceeded(result.report));
+        }
         clearMissionSubmissionFailure(activeSubmissionKey);
       }
       await refresh();
@@ -741,14 +765,16 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
           )}
         </section>
 
-        {(submitting || latestMission || missionApprovals.length > 0 || missionTasks.length > 0 || currentMissionAssistantMessage || lastReport) && (
+        {(showingStartingState || latestMission || missionApprovals.length > 0 || missionTasks.length > 0 || currentMissionAssistantMessage || lastReport) && (
           <section className="mt-12 grid gap-4 lg:grid-cols-[1.25fr_0.75fr]">
             <div className="rounded-2xl border border-white/[0.08] bg-white/[0.025] p-5">
               <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0">
                   <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-600">Current work</div>
                   <h2 className="mt-2 truncate text-base font-semibold text-zinc-100">
-                    {latestMission?.goal ?? (submitting ? optimisticGoal : "Thread activity")}
+                    {acceptedSubmissionPending
+                      ? acceptedSubmission?.goal
+                      : latestMission?.goal ?? (submitting ? optimisticGoal : "Thread activity")}
                   </h2>
                 </div>
                 <div className="flex shrink-0 items-center gap-2 rounded-full border border-white/[0.07] px-2.5 py-1 text-[10px] text-zinc-500">
@@ -770,7 +796,7 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
                 )}
                 {missionTasks.length > 0 ? missionTasks.map(renderMissionTask) : (
                   <div className="rounded-xl border border-dashed border-white/[0.07] px-4 py-6 text-center text-xs text-zinc-600">
-                    {submitting && !latestMission
+                    {showingStartingState && !latestMission
                       ? "Request received. Chef is starting the Mission now."
                       : homeState === "working"
                         ? "Chef is preparing or verifying this Mission."
