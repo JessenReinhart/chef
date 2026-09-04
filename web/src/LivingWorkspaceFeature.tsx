@@ -11,6 +11,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { api } from "./api";
+import { dismissVisibleAppError, visibleAppError } from "./appErrorProjection";
 import { loadSelectedThreadId, SELECTED_THREAD_EVENT, threadMessages } from "./threadApi";
 import {
   createThreadHistoryLoader,
@@ -31,6 +32,7 @@ import {
   takeMissionSubmissionFailure,
 } from "./missionSubmissionFeedback";
 import { createMissionProgressRefreshQueue } from "./missionProgressStream";
+import { runRecoverableWorkspaceRefresh } from "./livingWorkspaceRefresh";
 import type {
   HarnessInfo,
   MissionStatus,
@@ -288,7 +290,8 @@ export function LivingWorkspaceFeature() {
   const [toolsOpen, setToolsOpen] = useState(false);
   const [directMessage, setDirectMessage] = useState("");
   const [directSending, setDirectSending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [stateRefreshError, setStateRefreshError] = useState<string | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const firstThreadSubmissionOwnerRef = useRef<string | null>(null);
   const threadHistoryLoader = useMemo(() => createThreadHistoryLoader(threadMessages), []);
@@ -303,18 +306,19 @@ export function LivingWorkspaceFeature() {
 
   const refresh = useCallback(async () => {
     if (!enabled) return;
-    try {
-      const state = await api.stateRaw();
-      setSnapshot({
-        tasks: state.tasks,
-        nodes: state.canvasNodes,
-        edges: state.canvasEdges,
-        missions: state.missions ?? [],
-        approvals: state.approvals.filter((approval) => approval.status === "pending"),
-      });
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Chef could not refresh the workspace.");
-    }
+    await runRecoverableWorkspaceRefresh(
+      () => api.stateRaw(),
+      (state) => {
+        setSnapshot({
+          tasks: state.tasks,
+          nodes: state.canvasNodes,
+          edges: state.canvasEdges,
+          missions: state.missions ?? [],
+          approvals: state.approvals.filter((approval) => approval.status === "pending"),
+        });
+      },
+      setStateRefreshError,
+    );
   }, [enabled]);
 
   const refreshQueue = useMemo(() => createMissionProgressRefreshQueue(refresh), [refresh]);
@@ -657,7 +661,7 @@ export function LivingWorkspaceFeature() {
       setChefNote(`${inputNode.label} is here. ✦`);
       void refresh();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : `Could not add ${inputNode.label}.`);
+      setActionError(reason instanceof Error ? reason.message : `Could not add ${inputNode.label}.`);
     }
   }, [snapshot.nodes.length, refresh]);
 
@@ -671,7 +675,7 @@ export function LivingWorkspaceFeature() {
       setChefNote(`Sent to ${selectedNode.label}.`);
       void refresh();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Could not send that message.");
+      setActionError(reason instanceof Error ? reason.message : "Could not send that message.");
     } finally {
       setDirectSending(false);
     }
@@ -687,7 +691,7 @@ export function LivingWorkspaceFeature() {
       const result = await api.pickProject();
       if (result.path && !result.cancelled) window.location.reload();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Could not open another project.");
+      setActionError(reason instanceof Error ? reason.message : "Could not open another project.");
     }
   }, []);
 
@@ -695,6 +699,12 @@ export function LivingWorkspaceFeature() {
 
   const agentHarnesses = harnesses.filter((harness) => harness.available && harness.id !== "generic").slice(0, 3);
   const hasWork = Boolean(focusGoal || visibleCanvasNodes.length > 0);
+  const displayedError = visibleAppError(actionError, stateRefreshError);
+  const dismissError = () => {
+    const next = dismissVisibleAppError(actionError, stateRefreshError);
+    setActionError(next.actionError);
+    setStateRefreshError(next.stateRefreshError);
+  };
 
   return (
     <div className="chef-living-shell" aria-label="Chef living workspace">
@@ -776,12 +786,12 @@ export function LivingWorkspaceFeature() {
             </div>
             <div className="chef-node-popover__actions">
               {(selectedNode.kind === "agent" || selectedNode.kind === "tool") && (
-                <button type="button" onClick={() => void api.activateNode(selectedNode.id).then(refresh).catch((reason) => setError(reason instanceof Error ? reason.message : "Could not open this node."))}>
+                <button type="button" onClick={() => void api.activateNode(selectedNode.id).then(refresh).catch((reason) => setActionError(reason instanceof Error ? reason.message : "Could not open this node."))}>
                   Open
                 </button>
               )}
               {selectedTask?.status === "failed" && (
-                <button type="button" onClick={() => void api.retryNode(selectedTask.id).then(refresh).catch((reason) => setError(reason instanceof Error ? reason.message : "Retry failed."))}>
+                <button type="button" onClick={() => void api.retryNode(selectedTask.id).then(refresh).catch((reason) => setActionError(reason instanceof Error ? reason.message : "Retry failed."))}>
                   Try again
                 </button>
               )}
@@ -882,11 +892,11 @@ export function LivingWorkspaceFeature() {
         </section>
       </main>
 
-      {error && (
+      {displayedError && (
         <div className="chef-friendly-error" role="alert">
           <span>Oops.</span>
-          <p>{error}</p>
-          <button type="button" onClick={() => setError(null)}>Okay</button>
+          <p>{displayedError}</p>
+          <button type="button" onClick={dismissError}>Okay</button>
         </div>
       )}
     </div>
