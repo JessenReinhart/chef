@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
 import { api, type ProjectInfo } from "./api";
+import { confirmPickedProject } from "./projectSelection";
+
+const PROJECT_REOPEN_POLL_MS = 250;
 
 export function WorkspaceContextBar() {
   const [project, setProject] = useState<ProjectInfo | null>(null);
@@ -23,8 +26,14 @@ export function WorkspaceContextBar() {
     setSwitching(true);
     setError(null);
     try {
-      const result = await api.pickProject();
-      if (result.path && !result.cancelled) window.location.reload();
+      const activated = await confirmPickedProject(
+        () => api.pickProject(),
+        () => api.project(),
+        () => new Promise((resolve) => window.setTimeout(resolve, PROJECT_REOPEN_POLL_MS)),
+      );
+      if (!activated) return;
+      setProject(activated);
+      window.location.reload();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not switch project");
     } finally {
