@@ -1,5 +1,5 @@
 import type { ChatMessage } from "./types";
-import { foregroundThreadId, invalidateThreadHistoryForMutation, resolveHomeThreadSelection } from "./threadSelection.ts";
+import { beginThreadHistoryMutation, foregroundThreadId, resolveHomeThreadSelection } from "./threadSelection.ts";
 
 export interface UiThread {
   id: string;
@@ -83,12 +83,16 @@ export async function threadMessages(threadId: string): Promise<ChatMessage[]> {
 }
 
 export async function sendThreadMessage(threadId: string, message: string): Promise<ThreadChatResult> {
-  invalidateThreadHistoryForMutation();
-  const response = await request<{ ok: boolean; data: ThreadChatResult }>(`/api/threads/${encodeURIComponent(threadId)}/chat`, {
-    method: "POST",
-    body: JSON.stringify({ message }),
-  });
-  return response.data;
+  const finishHistoryMutation = beginThreadHistoryMutation();
+  try {
+    const response = await request<{ ok: boolean; data: ThreadChatResult }>(`/api/threads/${encodeURIComponent(threadId)}/chat`, {
+      method: "POST",
+      body: JSON.stringify({ message }),
+    });
+    return response.data;
+  } finally {
+    finishHistoryMutation();
+  }
 }
 
 export function loadSelectedThreadId(): string | null {
