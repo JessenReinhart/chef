@@ -164,7 +164,7 @@ export class Api {
   }
 
   async capabilities(role: "engineer" | "orchestrator" | "human"): Promise<{ role: string; policy: Record<string, "allow" | "deny" | "approval"> }> {
-    const data = await this.request<{ ok: boolean; data: { role: string; policy: Record<string, "allow" | "deny" | "approval"> }>(`/api/capabilities?role=${role}`);
+    const data = await this.request<{ ok: boolean; data: { role: string; policy: Record<string, "allow" | "deny" | "approval"> } }>(`/api/capabilities?role=${role}`);
     return data.data;
   }
 
