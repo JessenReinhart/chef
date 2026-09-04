@@ -16,6 +16,13 @@ export type HomeThreadSelection = {
   readOnly: boolean;
 };
 
+type ThreadHistorySnapshot = {
+  selectionGeneration: number;
+  mutationGeneration: number;
+};
+
+let threadHistoryMutationGeneration = 0;
+
 export const NEW_THREAD_SUBMISSION_KEY = "__chef-new-thread-submission__";
 
 export function threadSubmissionKey(threadId: string | null): string {
@@ -83,6 +90,11 @@ export function threadSubmissionOwnsForeground(
   return selectedThreadId === null;
 }
 
+/** A conversation mutation makes every history read that began before it stale. */
+export function invalidateThreadHistoryForMutation(): void {
+  threadHistoryMutationGeneration += 1;
+}
+
 /**
  * Resolve an authoritative read only while the foreground Thread still owns it.
  * Slow state reads may settle after a Thread switch; those results are background
@@ -138,29 +150,37 @@ export function latestAssistantThreadNote(
 export function createThreadHistoryLoader(
   loadThreadMessages: (threadId: string) => Promise<ChatMessage[]>,
 ) {
-  let generation = 0;
+  let selectionGeneration = 0;
+
+  function snapshot(): ThreadHistorySnapshot {
+    return {
+      selectionGeneration,
+      mutationGeneration: threadHistoryMutationGeneration,
+    };
+  }
+
+  function isCurrent(candidate: ThreadHistorySnapshot): boolean {
+    return candidate.selectionGeneration === selectionGeneration
+      && candidate.mutationGeneration === threadHistoryMutationGeneration;
+  }
 
   return {
-    snapshot(): number {
-      return generation;
-    },
-
-    isCurrent(snapshot: number): boolean {
-      return snapshot === generation;
-    },
+    snapshot,
+    isCurrent,
 
     invalidate(): void {
-      generation += 1;
+      selectionGeneration += 1;
     },
 
     async load(threadId: string): Promise<ThreadHistoryLoad> {
-      const requestGeneration = ++generation;
+      selectionGeneration += 1;
+      const requestSnapshot = snapshot();
       try {
         const messages = await loadThreadMessages(threadId);
-        if (requestGeneration !== generation) return { current: false };
+        if (!isCurrent(requestSnapshot)) return { current: false };
         return { current: true, messages };
       } catch (error) {
-        if (requestGeneration !== generation) return { current: false };
+        if (!isCurrent(requestSnapshot)) return { current: false };
         throw error;
       }
     },
