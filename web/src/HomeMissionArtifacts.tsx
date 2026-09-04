@@ -3,7 +3,12 @@ import { createPortal } from "react-dom";
 import { loadSelectedThreadId, SELECTED_THREAD_EVENT } from "./threadApi";
 import { artifactHandoff, canRevealArtifact, isFileUriArtifact } from "./artifactHandoff";
 import { missionResultHandoffProjection, shouldRetainMissionResultOnRefreshFailure } from "./artifactProjection";
-import { artifactRevealLabel, copyRunCommand, createSingleFlightArtifactRevealer } from "./resultActions";
+import {
+  artifactRevealLabel,
+  copyRunCommand,
+  createSingleFlightArtifactDownloader,
+  createSingleFlightArtifactRevealer,
+} from "./resultActions";
 import { selectLivingWorkspaceMission } from "./missionActivityProjection";
 import { createMissionProgressRefreshQueue, subscribeMissionProgressRefresh } from "./missionProgressStream";
 import { missionTaskIdsFromEvents } from "./threadScope";
@@ -22,6 +27,7 @@ type HomeArtifact = {
 type StateSnapshot = { missions?: UiMission[]; events?: UiRuntimeEvent[] };
 type RunCopyState = "copied" | "error";
 type RevealState = { status: "opening" | "opened" | "error"; message?: string };
+type DownloadState = { status: "saving" | "saved" | "error"; message?: string };
 
 const MAX_HOME_ARTIFACTS = 4;
 
@@ -32,9 +38,11 @@ export function HomeMissionArtifacts() {
   const [error, setError] = useState<string | null>(null);
   const [runCopyState, setRunCopyState] = useState<Record<string, RunCopyState>>({});
   const [revealState, setRevealState] = useState<Record<string, RevealState>>({});
+  const [downloadState, setDownloadState] = useState<Record<string, DownloadState>>({});
   const refreshSequence = useRef(0);
   const loadedThreadId = useRef<string | null>(null);
   const revealArtifactOnce = useRef(createSingleFlightArtifactRevealer()).current;
+  const downloadArtifactOnce = useRef(createSingleFlightArtifactDownloader()).current;
 
   const refresh = useCallback(async () => {
     const sequence = ++refreshSequence.current;
@@ -130,6 +138,29 @@ export function HomeMissionArtifacts() {
     }));
   }, [revealArtifactOnce]);
 
+  const handleDownloadArtifact = useCallback(async (artifactId: string) => {
+    setDownloadState((current) => ({ ...current, [artifactId]: { status: "saving" } }));
+    const result = await downloadArtifactOnce(artifactId);
+    if (!result.ok) {
+      setDownloadState((current) => ({ ...current, [artifactId]: { status: "error", message: result.error } }));
+      return;
+    }
+
+    const url = URL.createObjectURL(result.blob);
+    try {
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = result.fileName;
+      anchor.style.display = "none";
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      setDownloadState((current) => ({ ...current, [artifactId]: { status: "saved" } }));
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }, [downloadArtifactOnce]);
+
   if (!target || (!error && missionArtifacts.length === 0 && !missingResultNotice)) return null;
 
   return createPortal(
@@ -158,6 +189,7 @@ export function HomeMissionArtifacts() {
             const handoff = artifactHandoff(artifact);
             const copyState = runCopyState[artifact.id];
             const reveal = revealState[artifact.id];
+            const download = downloadState[artifact.id];
             const revealable = canRevealArtifact(artifact);
             return (
               <article key={`${artifact.id}:${artifact.version}`} className="rounded-xl border border-white/[0.07] bg-black/20 p-3">
@@ -177,13 +209,14 @@ export function HomeMissionArtifacts() {
                         {artifactRevealLabel(reveal?.status ?? "idle")}
                       </button>
                       {isFileUriArtifact(artifact) && (
-                        <a
-                          href={`/api/artifacts/${encodeURIComponent(artifact.id)}/download`}
-                          download
-                          className="rounded-lg border border-white/10 px-2.5 py-1 text-[10px] font-medium text-zinc-400 transition hover:border-white/20 hover:text-zinc-100"
+                        <button
+                          type="button"
+                          onClick={() => void handleDownloadArtifact(artifact.id)}
+                          disabled={download?.status === "saving"}
+                          className="rounded-lg border border-white/10 px-2.5 py-1 text-[10px] font-medium text-zinc-400 transition hover:border-white/20 hover:text-zinc-100 disabled:cursor-wait disabled:opacity-60"
                         >
-                          Save copy
-                        </a>
+                          {download?.status === "saving" ? "Saving…" : download?.status === "saved" ? "Saved" : "Save copy"}
+                        </button>
                       )}
                     </div>
                   )}
@@ -191,6 +224,11 @@ export function HomeMissionArtifacts() {
                 {reveal?.status === "error" && (
                   <p role="status" className="mt-2 text-[10px] leading-4 text-amber-300">
                     {reveal.message ?? "Could not show this result."}
+                  </p>
+                )}
+                {download?.status === "error" && (
+                  <p role="status" className="mt-2 text-[10px] leading-4 text-amber-300">
+                    {download.message ?? "Could not save this result."}
                   </p>
                 )}
                 {handoff.summary && <p className="mt-2 line-clamp-3 text-[11px] leading-4 text-zinc-500">{handoff.summary}</p>}
