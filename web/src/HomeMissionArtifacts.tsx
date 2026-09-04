@@ -4,6 +4,7 @@ import { loadSelectedThreadId, SELECTED_THREAD_EVENT } from "./threadApi";
 import { artifactHandoff, canRevealArtifact, isFileUriArtifact } from "./artifactHandoff";
 import { missionResultHandoffProjection, shouldRetainMissionResultOnRefreshFailure } from "./artifactProjection";
 import {
+  artifactActionStateKey,
   artifactRevealLabel,
   copyRunCommand,
   createSingleFlightArtifactDownloader,
@@ -122,27 +123,27 @@ export function HomeMissionArtifacts() {
   const missionArtifacts = resultHandoff.artifacts;
   const missingResultNotice = resultHandoff.notice;
 
-  const handleCopyRunCommand = useCallback(async (artifactId: string, runCommand: string) => {
+  const handleCopyRunCommand = useCallback(async (actionKey: string, runCommand: string) => {
     const result = await copyRunCommand(runCommand, navigator.clipboard);
-    setRunCopyState((current) => ({ ...current, [artifactId]: result.ok ? "copied" : "error" }));
+    setRunCopyState((current) => ({ ...current, [actionKey]: result.ok ? "copied" : "error" }));
   }, []);
 
-  const handleRevealArtifact = useCallback(async (artifactId: string) => {
-    setRevealState((current) => ({ ...current, [artifactId]: { status: "opening" } }));
-    const result = await revealArtifactOnce(artifactId);
+  const handleRevealArtifact = useCallback(async (artifactId: string, actionKey: string) => {
+    setRevealState((current) => ({ ...current, [actionKey]: { status: "opening" } }));
+    const result = await revealArtifactOnce(artifactId, actionKey);
     setRevealState((current) => ({
       ...current,
-      [artifactId]: result.ok
+      [actionKey]: result.ok
         ? { status: "opened" }
         : { status: "error", message: result.error },
     }));
   }, [revealArtifactOnce]);
 
-  const handleDownloadArtifact = useCallback(async (artifactId: string) => {
-    setDownloadState((current) => ({ ...current, [artifactId]: { status: "saving" } }));
-    const result = await downloadArtifactOnce(artifactId);
+  const handleDownloadArtifact = useCallback(async (artifactId: string, actionKey: string) => {
+    setDownloadState((current) => ({ ...current, [actionKey]: { status: "saving" } }));
+    const result = await downloadArtifactOnce(artifactId, actionKey);
     if (!result.ok) {
-      setDownloadState((current) => ({ ...current, [artifactId]: { status: "error", message: result.error } }));
+      setDownloadState((current) => ({ ...current, [actionKey]: { status: "error", message: result.error } }));
       return;
     }
 
@@ -155,7 +156,7 @@ export function HomeMissionArtifacts() {
       document.body.appendChild(anchor);
       anchor.click();
       anchor.remove();
-      setDownloadState((current) => ({ ...current, [artifactId]: { status: "saved" } }));
+      setDownloadState((current) => ({ ...current, [actionKey]: { status: "saved" } }));
     } finally {
       URL.revokeObjectURL(url);
     }
@@ -187,12 +188,13 @@ export function HomeMissionArtifacts() {
         <div className="mt-3 grid gap-2 sm:grid-cols-2">
           {missionArtifacts.map((artifact) => {
             const handoff = artifactHandoff(artifact);
-            const copyState = runCopyState[artifact.id];
-            const reveal = revealState[artifact.id];
-            const download = downloadState[artifact.id];
+            const actionKey = artifactActionStateKey(artifact.id, artifact.version);
+            const copyState = runCopyState[actionKey];
+            const reveal = revealState[actionKey];
+            const download = downloadState[actionKey];
             const revealable = canRevealArtifact(artifact);
             return (
-              <article key={`${artifact.id}:${artifact.version}`} className="rounded-xl border border-white/[0.07] bg-black/20 p-3">
+              <article key={actionKey} className="rounded-xl border border-white/[0.07] bg-black/20 p-3">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="truncate text-xs font-medium text-zinc-200" title={artifact.name}>{artifact.name}</div>
@@ -202,7 +204,7 @@ export function HomeMissionArtifacts() {
                     <div className="flex shrink-0 items-center gap-1.5">
                       <button
                         type="button"
-                        onClick={() => void handleRevealArtifact(artifact.id)}
+                        onClick={() => void handleRevealArtifact(artifact.id, actionKey)}
                         disabled={reveal?.status === "opening"}
                         className="rounded-lg border border-white/10 px-2.5 py-1 text-[10px] font-medium text-zinc-400 transition hover:border-white/20 hover:text-zinc-100 disabled:cursor-wait disabled:opacity-60"
                       >
@@ -211,7 +213,7 @@ export function HomeMissionArtifacts() {
                       {isFileUriArtifact(artifact) && (
                         <button
                           type="button"
-                          onClick={() => void handleDownloadArtifact(artifact.id)}
+                          onClick={() => void handleDownloadArtifact(artifact.id, actionKey)}
                           disabled={download?.status === "saving"}
                           className="rounded-lg border border-white/10 px-2.5 py-1 text-[10px] font-medium text-zinc-400 transition hover:border-white/20 hover:text-zinc-100 disabled:cursor-wait disabled:opacity-60"
                         >
@@ -246,7 +248,7 @@ export function HomeMissionArtifacts() {
                           <dt className="font-medium uppercase tracking-[0.12em] text-zinc-600">Run</dt>
                           <button
                             type="button"
-                            onClick={() => void handleCopyRunCommand(artifact.id, handoff.runCommand!)}
+                            onClick={() => void handleCopyRunCommand(actionKey, handoff.runCommand!)}
                             className="rounded-md border border-white/10 px-2 py-0.5 font-medium text-zinc-400 transition hover:border-white/20 hover:text-zinc-100"
                           >
                             {copyState === "copied" ? "Copied" : "Copy run command"}
