@@ -8,6 +8,12 @@ export type MissionSubmissionFailureRecovery = MissionSubmissionFeedback & {
   chefNote: string;
 };
 
+export type AcceptedMissionSubmission = {
+  threadId: string;
+  missionId: string;
+  goal: string;
+};
+
 export const MISSION_SUBMISSION_FAILURE_EVENT = "chef:mission-submission-failure";
 
 const SELECTED_THREAD_KEY = "chef:selected-thread";
@@ -31,6 +37,26 @@ export function missionSubmissionStarted(submittedText: string): MissionSubmissi
     optimisticGoal: submittedText,
     chefNote: missionSubmissionAcknowledgement(),
   };
+}
+
+export function missionSubmissionAccepted(
+  threadId: string,
+  missionId: string,
+  submittedText: string,
+): AcceptedMissionSubmission {
+  return { threadId, missionId, goal: submittedText };
+}
+
+export function acceptedMissionSubmissionIsPending(
+  accepted: AcceptedMissionSubmission | null,
+  selectedThreadId: string | null,
+  missions: Array<{ id: string }>,
+): boolean {
+  return Boolean(
+    accepted
+      && accepted.threadId === selectedThreadId
+      && !missions.some((mission) => mission.id === accepted.missionId),
+  );
 }
 
 export function missionSubmissionSucceeded(report?: string | null): MissionSubmissionFeedback {
