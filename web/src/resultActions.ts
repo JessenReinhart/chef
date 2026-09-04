@@ -28,6 +28,8 @@ type DownloadRequester = (
 
 type ArtifactRevealer = (artifactId: string) => Promise<ArtifactRevealResult>;
 type ArtifactDownloader = (artifactId: string) => Promise<ArtifactDownloadResult>;
+type VersionOwnedArtifactRevealer = (artifactId: string, actionKey?: string) => Promise<ArtifactRevealResult>;
+type VersionOwnedArtifactDownloader = (artifactId: string, actionKey?: string) => Promise<ArtifactDownloadResult>;
 
 /** Scope transient UI feedback to the exact durable result version it describes. */
 export function artifactActionStateKey(artifactId: string, version: number): string {
@@ -152,48 +154,48 @@ export async function downloadArtifact(
 }
 
 /**
- * Keep one reveal action in flight per durable artifact.
+ * Keep one reveal action in flight per exact result action owner.
  *
  * Opening a desktop file manager is an external side effect. Repeated clicks
- * while the first request is still pending must share that request instead of
- * spawning duplicate windows. A settled action is removed so a later retry is
- * still possible after success or failure.
+ * for the same artifact version share that request, while a newly published
+ * version gets its own action instead of inheriting an older version's pending
+ * side effect. The backend call still receives only the stable artifact ID.
  */
 export function createSingleFlightArtifactRevealer(
   revealer: ArtifactRevealer = revealArtifact,
-): ArtifactRevealer {
+): VersionOwnedArtifactRevealer {
   const inFlight = new Map<string, Promise<ArtifactRevealResult>>();
 
-  return (artifactId) => {
-    const existing = inFlight.get(artifactId);
+  return (artifactId, actionKey = artifactId) => {
+    const existing = inFlight.get(actionKey);
     if (existing) return existing;
 
     const request = Promise.resolve()
       .then(() => revealer(artifactId))
       .finally(() => {
-        if (inFlight.get(artifactId) === request) inFlight.delete(artifactId);
+        if (inFlight.get(actionKey) === request) inFlight.delete(actionKey);
       });
-    inFlight.set(artifactId, request);
+    inFlight.set(actionKey, request);
     return request;
   };
 }
 
-/** Keep one Save copy request in flight per artifact while allowing later retries. */
+/** Keep one Save copy request in flight per exact result action owner while allowing later retries. */
 export function createSingleFlightArtifactDownloader(
   downloader: ArtifactDownloader = downloadArtifact,
-): ArtifactDownloader {
+): VersionOwnedArtifactDownloader {
   const inFlight = new Map<string, Promise<ArtifactDownloadResult>>();
 
-  return (artifactId) => {
-    const existing = inFlight.get(artifactId);
+  return (artifactId, actionKey = artifactId) => {
+    const existing = inFlight.get(actionKey);
     if (existing) return existing;
 
     const request = Promise.resolve()
       .then(() => downloader(artifactId))
       .finally(() => {
-        if (inFlight.get(artifactId) === request) inFlight.delete(artifactId);
+        if (inFlight.get(actionKey) === request) inFlight.delete(actionKey);
       });
-    inFlight.set(artifactId, request);
+    inFlight.set(actionKey, request);
     return request;
   };
 }
