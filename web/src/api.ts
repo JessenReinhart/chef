@@ -176,9 +176,8 @@ export class Api {
 
   // ── State & graph ────────────────────────────────────────────────
   async stateRaw(): Promise<ThreadScopedState> {
-    const selectedThreadId = selectedSimpleModeThreadId();
     const state = await this.rawStateSnapshot();
-    return scopeStateToThread(state, selectedThreadId);
+    return scopeStateToThread(state, selectedSimpleModeThreadId());
   }
 
   // ── Canvas graph patch (runtime-owned projection) ───────────────
@@ -354,7 +353,7 @@ export class Api {
   }
 
   async interruptSession(sessionId: string): Promise<void> {
-    await this.request("/api/sessions/interrupt", { method: "POST", body: JSON.stringify({ sessionId }) });
+    await this.request("/api/sessions/interrupt", { method: "POST", body: JSON.stringify({ sessionId, data: "\u0003" }) });
   }
 
   async sendPeerMessage(sessionId: string, from: string, text: string): Promise<void> {
