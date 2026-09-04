@@ -40,12 +40,12 @@ export function sameSelectedProjectPath(left: string, right: string): boolean {
   return normalizedProjectPath(left) === normalizedProjectPath(right);
 }
 
-export async function waitForSelectedProject(
+export async function waitForSelectedProject<T extends ProjectSelectionInfo>(
   expectedPath: string,
-  loadProject: () => Promise<ProjectSelectionInfo>,
+  loadProject: () => Promise<T>,
   delay: () => Promise<void>,
   attempts = 40,
-): Promise<ProjectSelectionInfo> {
+): Promise<T> {
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     if (attempt > 0) await delay();
     try {
@@ -63,12 +63,12 @@ export async function waitForSelectedProject(
  * project endpoint, so do not present/reload the new workspace until that same
  * path is authoritative again.
  */
-export async function confirmPickedProject(
+export async function confirmPickedProject<T extends ProjectSelectionInfo>(
   pickProject: () => Promise<ProjectPickResult>,
-  loadProject: () => Promise<ProjectSelectionInfo>,
+  loadProject: () => Promise<T>,
   delay: () => Promise<void>,
   attempts = 40,
-): Promise<ProjectSelectionInfo | null> {
+): Promise<T | null> {
   const picked = await pickProject();
   if (picked.cancelled || !picked.path) return null;
   return waitForSelectedProject(picked.path, loadProject, delay, attempts);
@@ -94,9 +94,9 @@ export function projectSelectionSummary(
     return {
       selected: false,
       transitioning: false,
-      label: "Open project",
-      status: null,
-      ariaLabel: "Open project",
+      label: "No project selected",
+      status: "Required",
+      ariaLabel: "No project selected. Select a project to continue.",
     };
   }
 
@@ -104,7 +104,7 @@ export function projectSelectionSummary(
     selected: true,
     transitioning: false,
     label: project.name,
-    status: "Selected",
-    ariaLabel: `Selected project: ${project.name} (${project.path})`,
+    status: null,
+    ariaLabel: `Selected project: ${project.name}. ${project.path}`,
   };
 }
