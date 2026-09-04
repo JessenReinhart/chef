@@ -22,6 +22,7 @@ type ThreadHistorySnapshot = {
 };
 
 let threadHistoryMutationGeneration = 0;
+let activeThreadHistoryMutations = 0;
 
 export const NEW_THREAD_SUBMISSION_KEY = "__chef-new-thread-submission__";
 
@@ -90,9 +91,21 @@ export function threadSubmissionOwnsForeground(
   return selectedThreadId === null;
 }
 
-/** A conversation mutation makes every history read that began before it stale. */
-export function invalidateThreadHistoryForMutation(): void {
+/**
+ * Keep Thread history non-authoritative for the full conversation mutation window.
+ * Reads started before or during the mutation are retired when the mutation closes.
+ */
+export function beginThreadHistoryMutation(): () => void {
+  activeThreadHistoryMutations += 1;
   threadHistoryMutationGeneration += 1;
+  let ended = false;
+
+  return () => {
+    if (ended) return;
+    ended = true;
+    activeThreadHistoryMutations -= 1;
+    threadHistoryMutationGeneration += 1;
+  };
 }
 
 /**
@@ -160,7 +173,8 @@ export function createThreadHistoryLoader(
   }
 
   function isCurrent(candidate: ThreadHistorySnapshot): boolean {
-    return candidate.selectionGeneration === selectionGeneration
+    return activeThreadHistoryMutations === 0
+      && candidate.selectionGeneration === selectionGeneration
       && candidate.mutationGeneration === threadHistoryMutationGeneration;
   }
 
