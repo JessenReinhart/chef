@@ -1,5 +1,6 @@
 import { strict as assert } from "node:assert";
 import {
+  confirmPickedProject,
   projectSelectionSummary,
   sameSelectedProjectPath,
   waitForSelectedProject,
@@ -93,6 +94,41 @@ assert.deepEqual(
   observed,
   ["/home/alice/old-project", "/home/alice/todo-app"],
   "a stale old-runtime response must not be accepted as successful project selection",
+);
+
+let cancelledLoadCalls = 0;
+const cancelled = await confirmPickedProject(
+  async () => ({ cancelled: true }),
+  async () => {
+    cancelledLoadCalls += 1;
+    return { name: "unexpected", path: "/unexpected" };
+  },
+  async () => {},
+);
+assert.equal(cancelled, null, "cancelling the native picker must not start a handoff or reload path");
+assert.equal(cancelledLoadCalls, 0, "cancelled selection must not poll project ownership");
+
+const handoffResponses: Array<{ name: string; path: string } | Error> = [
+  new Error("runtime restarting"),
+  { name: "old-project", path: "C:\\dev\\old-project" },
+  { name: "Todo-App", path: "C:\\Dev\\Todo-App\\" },
+];
+const confirmed = await confirmPickedProject(
+  async () => ({ path: "c:/dev/todo-app" }),
+  async () => {
+    const next = handoffResponses.shift();
+    if (!next) throw new Error("unexpected project confirmation poll");
+    if (next instanceof Error) throw next;
+    return next;
+  },
+  async () => {},
+  4,
+);
+assert.equal(confirmed?.name, "Todo-App");
+assert.equal(
+  confirmed?.path,
+  "C:\\Dev\\Todo-App\\",
+  "picker completion must wait through restart/stale runtime evidence until the requested Windows project is authoritative",
 );
 
 await assert.rejects(
