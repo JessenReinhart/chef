@@ -9,7 +9,7 @@ type PendingHistory = {
 };
 
 type PendingChat = {
-  resolve: (response: Response) => void;
+  resolve: () => void;
 };
 
 const pendingHistory: PendingHistory[] = [];
@@ -71,7 +71,7 @@ try {
     "history loaded while the chat POST is still committing must stay non-authoritative",
   );
 
-  pendingChats[0].resolve({} as Response);
+  pendingChats[0].resolve();
   await submission;
 
   const freshHistory = history.load("thread-a");
@@ -99,7 +99,7 @@ try {
     { current: false },
     "a pre-mutation history failure must also retire silently instead of surfacing over the new submission",
   );
-  pendingChats[1].resolve({} as Response);
+  pendingChats[1].resolve();
   await secondSubmission;
 
   assert.equal(chatRequests, 2, "both conversation mutations should still reach the chat API exactly once");
