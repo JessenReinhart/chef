@@ -1,10 +1,24 @@
 import { strict as assert } from "node:assert";
 import { artifactHandoff } from "../web/src/artifactHandoff.ts";
 import {
+  artifactActionStateKey,
   copyRunCommand,
   createSingleFlightArtifactDownloader,
   downloadArtifact,
 } from "../web/src/resultActions.ts";
+
+const firstVersionActionKey = artifactActionStateKey("todo-app", 1);
+const secondVersionActionKey = artifactActionStateKey("todo-app", 2);
+assert.notEqual(
+  firstVersionActionKey,
+  secondVersionActionKey,
+  "a newer durable artifact version must start with fresh reveal/save/copy feedback instead of inheriting the previous version's action state",
+);
+assert.equal(
+  artifactActionStateKey("todo-app", 2),
+  secondVersionActionKey,
+  "the same artifact version should keep stable action ownership across rerenders",
+);
 
 const canonical = artifactHandoff({
   name: "todo-app",
