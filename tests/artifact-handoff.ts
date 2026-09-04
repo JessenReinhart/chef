@@ -1,6 +1,10 @@
 import { strict as assert } from "node:assert";
 import { artifactHandoff } from "../web/src/artifactHandoff.ts";
-import { copyRunCommand } from "../web/src/resultActions.ts";
+import {
+  copyRunCommand,
+  createSingleFlightArtifactDownloader,
+  downloadArtifact,
+} from "../web/src/resultActions.ts";
 
 const canonical = artifactHandoff({
   name: "todo-app",
@@ -34,6 +38,54 @@ const copyFailure = await copyRunCommand(canonical.runCommand, {
   },
 });
 assert.deepEqual(copyFailure, { ok: false, error: "clipboard denied" }, "clipboard failures remain observable instead of becoming false success");
+
+const downloadBody = new Blob(["todo app"]);
+const downloadSuccess = await downloadArtifact("todo-file", async (input, init) => {
+  assert.equal(String(input), "/api/artifacts/todo-file/download");
+  assert.equal(new Headers(init?.headers).get("x-chef-action"), "download-artifact");
+  return {
+    ok: true,
+    async json() { return {}; },
+    async blob() { return downloadBody; },
+    headers: new Headers({ "content-disposition": "attachment; filename*=UTF-8''todo%20app.mjs" }),
+  };
+});
+assert.equal(downloadSuccess.ok, true);
+if (downloadSuccess.ok) {
+  assert.equal(downloadSuccess.blob, downloadBody);
+  assert.equal(downloadSuccess.fileName, "todo app.mjs", "Save copy should preserve the server-provided result name");
+}
+
+const directoryDownload = await downloadArtifact("todo-directory", async () => ({
+  ok: false,
+  async json() { return { error: "artifact URI does not point to a file" }; },
+  async blob() { return new Blob(); },
+  headers: new Headers(),
+}));
+assert.deepEqual(
+  directoryDownload,
+  { ok: false, error: "This result is a folder. Use Show result to open it." },
+  "directory-backed apps should remain recoverable from the Simple Mode result shelf instead of navigating to a raw 409 response",
+);
+
+let downloadCalls = 0;
+let releaseDownload!: () => void;
+const pendingDownload = new Promise<void>((resolve) => { releaseDownload = resolve; });
+const singleFlightDownload = createSingleFlightArtifactDownloader(async () => {
+  downloadCalls += 1;
+  await pendingDownload;
+  return { ok: false, error: "still a folder" };
+});
+const firstDownload = singleFlightDownload("todo-directory");
+const secondDownload = singleFlightDownload("todo-directory");
+await Promise.resolve();
+assert.equal(downloadCalls, 1, "repeated Save copy clicks must share the in-flight request");
+assert.equal(firstDownload, secondDownload, "the same artifact should share one in-flight download promise");
+releaseDownload();
+await firstDownload;
+await secondDownload;
+await singleFlightDownload("todo-directory");
+assert.equal(downloadCalls, 2, "a settled Save copy attempt should allow a later retry");
 
 const windows = artifactHandoff({
   name: "todo-app.mjs",
