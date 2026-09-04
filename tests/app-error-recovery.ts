@@ -48,6 +48,44 @@ assert.equal(dismissed.stateRefreshError, null, "once visible, the refresh warni
 
 assert.equal(stateRefreshErrorMessage("unknown"), "Failed to load state");
 
+// Intent Home polls every 1.8s while explicit recovery actions can fail independently.
+// Exercise that exact ownership sequence without asserting component source shape.
+let intentHomeActionError: string | null = "Chef could not retry this work";
+let intentHomeRefreshError: string | null = null;
+assert.equal(
+  visibleAppError(intentHomeActionError, intentHomeRefreshError),
+  "Chef could not retry this work",
+  "Intent Home should surface a failed explicit action",
+);
+intentHomeRefreshError = stateRefreshErrorMessage(new Error("Workspace refresh interrupted"));
+assert.equal(
+  visibleAppError(intentHomeActionError, intentHomeRefreshError),
+  "Chef could not retry this work",
+  "Intent Home background refresh failures must not replace a more important action failure",
+);
+intentHomeRefreshError = null;
+assert.equal(
+  visibleAppError(intentHomeActionError, intentHomeRefreshError),
+  "Chef could not retry this work",
+  "Intent Home recovery polling must not erase the failed action",
+);
+let intentHomeDismissed = dismissVisibleAppError(intentHomeActionError, intentHomeRefreshError);
+intentHomeActionError = intentHomeDismissed.actionError;
+intentHomeRefreshError = intentHomeDismissed.stateRefreshError;
+assert.equal(
+  visibleAppError(intentHomeActionError, intentHomeRefreshError),
+  null,
+  "the user can explicitly dismiss the action failure after seeing it",
+);
+intentHomeRefreshError = stateRefreshErrorMessage(new Error("Workspace refresh interrupted"));
+assert.equal(visibleAppError(intentHomeActionError, intentHomeRefreshError), "Workspace refresh interrupted");
+intentHomeRefreshError = null;
+assert.equal(
+  visibleAppError(intentHomeActionError, intentHomeRefreshError),
+  null,
+  "a recovered refresh-owned warning should retire automatically when no action failure exists",
+);
+
 const originalFetch = globalThis.fetch;
 const originalLocalStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
 const storage = new Map<string, string>();
