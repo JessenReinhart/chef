@@ -2,6 +2,7 @@ import { strict as assert } from "node:assert";
 import {
   missionResultHandoffProjection,
   shouldOfferArtifactShelf,
+  shouldRetainMissionResultOnRefreshFailure,
   type LivingArtifact,
 } from "../web/src/artifactProjection.ts";
 
@@ -38,6 +39,22 @@ assert.deepEqual(
   missionResultHandoffProjection([result], scope, "thread-current", "completed"),
   { artifacts: [result], notice: null },
   "a completed Mission with its durable result must project the result without a false warning",
+);
+
+assert.equal(
+  shouldRetainMissionResultOnRefreshFailure("thread-current", "thread-current"),
+  true,
+  "a transient refresh failure for the still-selected Thread must keep its last known result handoff available",
+);
+assert.equal(
+  shouldRetainMissionResultOnRefreshFailure("thread-current", "thread-other"),
+  false,
+  "a refresh failure after switching Threads must never retain the previous Thread's result as current",
+);
+assert.equal(
+  shouldRetainMissionResultOnRefreshFailure(null, "thread-current"),
+  false,
+  "Chef must not invent a retained handoff when no successful result snapshot has loaded for the selected Thread",
 );
 
 assert.deepEqual(
@@ -156,4 +173,4 @@ assert.equal(
   "an empty workspace must not render an empty artifact shelf affordance",
 );
 
-console.log("result-handoff-projection: ok — incomplete handoffs stay truthful, Thread switching stays scoped, and durable workspace artifacts remain rediscoverable whenever results are hidden");
+console.log("result-handoff-projection: ok — incomplete handoffs stay truthful, refresh failures preserve only selected-Thread results, and durable workspace artifacts remain rediscoverable whenever results are hidden");
