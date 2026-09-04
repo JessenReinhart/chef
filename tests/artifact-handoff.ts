@@ -4,6 +4,7 @@ import {
   artifactActionStateKey,
   copyRunCommand,
   createSingleFlightArtifactDownloader,
+  createSingleFlightArtifactRevealer,
   downloadArtifact,
 } from "../web/src/resultActions.ts";
 
@@ -100,6 +101,46 @@ await firstDownload;
 await secondDownload;
 await singleFlightDownload("todo-directory");
 assert.equal(downloadCalls, 2, "a settled Save copy attempt should allow a later retry");
+
+let versionOwnedDownloadCalls = 0;
+const versionDownloadReleases: Array<() => void> = [];
+const versionOwnedDownload = createSingleFlightArtifactDownloader(async (artifactId) => {
+  assert.equal(artifactId, "todo-app", "version ownership must not change the stable artifact ID sent to the backend action");
+  versionOwnedDownloadCalls += 1;
+  await new Promise<void>((resolve) => versionDownloadReleases.push(resolve));
+  return { ok: false, error: "test complete" };
+});
+const versionOneDownload = versionOwnedDownload("todo-app", firstVersionActionKey);
+const duplicateVersionOneDownload = versionOwnedDownload("todo-app", firstVersionActionKey);
+await Promise.resolve();
+assert.equal(versionOwnedDownloadCalls, 1, "duplicate Save copy actions for the same artifact version should still coalesce");
+assert.equal(versionOneDownload, duplicateVersionOneDownload);
+const versionTwoDownload = versionOwnedDownload("todo-app", secondVersionActionKey);
+await Promise.resolve();
+assert.equal(versionOwnedDownloadCalls, 2, "a newer artifact version must not reuse an older version's in-flight Save copy action");
+assert.notEqual(versionOneDownload, versionTwoDownload);
+for (const release of versionDownloadReleases) release();
+await Promise.all([versionOneDownload, versionTwoDownload]);
+
+let revealCalls = 0;
+const revealReleases: Array<() => void> = [];
+const versionOwnedReveal = createSingleFlightArtifactRevealer(async (artifactId) => {
+  assert.equal(artifactId, "todo-app", "version ownership must not change the stable artifact ID sent to the reveal action");
+  revealCalls += 1;
+  await new Promise<void>((resolve) => revealReleases.push(resolve));
+  return { ok: true };
+});
+const versionOneReveal = versionOwnedReveal("todo-app", firstVersionActionKey);
+const duplicateVersionOneReveal = versionOwnedReveal("todo-app", firstVersionActionKey);
+await Promise.resolve();
+assert.equal(revealCalls, 1, "duplicate Show result actions for the same version should coalesce");
+assert.equal(versionOneReveal, duplicateVersionOneReveal);
+const versionTwoReveal = versionOwnedReveal("todo-app", secondVersionActionKey);
+await Promise.resolve();
+assert.equal(revealCalls, 2, "a newer artifact version must get its own Show result side effect");
+assert.notEqual(versionOneReveal, versionTwoReveal);
+for (const release of revealReleases) release();
+await Promise.all([versionOneReveal, versionTwoReveal]);
 
 const windows = artifactHandoff({
   name: "todo-app.mjs",
