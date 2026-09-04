@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-09-04
+
+- **Completed Mission results stay visible through background refresh failures (#372):** Simple Mode now keeps the completed result location, run instructions, verification details, and result actions visible if a later best-effort result refresh fails, while switching Threads or starting newer work still clears stale handoff state normally.
+- **Living Workspace progress refreshes no longer pile up during rapid runtime updates (#370):** Runtime-driven refreshes are now bounded so bursts of progress signals cannot build an ever-growing request queue, while one trailing refresh still preserves the newest visible work state.
+
 ## 2026-09-03
 
 - **Cancelled or completed Missions can no longer restart old failed work (#351):** Simple Mode recovery now keeps hard-terminal Mission history final instead of launching an orphan retry underneath it, while ordinary failed Missions still use the existing bounded retry path and return to visible work normally.
