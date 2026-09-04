@@ -30,6 +30,7 @@ import {
   rememberMissionSubmissionFailure,
   takeMissionSubmissionFailure,
 } from "./missionSubmissionFeedback";
+import { createMissionProgressRefreshQueue } from "./missionProgressStream";
 import type {
   HarnessInfo,
   MissionStatus,
@@ -316,12 +317,16 @@ export function LivingWorkspaceFeature() {
     }
   }, [enabled]);
 
+  const refreshQueue = useMemo(() => createMissionProgressRefreshQueue(refresh), [refresh]);
+
+  useEffect(() => () => refreshQueue.close(), [refreshQueue]);
+
   useEffect(() => {
     if (!enabled) return;
-    void refresh();
-    const timer = window.setInterval(() => void refresh(), 1500);
+    refreshQueue.trigger();
+    const timer = window.setInterval(refreshQueue.trigger, 1500);
     return () => window.clearInterval(timer);
-  }, [enabled, refresh]);
+  }, [enabled, refreshQueue]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -374,7 +379,7 @@ export function LivingWorkspaceFeature() {
       setSelectedThreadId(nextThreadId);
       setOptimisticGoal("");
       if (!applyStoredFailure(threadSubmissionKey(nextThreadId))) loadThreadNote(nextThreadId);
-      void refresh();
+      refreshQueue.trigger();
     };
 
     const onSubmissionFailure = (event: Event) => {
@@ -391,14 +396,14 @@ export function LivingWorkspaceFeature() {
       window.removeEventListener(SELECTED_THREAD_EVENT, onThreadChanged);
       window.removeEventListener(MISSION_SUBMISSION_FAILURE_EVENT, onSubmissionFailure);
     };
-  }, [enabled, refresh, threadHistoryLoader]);
+  }, [enabled, refreshQueue, threadHistoryLoader]);
 
   useEffect(() => {
     if (!enabled) return;
     const es = new EventSource("/api/events?types=canvas.*,mission.*,approval.*,node.*");
-    es.onmessage = () => void refresh();
+    es.onmessage = refreshQueue.trigger;
     return () => es.close();
-  }, [enabled, refresh]);
+  }, [enabled, refreshQueue]);
 
   const latestMission = useMemo(
     () => latestMissionForSelectedThread(snapshot.missions, selectedThreadId),
