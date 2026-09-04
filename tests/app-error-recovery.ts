@@ -49,6 +49,22 @@ assert.equal(dismissed.stateRefreshError, null, "once visible, the refresh warni
 assert.equal(stateRefreshErrorMessage("unknown"), "Failed to load state");
 
 const originalFetch = globalThis.fetch;
+const originalLocalStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+const storage = new Map<string, string>();
+Object.defineProperty(globalThis, "localStorage", {
+  configurable: true,
+  value: {
+    getItem: (key: string) => storage.get(key) ?? null,
+    setItem: (key: string, value: string) => storage.set(key, String(value)),
+    removeItem: (key: string) => storage.delete(key),
+    clear: () => storage.clear(),
+    key: (index: number) => [...storage.keys()][index] ?? null,
+    get length() {
+      return storage.size;
+    },
+  } satisfies Storage,
+});
+
 const snapshot = {
   tasks: [],
   canvasNodes: [],
@@ -113,8 +129,41 @@ try {
   }) as typeof fetch;
   await client.stateRaw();
   assert.equal(fetchCalls, 4, "a failed bounded refresh must release the queue so the next recovery read can run");
+
+  storage.set("chef:selected-thread", "thread-a");
+  let releaseThreadSwitch: (() => void) | null = null;
+  globalThis.fetch = (async () => {
+    await new Promise<void>((resolve) => {
+      releaseThreadSwitch = resolve;
+    });
+    return {
+      ok: true,
+      json: async () => ({
+        ...snapshot,
+        missions: [
+          { id: "mission-a", taskIds: [], metadata: { threadId: "thread-a" } },
+          { id: "mission-b", taskIds: [], metadata: { threadId: "thread-b" } },
+        ],
+      }),
+    } as Response;
+  }) as typeof fetch;
+
+  const switchingSnapshot = client.stateRaw();
+  await Promise.resolve();
+  assert.ok(releaseThreadSwitch, "the thread-switch fixture should hold the authoritative state response open");
+  storage.set("chef:selected-thread", "thread-b");
+  releaseThreadSwitch();
+
+  const settledAfterSwitch = await switchingSnapshot;
+  assert.deepEqual(
+    settledAfterSwitch.missions?.map((mission) => mission.id),
+    ["mission-b"],
+    "a slow authoritative response must be projected to the Thread selected when it settles, not the stale Thread selected when it started",
+  );
 } finally {
   globalThis.fetch = originalFetch;
+  if (originalLocalStorage) Object.defineProperty(globalThis, "localStorage", originalLocalStorage);
+  else delete (globalThis as { localStorage?: Storage }).localStorage;
 }
 
 console.log("app error recovery behavior passed");
