@@ -74,6 +74,9 @@ function selectedSimpleModeThreadId(): string | null {
 
 export class Api {
   private base: string;
+  private stateRawActive: Promise<ThreadScopedState> | null = null;
+  private stateRawTrailing: Promise<ThreadScopedState> | null = null;
+
   constructor(base = "") {
     this.base = base;
   }
@@ -94,6 +97,35 @@ export class Api {
       throw new Error(message);
     }
     return (await res.json()) as T;
+  }
+
+  private startRawStateRequest(): Promise<ThreadScopedState> {
+    const request = this.request<ThreadScopedState>("/api/state");
+    const tracked = request.finally(() => {
+      if (this.stateRawActive === tracked) this.stateRawActive = null;
+    });
+    this.stateRawActive = tracked;
+    return tracked;
+  }
+
+  /**
+   * Keep authoritative state reads bounded to one active request plus one trailing
+   * refresh. Polling, SSE, and post-action refreshes can all ask for state at once;
+   * coalescing the burst prevents older requests from settling after newer ones.
+   */
+  private rawStateSnapshot(): Promise<ThreadScopedState> {
+    if (this.stateRawTrailing) return this.stateRawTrailing;
+    if (!this.stateRawActive) return this.startRawStateRequest();
+
+    const predecessor = this.stateRawActive;
+    const trailing = predecessor
+      .catch(() => undefined)
+      .then(() => this.startRawStateRequest())
+      .finally(() => {
+        if (this.stateRawTrailing === trailing) this.stateRawTrailing = null;
+      });
+    this.stateRawTrailing = trailing;
+    return trailing;
   }
 
   // ── Project launcher ─────────────────────────────────────────────
@@ -132,7 +164,7 @@ export class Api {
   }
 
   async capabilities(role: "engineer" | "orchestrator" | "human"): Promise<{ role: string; policy: Record<string, "allow" | "deny" | "approval"> }> {
-    const data = await this.request<{ ok: boolean; data: { role: string; policy: Record<string, "allow" | "deny" | "approval"> } }>(`/api/capabilities?role=${role}`);
+    const data = await this.request<{ ok: boolean; data: { role: string; policy: Record<string, "allow" | "deny" | "approval"> }>(`/api/capabilities?role=${role}`);
     return data.data;
   }
 
@@ -144,8 +176,9 @@ export class Api {
 
   // ── State & graph ────────────────────────────────────────────────
   async stateRaw(): Promise<ThreadScopedState> {
-    const state = await this.request<ThreadScopedState>("/api/state");
-    return scopeStateToThread(state, selectedSimpleModeThreadId());
+    const selectedThreadId = selectedSimpleModeThreadId();
+    const state = await this.rawStateSnapshot();
+    return scopeStateToThread(state, selectedThreadId);
   }
 
   // ── Canvas graph patch (runtime-owned projection) ───────────────
