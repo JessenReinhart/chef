@@ -130,7 +130,7 @@ export function HomeMissionArtifacts() {
 
   const handleRevealArtifact = useCallback(async (artifactId: string, actionKey: string) => {
     setRevealState((current) => ({ ...current, [actionKey]: { status: "opening" } }));
-    const result = await revealArtifactOnce(artifactId);
+    const result = await revealArtifactOnce(artifactId, actionKey);
     setRevealState((current) => ({
       ...current,
       [actionKey]: result.ok
@@ -141,7 +141,7 @@ export function HomeMissionArtifacts() {
 
   const handleDownloadArtifact = useCallback(async (artifactId: string, actionKey: string) => {
     setDownloadState((current) => ({ ...current, [actionKey]: { status: "saving" } }));
-    const result = await downloadArtifactOnce(artifactId);
+    const result = await downloadArtifactOnce(artifactId, actionKey);
     if (!result.ok) {
       setDownloadState((current) => ({ ...current, [actionKey]: { status: "error", message: result.error } }));
       return;
