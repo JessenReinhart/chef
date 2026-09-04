@@ -4,6 +4,7 @@ import { NodePalette } from "./NodePalette";
 import { ChatPanel } from "./ChatPanel";
 import { MissionPanel } from "./MissionPanel";
 import { api } from "./api";
+import { dismissVisibleAppError, stateRefreshErrorMessage, visibleAppError } from "./appErrorProjection";
 import { NODE_LIBRARY, registerHarnesses, subscribeLibrary } from "./nodeCatalog";
 import { TerminalView } from "./TerminalView";
 import { BrowserSurface } from "./BrowserSurface";
@@ -61,6 +62,7 @@ export function App() {
   const [events, setEvents] = useState<UiRuntimeEvent[]>([]);
   const [selectedTask, setSelectedTask] = useState<UiTask | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [stateRefreshError, setStateRefreshError] = useState<string | null>(null);
   // Terminal canvas nodes mount a live TerminalView. This state picks which
   // node's session the terminal is tied to. TerminalView self-manages its own
   // SSE stream via /api/events?types=session.data; App only needs the ids.
@@ -96,8 +98,9 @@ export function App() {
       setEvents(snapshot.events ?? []);
       const pending = snapshot.approvals.filter((a) => a.status === "pending");
       setApprovals(pending);
+      setStateRefreshError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load state");
+      setStateRefreshError(stateRefreshErrorMessage(err));
     }
   }, []);
 
@@ -430,6 +433,12 @@ export function App() {
       cost: typeof cost === "number" ? cost : usage.cost,
     };
   }, {});
+  const displayedError = visibleAppError(error, stateRefreshError);
+  const handleDismissError = () => {
+    const next = dismissVisibleAppError(error, stateRefreshError);
+    setError(next.actionError);
+    setStateRefreshError(next.stateRefreshError);
+  };
 
   return (
     <div className="h-screen w-screen flex flex-col bg-[#010409] text-[#e6edf3] overflow-hidden">
@@ -741,10 +750,10 @@ export function App() {
       </div>
 
       {/* Error toast */}
-      {error && (
+      {displayedError && (
         <div className="fixed top-14 right-4 z-50 rounded-lg border border-red-500/40 bg-[#0d1117] p-3 shadow-xl max-w-sm">
-          <p className="text-xs text-red-400">{error}</p>
-          <button onClick={() => setError(null)} className="mt-1 text-[10px] text-[#8b949e] hover:text-[#e6edf3]">
+          <p className="text-xs text-red-400">{displayedError}</p>
+          <button onClick={handleDismissError} className="mt-1 text-[10px] text-[#8b949e] hover:text-[#e6edf3]">
             Dismiss
           </button>
         </div>
