@@ -94,9 +94,9 @@ export function projectSelectionSummary(
     return {
       selected: false,
       transitioning: false,
-      label: "No project selected",
-      status: "Required",
-      ariaLabel: "No project selected. Select a project to continue.",
+      label: "Open project",
+      status: null,
+      ariaLabel: "Open project",
     };
   }
 
@@ -104,7 +104,7 @@ export function projectSelectionSummary(
     selected: true,
     transitioning: false,
     label: project.name,
-    status: null,
-    ariaLabel: `Selected project: ${project.name}. ${project.path}`,
+    status: "Selected",
+    ariaLabel: `Selected project: ${project.name} (${project.path})`,
   };
 }
