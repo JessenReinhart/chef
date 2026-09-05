@@ -48,10 +48,15 @@ function simpleModeActionOwner(): { threadId: string | null; guarded: boolean } 
   };
 }
 
-function assertThreadActionStillOwnsForeground(owner: { threadId: string | null; guarded: boolean }): void {
-  if (owner.guarded && loadSelectedThreadId() !== owner.threadId) {
-    throw new Error("Thread selection changed while the action was completing");
-  }
+function assertThreadActionStillOwnsForeground(
+  owner: { threadId: string | null; guarded: boolean },
+  transferredThreadId: string | null = null,
+): void {
+  if (!owner.guarded) return;
+  const selectedThreadId = loadSelectedThreadId();
+  if (selectedThreadId === owner.threadId) return;
+  if (owner.threadId === null && transferredThreadId !== null && selectedThreadId === transferredThreadId) return;
+  throw new Error("Thread selection changed while the action was completing");
 }
 
 export async function listThreads(): Promise<UiThread[]> {
@@ -68,9 +73,10 @@ export async function createThread(title: string): Promise<UiThread> {
     method: "POST",
     body: JSON.stringify({ title }),
   });
-  // The server mutation remains authoritative and will appear in the next list refresh,
-  // but a late success must not let its caller replace a newer Simple Mode foreground.
-  assertThreadActionStillOwnsForeground(owner);
+  // The server mutation remains authoritative and will appear in the next list refresh.
+  // A fresh workspace may legitimately transfer ownership from no Thread to the exact
+  // Thread this request created; every unrelated foreground change must fail closed.
+  assertThreadActionStillOwnsForeground(owner, response.data.id);
   return response.data;
 }
 
