@@ -111,6 +111,16 @@ export function shouldRetainMissionResultOnRefreshFailure(
   return Boolean(loadedThreadId && selectedThreadId && loadedThreadId === selectedThreadId);
 }
 
+export function shouldRetainMissionArtifactsOnRefreshFailure(
+  loadedThreadId: string | null | undefined,
+  selectedThreadId: string | null | undefined,
+  loadedMissionId: string | null | undefined,
+  currentMissionId: string | null | undefined,
+): boolean {
+  return shouldRetainMissionResultOnRefreshFailure(loadedThreadId, selectedThreadId)
+    && Boolean(loadedMissionId && currentMissionId && loadedMissionId === currentMissionId);
+}
+
 export function shouldOfferArtifactShelf(
   workspaceArtifactCount: number,
   visibleResultCount: number,
