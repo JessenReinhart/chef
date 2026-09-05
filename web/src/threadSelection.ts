@@ -83,6 +83,20 @@ export function foregroundThreadId(selection: HomeThreadSelection): string | nul
   return selection.selectedThread?.id ?? null;
 }
 
+/**
+ * Conversation history belongs to the Thread that loaded it. A foreground
+ * selection change must fail closed while the newly selected history is still
+ * pending or has failed, instead of presenting the previous Thread's messages
+ * under the new Thread title.
+ */
+export function messagesForThreadSelection(
+  currentThreadId: string | null,
+  nextThreadId: string | null,
+  currentMessages: readonly ChatMessage[],
+): ChatMessage[] {
+  return currentThreadId === nextThreadId ? [...currentMessages] : [];
+}
+
 export function threadSubmissionOwnsForeground(
   submittedThreadId: string | null,
   selectedThreadId: string | null,
