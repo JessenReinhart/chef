@@ -1,5 +1,5 @@
-import type { UiThread } from "./threadApi";
-import { resolveHomeThreadSelection, type HomeThreadSelection } from "./threadSelection";
+import type { UiThread } from "./threadApi.ts";
+import { resolveHomeThreadSelection, type HomeThreadSelection } from "./threadSelection.ts";
 
 export type IntentHomeRefreshCore<TSnapshot> = {
   snapshot: TSnapshot;
