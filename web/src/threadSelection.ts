@@ -106,6 +106,15 @@ export function draftForThreadSelection(
   return currentThreadId === nextThreadId ? currentDraft : "";
 }
 
+/** Action failures describe the foreground Thread that produced them and must not cross selection. */
+export function actionErrorForThreadSelection(
+  currentThreadId: string | null,
+  nextThreadId: string | null,
+  currentError: string | null,
+): string | null {
+  return currentThreadId === nextThreadId ? currentError : null;
+}
+
 export function threadSubmissionOwnsForeground(
   submittedThreadId: string | null,
   selectedThreadId: string | null,
