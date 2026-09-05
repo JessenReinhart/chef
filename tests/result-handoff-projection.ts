@@ -10,7 +10,7 @@ const completedNotice = "Work is marked complete, but Chef did not publish a dur
 const attentionPartialNotice = "Chef saved a partial result, but this Mission still needs attention before the handoff is complete.";
 const pausedPartialNotice = "Chef saved a partial result, but this Mission is paused before the handoff is complete.";
 const pausedEmptyNotice = "No durable result is available because this Mission is paused.";
-const stoppedPartialNotice = "Chef saved a partial result, but this Mission was stopped before the handoff is complete.";
+const stoppedPartialNotice = "Chef saved a partial result, but this Mission was stopped before the handoff was complete.";
 const scope = { missionId: "mission-current", taskIds: ["task-current"], threadId: "thread-current" };
 const result: LivingArtifact = {
   id: "todo-result",
