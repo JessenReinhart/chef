@@ -2,6 +2,7 @@ import { strict as assert } from "node:assert";
 import {
   missionResultHandoffProjection,
   shouldOfferArtifactShelf,
+  shouldRetainMissionArtifactsOnRefreshFailure,
   shouldRetainMissionResultOnRefreshFailure,
   type LivingArtifact,
 } from "../web/src/artifactProjection.ts";
@@ -114,7 +115,7 @@ assert.deepEqual(
 assert.equal(
   shouldRetainMissionResultOnRefreshFailure("thread-current", "thread-current"),
   true,
-  "a transient refresh failure for the still-selected Thread must keep its last known result handoff available",
+  "a transient full refresh failure for the still-selected Thread may keep its last known result handoff available",
 );
 assert.equal(
   shouldRetainMissionResultOnRefreshFailure("thread-current", "thread-other"),
@@ -125,6 +126,27 @@ assert.equal(
   shouldRetainMissionResultOnRefreshFailure(null, "thread-current"),
   false,
   "Chef must not invent a retained handoff when no successful result snapshot has loaded for the selected Thread",
+);
+
+assert.equal(
+  shouldRetainMissionArtifactsOnRefreshFailure("thread-current", "thread-current", "mission-current", "mission-current"),
+  true,
+  "an artifact-only failure may retain the last known cards when state confirms the same Thread and Mission are still current",
+);
+assert.equal(
+  shouldRetainMissionArtifactsOnRefreshFailure("thread-current", "thread-current", "mission-previous", "mission-current"),
+  false,
+  "a newer Mission in the same Thread must not inherit the previous Mission's result cards when artifact refresh fails",
+);
+assert.equal(
+  shouldRetainMissionArtifactsOnRefreshFailure("thread-current", "thread-other", "mission-current", "mission-current"),
+  false,
+  "Mission identity cannot make a prior Thread's result safe after Thread selection changes",
+);
+assert.equal(
+  shouldRetainMissionArtifactsOnRefreshFailure("thread-current", "thread-current", "mission-current", null),
+  false,
+  "a selected Thread with no current Mission must clear prior Mission cards after an artifact-only failure",
 );
 
 assert.deepEqual(
@@ -243,4 +265,4 @@ assert.equal(
   "an empty workspace must not render an empty artifact shelf affordance",
 );
 
-console.log("result-handoff-projection: ok — runnable overflow stays visible, incomplete handoffs stay truthful, refresh failures preserve only selected-Thread results, and durable workspace artifacts remain rediscoverable whenever results are hidden");
+console.log("result-handoff-projection: ok — runnable overflow stays visible, incomplete handoffs stay truthful, refresh failures retain cards only for the same selected Mission, and durable workspace artifacts remain rediscoverable whenever results are hidden");
