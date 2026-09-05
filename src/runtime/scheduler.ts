@@ -267,12 +267,14 @@ export class Scheduler {
         TaskMachine.validateTransition(dispatchTask.status, "running");
         const { event: retryEvt } = TaskMachine.transition(dispatchTask, "running", {
           retryCount: dispatchTask.retryCount + 1,
-          error: undefined,
         });
         this.#repo.updateTask(dispatchTask.id, {
           status: "running",
           retryCount: dispatchTask.retryCount + 1,
-          error: undefined,
+          // Repository.updateTask uses undefined as “leave unchanged”; NULL is
+          // the durable representation of an absent terminal outcome.
+          error: null,
+          resultSummary: null,
         });
         this.#appendEvent(workspaceId, retryEvt);
         dispatchTask = this.#repo.getTask(dispatchTask.id)!;
