@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { loadSelectedThreadId, SELECTED_THREAD_EVENT } from "./threadApi";
 import { artifactHandoff, canRevealArtifact, isFileUriArtifact } from "./artifactHandoff";
 import { missionResultHandoffProjection, shouldRetainMissionResultOnRefreshFailure } from "./artifactProjection";
-import { probeArtifactDownloadability } from "./artifactDownloadCapability";
+import { watchArtifactDownloadability } from "./artifactDownloadCapability";
 import {
   artifactActionStateKey,
   artifactRevealLabel,
@@ -44,7 +44,6 @@ export function HomeMissionArtifacts() {
   const [downloadCapability, setDownloadCapability] = useState<Record<string, boolean>>({});
   const refreshSequence = useRef(0);
   const loadedThreadId = useRef<string | null>(null);
-  const downloadCapabilityRequested = useRef(new Set<string>());
   const revealArtifactOnce = useRef(createSingleFlightArtifactRevealer()).current;
   const downloadArtifactOnce = useRef(createSingleFlightArtifactDownloader()).current;
 
@@ -127,21 +126,19 @@ export function HomeMissionArtifacts() {
   const missingResultNotice = resultHandoff.notice;
 
   useEffect(() => {
+    const stopWatching: Array<() => void> = [];
     for (const artifact of missionArtifacts) {
       if (!isFileUriArtifact(artifact)) continue;
       const actionKey = artifactActionStateKey(artifact.id, artifact.version);
-      if (downloadCapabilityRequested.current.has(actionKey)) continue;
-      downloadCapabilityRequested.current.add(actionKey);
-      void probeArtifactDownloadability(artifact.id, artifact.version).then((downloadable) => {
-        if (downloadable === null) {
-          downloadCapabilityRequested.current.delete(actionKey);
-          return;
-        }
+      stopWatching.push(watchArtifactDownloadability(artifact.id, artifact.version, (downloadable) => {
         setDownloadCapability((current) => current[actionKey] === downloadable
           ? current
           : { ...current, [actionKey]: downloadable });
-      });
+      }));
     }
+    return () => {
+      for (const stop of stopWatching) stop();
+    };
   }, [missionArtifacts]);
 
   const handleCopyRunCommand = useCallback(async (actionKey: string, runCommand: string) => {
