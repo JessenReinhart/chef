@@ -17,12 +17,13 @@ export type HomeThreadSelection = {
 };
 
 type ThreadHistorySnapshot = {
+  threadId: string;
   selectionGeneration: number;
   mutationGeneration: number;
 };
 
-let threadHistoryMutationGeneration = 0;
-let activeThreadHistoryMutations = 0;
+const threadHistoryMutationGenerations = new Map<string, number>();
+const activeThreadHistoryMutations = new Map<string, number>();
 
 export const NEW_THREAD_SUBMISSION_KEY = "__chef-new-thread-submission__";
 
@@ -91,20 +92,26 @@ export function threadSubmissionOwnsForeground(
   return selectedThreadId === null;
 }
 
+function threadHistoryMutationGeneration(threadId: string): number {
+  return threadHistoryMutationGenerations.get(threadId) ?? 0;
+}
+
 /**
- * Keep Thread history non-authoritative for the full conversation mutation window.
- * Reads started before or during the mutation are retired when the mutation closes.
+ * Keep the mutated Thread's history non-authoritative for the full conversation mutation window.
+ * Reads for unrelated Threads remain usable when the user switches while a submission is slow.
  */
-export function beginThreadHistoryMutation(): () => void {
-  activeThreadHistoryMutations += 1;
-  threadHistoryMutationGeneration += 1;
+export function beginThreadHistoryMutation(threadId: string): () => void {
+  activeThreadHistoryMutations.set(threadId, (activeThreadHistoryMutations.get(threadId) ?? 0) + 1);
+  threadHistoryMutationGenerations.set(threadId, threadHistoryMutationGeneration(threadId) + 1);
   let ended = false;
 
   return () => {
     if (ended) return;
     ended = true;
-    activeThreadHistoryMutations -= 1;
-    threadHistoryMutationGeneration += 1;
+    const remaining = (activeThreadHistoryMutations.get(threadId) ?? 1) - 1;
+    if (remaining > 0) activeThreadHistoryMutations.set(threadId, remaining);
+    else activeThreadHistoryMutations.delete(threadId);
+    threadHistoryMutationGenerations.set(threadId, threadHistoryMutationGeneration(threadId) + 1);
   };
 }
 
@@ -165,17 +172,18 @@ export function createThreadHistoryLoader(
 ) {
   let selectionGeneration = 0;
 
-  function snapshot(): ThreadHistorySnapshot {
+  function snapshot(threadId: string): ThreadHistorySnapshot {
     return {
+      threadId,
       selectionGeneration,
-      mutationGeneration: threadHistoryMutationGeneration,
+      mutationGeneration: threadHistoryMutationGeneration(threadId),
     };
   }
 
   function isCurrent(candidate: ThreadHistorySnapshot): boolean {
-    return activeThreadHistoryMutations === 0
+    return !activeThreadHistoryMutations.has(candidate.threadId)
       && candidate.selectionGeneration === selectionGeneration
-      && candidate.mutationGeneration === threadHistoryMutationGeneration;
+      && candidate.mutationGeneration === threadHistoryMutationGeneration(candidate.threadId);
   }
 
   return {
@@ -188,7 +196,7 @@ export function createThreadHistoryLoader(
 
     async load(threadId: string): Promise<ThreadHistoryLoad> {
       selectionGeneration += 1;
-      const requestSnapshot = snapshot();
+      const requestSnapshot = snapshot(threadId);
       try {
         const messages = await loadThreadMessages(threadId);
         if (!isCurrent(requestSnapshot)) return { current: false };
