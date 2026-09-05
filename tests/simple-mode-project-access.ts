@@ -1,6 +1,7 @@
 import { strict as assert } from "node:assert";
 import {
   confirmPickedProject,
+  createSingleFlightProjectSelection,
   projectSelectionSummary,
   sameSelectedProjectPath,
   waitForSelectedProject,
@@ -142,4 +143,52 @@ await assert.rejects(
   "selection timeout must fail visibly instead of reloading the wrong workspace",
 );
 
-console.log("simple-mode-project-access: ok — project selection stays truthful through Linux/Windows handoffs and waits for the requested runtime");
+const singleFlight = createSingleFlightProjectSelection();
+let releaseFirst!: () => void;
+const firstPending = new Promise<void>((resolve) => { releaseFirst = resolve; });
+let actionCalls = 0;
+const first = singleFlight(async () => {
+  actionCalls += 1;
+  await firstPending;
+  return "first";
+});
+const duplicate = await singleFlight(async () => {
+  actionCalls += 1;
+  return "duplicate";
+});
+assert.deepEqual(duplicate, { accepted: false }, "duplicate project activation must be rejected before starting another handoff");
+assert.equal(actionCalls, 1, "duplicate activation must not call the second project action");
+releaseFirst();
+assert.deepEqual(await first, { accepted: true, value: "first" });
+
+const afterSuccess = await singleFlight(async () => {
+  actionCalls += 1;
+  return "after-success";
+});
+assert.deepEqual(afterSuccess, { accepted: true, value: "after-success" }, "single-flight ownership must release after successful completion");
+
+await assert.rejects(
+  () => singleFlight(async () => {
+    actionCalls += 1;
+    throw new Error("selection failed");
+  }),
+  /selection failed/,
+);
+const afterFailure = await singleFlight(async () => {
+  actionCalls += 1;
+  return "after-failure";
+});
+assert.deepEqual(afterFailure, { accepted: true, value: "after-failure" }, "single-flight ownership must release after failed completion");
+
+const afterCancellation = await singleFlight(async () => {
+  actionCalls += 1;
+  return null;
+});
+assert.deepEqual(afterCancellation, { accepted: true, value: null }, "cancelled picker completion must also release single-flight ownership");
+const afterCancellationRetry = await singleFlight(async () => {
+  actionCalls += 1;
+  return "after-cancel";
+});
+assert.deepEqual(afterCancellationRetry, { accepted: true, value: "after-cancel" });
+
+console.log("simple-mode-project-access: ok — project selection stays truthful through Linux/Windows handoffs and serializes reopen ownership");
