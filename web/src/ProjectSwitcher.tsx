@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, type ProjectInfo } from "./api";
-import { projectSelectionSummary, waitForSelectedProject } from "./projectSelection";
+import { createSingleFlightProjectSelection, projectSelectionSummary, waitForSelectedProject } from "./projectSelection";
 
 export function ProjectSwitcher() {
   const [project, setProject] = useState<ProjectInfo | null>(null);
@@ -9,6 +9,7 @@ export function ProjectSwitcher() {
   const [busy, setBusy] = useState(false);
   const [pendingPath, setPendingPath] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const runProjectSelection = useRef(createSingleFlightProjectSelection()).current;
 
   const refresh = async () => {
     try { setProject(await api.project()); }
@@ -21,31 +22,33 @@ export function ProjectSwitcher() {
     action: () => Promise<{ path?: string; reopening?: boolean; cancelled?: boolean }>,
     requestedPath?: string,
   ) => {
-    setBusy(true);
-    setPendingPath(requestedPath?.trim() || null);
-    setError(null);
-    try {
-      const result = await action();
-      if (result.cancelled) return;
-      if (result.reopening) {
-        if (!result.path) throw new Error("Chef did not report which project it is reopening");
-        setPendingPath(result.path);
-        await waitForSelectedProject(
-          result.path,
-          () => api.project(),
-          () => new Promise((resolve) => window.setTimeout(resolve, 250)),
-        );
-        window.location.reload();
-        return;
+    await runProjectSelection(async () => {
+      setBusy(true);
+      setPendingPath(requestedPath?.trim() || null);
+      setError(null);
+      try {
+        const result = await action();
+        if (result.cancelled) return;
+        if (result.reopening) {
+          if (!result.path) throw new Error("Chef did not report which project it is reopening");
+          setPendingPath(result.path);
+          await waitForSelectedProject(
+            result.path,
+            () => api.project(),
+            () => new Promise((resolve) => window.setTimeout(resolve, 250)),
+          );
+          window.location.reload();
+          return;
+        }
+        await refresh();
+        setOpen(false);
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : "Failed to open project");
+      } finally {
+        setBusy(false);
+        setPendingPath(null);
       }
-      await refresh();
-      setOpen(false);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Failed to open project");
-    } finally {
-      setBusy(false);
-      setPendingPath(null);
-    }
+    });
   };
 
   const selection = projectSelectionSummary(project, { busy, pendingPath });
