@@ -1,5 +1,7 @@
 import { strict as assert } from "node:assert";
 import { TaskMachine } from "../src/runtime/task-machine.ts";
+import { Scheduler, type HarnessLike, type HarnessRegistry } from "../src/runtime/scheduler.ts";
+import { Repository } from "../src/persistence/database.ts";
 import type { Task } from "../src/core/types.ts";
 import { canRetryMissionTask } from "../web/src/missionRecovery.ts";
 
@@ -116,4 +118,56 @@ const explicitReplacement = TaskMachine.transition(failedTask, "running", {
 assert.equal(explicitReplacement.task.error, "replacement diagnostic", "explicit retry metadata must override the default cleanup");
 assert.equal(explicitReplacement.task.resultSummary, "replacement context", "explicit result metadata must override the default cleanup");
 
-console.log("simple-mode-recovery-actions: ok — Retry follows Mission lifecycle, approvals, read-only state, and clears stale Task failure state");
+const repo = new Repository(":memory:");
+const workspace = repo.createWorkspace({ id: "workspace-durable-retry", name: "Durable retry" });
+repo.seedAgent({ id: "worker-durable", workspaceId: workspace.id, name: "Worker", role: "implementation" });
+const durableFailed = repo.insertTask({
+  id: "task-durable-retry",
+  workspaceId: workspace.id,
+  title: "Build todo app",
+  description: "Create and verify the todo app",
+  status: "failed",
+  assignedTo: "worker-durable",
+  retryCount: 1,
+  error: "first attempt failed",
+  resultSummary: "stale first-attempt result",
+});
+
+const fakeHarness: HarnessLike = {
+  id: "fake-durable-retry",
+  command: "fake-worker",
+  args: [],
+  cwd: process.cwd(),
+  async spawn(options) { return { id: options?.sessionId ?? "fake-session", pid: 1234 }; },
+  async *events() {},
+  async send() {},
+  async interrupt() {},
+  async resize() {},
+  async terminate() {},
+  async forget() {},
+  async writeContextRefs() { return "fake-context"; },
+  async writeMessage() { return "fake-message"; },
+  async close() {},
+};
+const harnesses = new Map([["worker-durable", fakeHarness]]);
+const registry: HarnessRegistry = {
+  get(agentId) { return harnesses.get(agentId); },
+  set(agentId, harness) { harnesses.set(agentId, harness); },
+  values() { return harnesses.values(); },
+};
+const scheduler = new Scheduler(repo, registry, { maxRetries: 2 });
+await scheduler.retryTask(workspace.id, durableFailed.id);
+
+const durableRunning = repo.getTask(durableFailed.id)!;
+assert.equal(durableRunning.status, "running", "Scheduler retry should durably re-enter running state");
+assert.equal(durableRunning.error, undefined, "Scheduler retry must clear the prior durable failure error");
+assert.equal(durableRunning.resultSummary, undefined, "Scheduler retry must clear the prior durable result summary");
+assert.equal(durableRunning.retryCount, 2, "Scheduler retry must durably increment retry count");
+assert.equal(durableRunning.assignedTo, "worker-durable", "Scheduler retry cleanup must preserve assignment");
+assert.ok(
+  repo.getWorkspaceSnapshot(workspace.id).events.some((event) => event.taskId === durableFailed.id && event.type === "task.running"),
+  "Scheduler retry must preserve the task.running event contract",
+);
+repo.close();
+
+console.log("simple-mode-recovery-actions: ok — Retry follows Mission lifecycle, approvals, read-only state, and clears stale Task failure state durably");
