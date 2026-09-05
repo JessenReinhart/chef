@@ -41,6 +41,24 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
+function simpleModeActionOwner(): { threadId: string | null; guarded: boolean } {
+  return {
+    threadId: loadSelectedThreadId(),
+    guarded: localStorage.getItem("chef:view-mode") !== "power",
+  };
+}
+
+function assertThreadActionStillOwnsForeground(
+  owner: { threadId: string | null; guarded: boolean },
+  transferredThreadId: string | null = null,
+): void {
+  if (!owner.guarded) return;
+  const selectedThreadId = loadSelectedThreadId();
+  if (selectedThreadId === owner.threadId) return;
+  if (owner.threadId === null && transferredThreadId !== null && selectedThreadId === transferredThreadId) return;
+  throw new Error("Thread selection changed while the action was completing");
+}
+
 export async function listThreads(): Promise<UiThread[]> {
   const response = await request<{ ok: boolean; data: UiThread[] }>("/api/threads");
   const rememberedId = loadSelectedThreadId();
@@ -50,10 +68,15 @@ export async function listThreads(): Promise<UiThread[]> {
 }
 
 export async function createThread(title: string): Promise<UiThread> {
+  const owner = simpleModeActionOwner();
   const response = await request<{ ok: boolean; data: UiThread }>("/api/threads", {
     method: "POST",
     body: JSON.stringify({ title }),
   });
+  // The server mutation remains authoritative and will appear in the next list refresh.
+  // A fresh workspace may legitimately transfer ownership from no Thread to the exact
+  // Thread this request created; every unrelated foreground change must fail closed.
+  assertThreadActionStillOwnsForeground(owner, response.data.id);
   return response.data;
 }
 
@@ -66,9 +89,13 @@ export async function renameThread(threadId: string, title: string): Promise<UiT
 }
 
 export async function archiveThread(threadId: string): Promise<UiThread> {
+  const owner = simpleModeActionOwner();
   const response = await request<{ ok: boolean; data: UiThread }>(`/api/threads/${encodeURIComponent(threadId)}/archive`, {
     method: "POST",
   });
+  // Archive still succeeds server-side. Suppressing a stale foreground settlement lets
+  // the periodic Thread refresh reconcile bookkeeping without stealing user context.
+  assertThreadActionStillOwnsForeground(owner);
   return response.data;
 }
 
