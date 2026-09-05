@@ -16,7 +16,17 @@ export type HomeThreadSelection = {
   readOnly: boolean;
 };
 
+type ThreadHistorySnapshot = {
+  threadId: string | null;
+  selectionGeneration: number;
+  mutationGeneration: number;
+};
+
+const threadHistoryMutationGenerations = new Map<string, number>();
+const activeThreadHistoryMutations = new Map<string, number>();
+
 export const NEW_THREAD_SUBMISSION_KEY = "__chef-new-thread-submission__";
+const SELECTED_THREAD_STORAGE_KEY = "chef:selected-thread";
 
 export function threadSubmissionKey(threadId: string | null): string {
   return threadId ?? NEW_THREAD_SUBMISSION_KEY;
@@ -83,6 +93,33 @@ export function threadSubmissionOwnsForeground(
   return selectedThreadId === null;
 }
 
+function threadHistoryMutationGeneration(threadId: string | null): number {
+  return threadId ? threadHistoryMutationGenerations.get(threadId) ?? 0 : 0;
+}
+
+function selectedThreadIdFromStorage(): string | null {
+  return globalThis.localStorage?.getItem(SELECTED_THREAD_STORAGE_KEY) ?? null;
+}
+
+/**
+ * Keep the mutated Thread's history non-authoritative for the full conversation mutation window.
+ * Reads for unrelated Threads remain usable when the user switches while a submission is slow.
+ */
+export function beginThreadHistoryMutation(threadId: string): () => void {
+  activeThreadHistoryMutations.set(threadId, (activeThreadHistoryMutations.get(threadId) ?? 0) + 1);
+  threadHistoryMutationGenerations.set(threadId, threadHistoryMutationGeneration(threadId) + 1);
+  let ended = false;
+
+  return () => {
+    if (ended) return;
+    ended = true;
+    const remaining = (activeThreadHistoryMutations.get(threadId) ?? 1) - 1;
+    if (remaining > 0) activeThreadHistoryMutations.set(threadId, remaining);
+    else activeThreadHistoryMutations.delete(threadId);
+    threadHistoryMutationGenerations.set(threadId, threadHistoryMutationGeneration(threadId) + 1);
+  };
+}
+
 /**
  * Resolve an authoritative read only while the foreground Thread still owns it.
  * Slow state reads may settle after a Thread switch; those results are background
@@ -138,29 +175,39 @@ export function latestAssistantThreadNote(
 export function createThreadHistoryLoader(
   loadThreadMessages: (threadId: string) => Promise<ChatMessage[]>,
 ) {
-  let generation = 0;
+  let selectionGeneration = 0;
+
+  function snapshot(threadId: string | null = selectedThreadIdFromStorage()): ThreadHistorySnapshot {
+    return {
+      threadId,
+      selectionGeneration,
+      mutationGeneration: threadHistoryMutationGeneration(threadId),
+    };
+  }
+
+  function isCurrent(candidate: ThreadHistorySnapshot): boolean {
+    return (!candidate.threadId || !activeThreadHistoryMutations.has(candidate.threadId))
+      && candidate.selectionGeneration === selectionGeneration
+      && candidate.mutationGeneration === threadHistoryMutationGeneration(candidate.threadId);
+  }
 
   return {
-    snapshot(): number {
-      return generation;
-    },
-
-    isCurrent(snapshot: number): boolean {
-      return snapshot === generation;
-    },
+    snapshot,
+    isCurrent,
 
     invalidate(): void {
-      generation += 1;
+      selectionGeneration += 1;
     },
 
     async load(threadId: string): Promise<ThreadHistoryLoad> {
-      const requestGeneration = ++generation;
+      selectionGeneration += 1;
+      const requestSnapshot = snapshot(threadId);
       try {
         const messages = await loadThreadMessages(threadId);
-        if (requestGeneration !== generation) return { current: false };
+        if (!isCurrent(requestSnapshot)) return { current: false };
         return { current: true, messages };
       } catch (error) {
-        if (requestGeneration !== generation) return { current: false };
+        if (!isCurrent(requestSnapshot)) return { current: false };
         throw error;
       }
     },
