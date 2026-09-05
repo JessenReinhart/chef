@@ -21,6 +21,10 @@ export type ProjectPickResult = {
   cancelled?: boolean;
 };
 
+export type SingleFlightProjectSelectionResult<T> =
+  | { accepted: true; value: T }
+  | { accepted: false };
+
 function normalizedProjectPath(path: string): string {
   let normalized = path.replace(/\\/g, "/");
   while (normalized.length > 1 && normalized.endsWith("/") && !/^[A-Za-z]:\/$/.test(normalized)) {
@@ -34,6 +38,19 @@ function projectNameFromPath(path: string): string | null {
   const normalized = path.replace(/\\/g, "/").replace(/\/+$/, "");
   const name = normalized.split("/").filter(Boolean).at(-1)?.trim();
   return name || null;
+}
+
+export function createSingleFlightProjectSelection() {
+  let inFlight = false;
+  return async function run<T>(action: () => Promise<T>): Promise<SingleFlightProjectSelectionResult<T>> {
+    if (inFlight) return { accepted: false };
+    inFlight = true;
+    try {
+      return { accepted: true, value: await action() };
+    } finally {
+      inFlight = false;
+    }
+  };
 }
 
 export function sameSelectedProjectPath(left: string, right: string): boolean {
