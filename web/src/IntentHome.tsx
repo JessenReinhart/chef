@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "./api";
 import { dismissVisibleAppError, stateRefreshErrorMessage, visibleAppError } from "./appErrorProjection";
+import { loadIntentHomeRefresh } from "./intentHomeRefresh";
 import {
   archiveThread,
   createThread,
@@ -129,22 +130,32 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
   }, []);
 
   const refresh = useCallback(async () => {
-    const selectionSnapshot = threadHistory.snapshot();
+    const refreshThreadId = loadSelectedThreadId();
+    const selectionSnapshot = threadHistory.snapshot(refreshThreadId);
     try {
-      const [snapshot, listedThreads] = await Promise.all([api.stateRaw(), listThreads()]);
-      const rememberedId = loadSelectedThreadId();
-      const selected = resolveHomeThreadSelection(listedThreads, rememberedId).selectedThread;
-      const selectedMessages = selected ? await threadMessages(selected.id) : [];
+      const result = await loadIntentHomeRefresh({
+        loadSnapshot: api.stateRaw,
+        loadThreads: listThreads,
+        rememberedThreadId: loadSelectedThreadId,
+        loadMessages: threadMessages,
+        onCore: ({ snapshot, threads: listedThreads, selection }) => {
+          setTasks(snapshot.tasks);
+          setMissions(snapshot.missions ?? []);
+          setEvents(snapshot.events);
+          setApprovals(snapshot.approvals.filter((approval) => approval.status === "pending"));
+          setThreads(listedThreads);
+          setStateRefreshError(null);
 
-      setTasks(snapshot.tasks);
-      setMissions(snapshot.missions ?? []);
-      setEvents(snapshot.events);
-      setApprovals(snapshot.approvals.filter((approval) => approval.status === "pending"));
-      setThreads(listedThreads);
+          if (!threadHistory.isCurrent(selectionSnapshot)) return;
+          const nextThreadId = selection.selectedThread?.id ?? null;
+          setMessages((current) => messagesForThreadSelection(refreshThreadId, nextThreadId, current));
+          setSelectedThreadId(nextThreadId);
+          saveSelectedThreadId(nextThreadId);
+        },
+      });
+
       if (threadHistory.isCurrent(selectionSnapshot)) {
-        setMessages(selectedMessages);
-        setSelectedThreadId(selected?.id ?? null);
-        saveSelectedThreadId(selected?.id ?? null);
+        setMessages(result.messages);
         setStateRefreshError(null);
       }
     } catch (err) {
