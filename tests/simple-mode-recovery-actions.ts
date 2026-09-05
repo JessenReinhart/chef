@@ -1,4 +1,6 @@
 import { strict as assert } from "node:assert";
+import { TaskMachine } from "../src/runtime/task-machine.ts";
+import type { Task } from "../src/core/types.ts";
 import { canRetryMissionTask } from "../web/src/missionRecovery.ts";
 
 assert.equal(canRetryMissionTask({
@@ -71,4 +73,47 @@ assert.equal(canRetryMissionTask({
   readOnly: false,
 }), true, "temporary Mission projection lag must not hide a valid recovery action");
 
-console.log("simple-mode-recovery-actions: ok — Retry follows Mission lifecycle, approvals, and read-only state");
+const failedTask: Task = {
+  id: "task-retry-failed",
+  workspaceId: "workspace-recovery",
+  title: "Build todo app",
+  description: "Create and verify the todo app",
+  status: "failed",
+  assignedTo: "worker-1",
+  dependencies: [],
+  contextRefs: [],
+  priority: 1,
+  retryCount: 1,
+  error: "npm test failed on the first attempt",
+  resultSummary: "stale partial result",
+  createdAt: 1,
+  updatedAt: 2,
+};
+
+const failedRetry = TaskMachine.transition(failedTask, "running", { retryCount: 2 });
+assert.equal(failedRetry.task.status, "running", "a failed Task retry should re-enter running state");
+assert.equal(failedRetry.task.error, undefined, "a healthy retry must not retain the previous failure error");
+assert.equal(failedRetry.task.resultSummary, undefined, "a healthy retry must not retain a stale prior result summary");
+assert.equal(failedRetry.task.retryCount, 2, "retry metadata must still be applied while stale state is cleared");
+assert.equal(failedRetry.task.assignedTo, "worker-1", "retry cleanup must preserve unrelated Task ownership metadata");
+assert.equal(failedRetry.event.type, "task.running", "retry cleanup must preserve the normal transition event");
+
+const blockedTask: Task = {
+  ...failedTask,
+  id: "task-retry-blocked",
+  status: "blocked",
+  error: "tool temporarily unavailable",
+  resultSummary: "blocked partial output",
+};
+const blockedRetry = TaskMachine.transition(blockedTask, "running");
+assert.equal(blockedRetry.task.error, undefined, "blocked Task retry must clear the prior blocker error");
+assert.equal(blockedRetry.task.resultSummary, undefined, "blocked Task retry must clear stale partial output");
+
+const explicitReplacement = TaskMachine.transition(failedTask, "running", {
+  error: "replacement diagnostic",
+  resultSummary: "replacement context",
+});
+assert.equal(explicitReplacement.task.error, "replacement diagnostic", "explicit retry metadata must override the default cleanup");
+assert.equal(explicitReplacement.task.resultSummary, "replacement context", "explicit result metadata must override the default cleanup");
+
+console.log("simple-mode-recovery-actions: ok — Retry follows Mission lifecycle, approvals, read-only state, and clears stale Task failure state");
