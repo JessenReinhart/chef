@@ -65,11 +65,16 @@ export class TaskMachine {
   ): TransitionResult {
     this.validateTransition(task.status, nextStatus);
 
+    const recovering = nextStatus === "running" && (task.status === "failed" || task.status === "blocked");
+    const transitionMetadata = recovering
+      ? { error: undefined, resultSummary: undefined, ...metadata }
+      : metadata;
+
     const updated: Task = {
       ...task,
       status: nextStatus,
       updatedAt: now(),
-      ...metadata,
+      ...transitionMetadata,
     };
 
     return {
@@ -79,7 +84,7 @@ export class TaskMachine {
         workspaceId: task.workspaceId,
         source: { type: "runtime", id: "task-machine" },
         type: `task.${nextStatus}`,
-        payload: { from: task.status, to: nextStatus, ...metadata },
+        payload: { from: task.status, to: nextStatus, ...transitionMetadata },
         taskId: task.id,
         timestamp: updated.updatedAt,
       },
