@@ -133,31 +133,36 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
     const refreshThreadId = loadSelectedThreadId();
     const selectionSnapshot = threadHistory.snapshot(refreshThreadId);
     try {
-      const result = await loadIntentHomeRefresh({
+      const { snapshot, threads: listedThreads, selection } = await loadIntentHomeRefresh({
         loadSnapshot: api.stateRaw,
         loadThreads: listThreads,
         rememberedThreadId: loadSelectedThreadId,
-        loadMessages: threadMessages,
-        onCore: ({ snapshot, threads: listedThreads, selection }) => {
-          setTasks(snapshot.tasks);
-          setMissions(snapshot.missions ?? []);
-          setEvents(snapshot.events);
-          setApprovals(snapshot.approvals.filter((approval) => approval.status === "pending"));
-          setThreads(listedThreads);
-          setStateRefreshError(null);
-
-          if (!threadHistory.isCurrent(selectionSnapshot)) return;
-          const nextThreadId = selection.selectedThread?.id ?? null;
-          setMessages((current) => messagesForThreadSelection(refreshThreadId, nextThreadId, current));
-          setSelectedThreadId(nextThreadId);
-          saveSelectedThreadId(nextThreadId);
-        },
       });
 
-      if (threadHistory.isCurrent(selectionSnapshot)) {
-        setMessages(result.messages);
+      setTasks(snapshot.tasks);
+      setMissions(snapshot.missions ?? []);
+      setEvents(snapshot.events);
+      setApprovals(snapshot.approvals.filter((approval) => approval.status === "pending"));
+      setThreads(listedThreads);
+      setStateRefreshError(null);
+
+      if (!threadHistory.isCurrent(selectionSnapshot)) return;
+      const nextThreadId = selection.selectedThread?.id ?? null;
+      setMessages((current) => messagesForThreadSelection(refreshThreadId, nextThreadId, current));
+      setSelectedThreadId(nextThreadId);
+      saveSelectedThreadId(nextThreadId);
+      if (!nextThreadId) return;
+
+      void threadHistory.load(nextThreadId).then((history) => {
+        if (!history.current) return;
+        setMessages(history.messages);
         setStateRefreshError(null);
-      }
+      }).catch((err) => {
+        if (loadSelectedThreadId() !== nextThreadId) return;
+        setStateRefreshError(stateRefreshErrorMessage(
+          err instanceof Error ? err : new Error("Chef could not refresh this Thread's conversation"),
+        ));
+      });
     } catch (err) {
       if (threadHistory.isCurrent(selectionSnapshot)) {
         setStateRefreshError(stateRefreshErrorMessage(
