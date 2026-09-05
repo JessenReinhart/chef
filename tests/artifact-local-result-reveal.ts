@@ -7,7 +7,7 @@ import { createChef } from "../src/main.ts";
 import { createHttpServer } from "../src/server/http-server.ts";
 import { createArtifactServer } from "../src/server/artifact-http.ts";
 import { canRevealArtifact, isFileUriArtifact } from "../web/src/artifactHandoff.ts";
-import { probeArtifactDownloadability } from "../web/src/artifactDownloadCapability.ts";
+import { probeArtifactDownloadability, watchArtifactDownloadability } from "../web/src/artifactDownloadCapability.ts";
 import { artifactRevealLabel, revealArtifact } from "../web/src/resultActions.ts";
 
 const projectDir = await mkdtemp(join(tmpdir(), "chef-local-result-reveal-"));
@@ -48,6 +48,32 @@ assert.equal(
   null,
   "a capability response for a newer artifact version must never enable Save copy on a stale result card",
 );
+
+let transientAttempts = 0;
+await new Promise<void>((resolve, reject) => {
+  const timeout = setTimeout(() => reject(new Error("transient artifact capability did not recover")), 1_000);
+  const stop = watchArtifactDownloadability("recovering", 3, (downloadable) => {
+    try {
+      assert.equal(downloadable, true, "a transient capability failure must recover without an unrelated artifact refresh");
+      assert.equal(transientAttempts, 2, "capability watcher should retry the same exact artifact version after transient failure");
+      clearTimeout(timeout);
+      stop();
+      resolve();
+    } catch (error) {
+      clearTimeout(timeout);
+      stop();
+      reject(error);
+    }
+  }, {
+    retryDelayMs: 0,
+    requester: async () => {
+      transientAttempts += 1;
+      return transientAttempts === 1
+        ? { ok: false, status: 503, headers: new Headers() }
+        : { ok: true, status: 204, headers: new Headers({ "x-chef-artifact-version": "3" }) };
+    },
+  });
+});
 
 const runtime = createChef({ dbPath: join(projectDir, "chef.sqlite"), projectDir });
 const revealed: Array<{ path: string; isDirectory: boolean }> = [];
@@ -212,7 +238,7 @@ try {
   assert.match(outsideReveal.body.error ?? "", /outside the project root/);
   assert.equal(revealed.length, 5, "rejected result locations must never invoke the OS opener");
 
-  console.log("artifact-local-result-reveal: ok — Simple Mode exposes truthful file/download capabilities while keeping local result reveal safe, version-bound, and project-scoped");
+  console.log("artifact-local-result-reveal: ok — Simple Mode exposes truthful file/download capabilities while keeping local result reveal safe, retryable, version-bound, and project-scoped");
 } finally {
   if (server.listening) await new Promise<void>((resolve) => server.close(() => resolve()));
   await runtime.close();
