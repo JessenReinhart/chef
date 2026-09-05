@@ -83,7 +83,7 @@ export async function threadMessages(threadId: string): Promise<ChatMessage[]> {
 }
 
 export async function sendThreadMessage(threadId: string, message: string): Promise<ThreadChatResult> {
-  const finishHistoryMutation = beginThreadHistoryMutation();
+  const finishHistoryMutation = beginThreadHistoryMutation(threadId);
   try {
     const response = await request<{ ok: boolean; data: ThreadChatResult }>(`/api/threads/${encodeURIComponent(threadId)}/chat`, {
       method: "POST",
