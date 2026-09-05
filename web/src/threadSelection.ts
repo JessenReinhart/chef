@@ -17,7 +17,7 @@ export type HomeThreadSelection = {
 };
 
 type ThreadHistorySnapshot = {
-  threadId: string;
+  threadId: string | null;
   selectionGeneration: number;
   mutationGeneration: number;
 };
@@ -26,6 +26,7 @@ const threadHistoryMutationGenerations = new Map<string, number>();
 const activeThreadHistoryMutations = new Map<string, number>();
 
 export const NEW_THREAD_SUBMISSION_KEY = "__chef-new-thread-submission__";
+const SELECTED_THREAD_STORAGE_KEY = "chef:selected-thread";
 
 export function threadSubmissionKey(threadId: string | null): string {
   return threadId ?? NEW_THREAD_SUBMISSION_KEY;
@@ -92,8 +93,12 @@ export function threadSubmissionOwnsForeground(
   return selectedThreadId === null;
 }
 
-function threadHistoryMutationGeneration(threadId: string): number {
-  return threadHistoryMutationGenerations.get(threadId) ?? 0;
+function threadHistoryMutationGeneration(threadId: string | null): number {
+  return threadId ? threadHistoryMutationGenerations.get(threadId) ?? 0 : 0;
+}
+
+function selectedThreadIdFromStorage(): string | null {
+  return globalThis.localStorage?.getItem(SELECTED_THREAD_STORAGE_KEY) ?? null;
 }
 
 /**
@@ -172,7 +177,7 @@ export function createThreadHistoryLoader(
 ) {
   let selectionGeneration = 0;
 
-  function snapshot(threadId: string): ThreadHistorySnapshot {
+  function snapshot(threadId: string | null = selectedThreadIdFromStorage()): ThreadHistorySnapshot {
     return {
       threadId,
       selectionGeneration,
@@ -181,7 +186,7 @@ export function createThreadHistoryLoader(
   }
 
   function isCurrent(candidate: ThreadHistorySnapshot): boolean {
-    return !activeThreadHistoryMutations.has(candidate.threadId)
+    return (!candidate.threadId || !activeThreadHistoryMutations.has(candidate.threadId))
       && candidate.selectionGeneration === selectionGeneration
       && candidate.mutationGeneration === threadHistoryMutationGeneration(candidate.threadId);
   }
