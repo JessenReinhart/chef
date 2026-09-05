@@ -16,6 +16,27 @@ assert.equal(canRetryMissionTask({
 }), true, "ordinary blocked Mission work must remain retryable");
 
 assert.equal(canRetryMissionTask({
+  missionStatus: "paused",
+  taskStatus: "failed",
+  blockedByApproval: false,
+  readOnly: false,
+}), false, "paused Missions must keep their pause gate instead of exposing Task Retry");
+
+assert.equal(canRetryMissionTask({
+  missionStatus: "waiting_for_approval",
+  taskStatus: "failed",
+  blockedByApproval: false,
+  readOnly: false,
+}), false, "approval-waiting Missions must resolve the approval gate before Task Retry is offered");
+
+assert.equal(canRetryMissionTask({
+  missionStatus: "waiting_for_approval",
+  taskStatus: "blocked",
+  blockedByApproval: false,
+  readOnly: false,
+}), false, "approval-waiting Missions must not advertise an independent blocked-Task Retry path");
+
+assert.equal(canRetryMissionTask({
   missionStatus: "cancelled",
   taskStatus: "failed",
   blockedByApproval: false,
