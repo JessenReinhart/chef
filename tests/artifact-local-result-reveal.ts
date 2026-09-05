@@ -30,14 +30,23 @@ const fallbackReveal = await revealArtifact("result-with-error", async () => ({
 }));
 assert.deepEqual(fallbackReveal, { ok: false, error: "Could not show this result" }, "reveal failure fallback must remain platform-neutral");
 assert.equal(
-  await probeArtifactDownloadability("transient", async () => ({ ok: false, status: 503 })),
+  await probeArtifactDownloadability("transient", 1, async () => ({ ok: false, status: 503, headers: new Headers() })),
   null,
   "transient capability failures must remain retryable instead of permanently hiding Save copy",
 );
 assert.equal(
-  await probeArtifactDownloadability("missing", async () => ({ ok: false, status: 404 })),
+  await probeArtifactDownloadability("missing", 1, async () => ({ ok: false, status: 404, headers: new Headers() })),
   false,
   "deterministic artifact rejections must not advertise Save copy",
+);
+assert.equal(
+  await probeArtifactDownloadability("version-race", 1, async () => ({
+    ok: true,
+    status: 204,
+    headers: new Headers({ "x-chef-artifact-version": "2" }),
+  })),
+  null,
+  "a capability response for a newer artifact version must never enable Save copy on a stale result card",
 );
 
 const runtime = createChef({ dbPath: join(projectDir, "chef.sqlite"), projectDir });
@@ -60,8 +69,9 @@ const requestReveal = async (artifactId: string) => {
   return { status: response.status, body: await response.json() as { error?: string } };
 };
 
-const requestDownloadCapability = (artifactId: string) => probeArtifactDownloadability(
+const requestDownloadCapability = (artifactId: string, artifactVersion: number) => probeArtifactDownloadability(
   artifactId,
+  artifactVersion,
   (input, init) => fetch(new URL(String(input), serverBaseUrl()), init),
 );
 
@@ -160,12 +170,12 @@ try {
 
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
 
-  assert.equal(await requestDownloadCapability(canonicalTodo.id), true, "a real project-contained file must advertise Save copy through the production HTTP boundary");
-  assert.equal(await requestDownloadCapability(canonicalTodoDirectory.id), false, "a runnable app directory must not advertise a file-only Save copy action");
-  assert.equal(await requestDownloadCapability(unsupported.id), false, "an artifact without a local backing file must not become downloadable");
-  assert.equal(await requestDownloadCapability(remote.id), false, "a remote result must not become a local download capability");
-  assert.equal(await requestDownloadCapability(outside.id), false, "an out-of-project path must fail closed during capability checks");
-  assert.equal(await requestDownloadCapability("missing-artifact"), false, "a missing durable result must not advertise Save copy");
+  assert.equal(await requestDownloadCapability(canonicalTodo.id, canonicalTodo.version), true, "a real project-contained file must advertise Save copy through the production HTTP boundary");
+  assert.equal(await requestDownloadCapability(canonicalTodoDirectory.id, canonicalTodoDirectory.version), false, "a runnable app directory must not advertise a file-only Save copy action");
+  assert.equal(await requestDownloadCapability(unsupported.id, unsupported.version), false, "an artifact without a local backing file must not become downloadable");
+  assert.equal(await requestDownloadCapability(remote.id, remote.version), false, "a remote result must not become a local download capability");
+  assert.equal(await requestDownloadCapability(outside.id, outside.version), false, "an out-of-project path must fail closed during capability checks");
+  assert.equal(await requestDownloadCapability("missing-artifact", 1), false, "a missing durable result must not advertise Save copy");
   assert.equal(revealed.length, 0, "download capability checks must never invoke the desktop opener");
 
   const canonicalTodoReveal = await requestReveal(canonicalTodo.id);
@@ -202,7 +212,7 @@ try {
   assert.match(outsideReveal.body.error ?? "", /outside the project root/);
   assert.equal(revealed.length, 5, "rejected result locations must never invoke the OS opener");
 
-  console.log("artifact-local-result-reveal: ok — Simple Mode exposes truthful file/download capabilities while keeping local result reveal safe and project-scoped");
+  console.log("artifact-local-result-reveal: ok — Simple Mode exposes truthful file/download capabilities while keeping local result reveal safe, version-bound, and project-scoped");
 } finally {
   if (server.listening) await new Promise<void>((resolve) => server.close(() => resolve()));
   await runtime.close();
