@@ -77,6 +77,28 @@ assert.deepEqual(
   "New Thread creation should settle normally while its initiating foreground still owns Simple Mode",
 );
 
+storage.delete("chef:selected-thread");
+request = deferredResponse();
+const firstThreadCreate = createThread("First thread");
+storage.set("chef:selected-thread", createdThread.id);
+request.resolve(okJson(createdThread));
+assert.deepEqual(
+  await firstThreadCreate,
+  createdThread,
+  "a fresh project may transfer ownership from no Thread to the exact Thread this request created",
+);
+
+storage.delete("chef:selected-thread");
+request = deferredResponse();
+const unrelatedFreshCreate = createThread("First thread");
+storage.set("chef:selected-thread", "thread-unrelated");
+request.resolve(okJson(createdThread));
+await assert.rejects(
+  unrelatedFreshCreate,
+  /Thread selection changed while the action was completing/,
+  "a fresh-project create must not treat an unrelated selected Thread as an allowed ownership transfer",
+);
+
 storage.set("chef:selected-thread", "thread-a");
 request = deferredResponse();
 const lateArchive = archiveThread("thread-a");
