@@ -159,8 +159,9 @@ export function HomeMissionArtifacts() {
       selectedThreadId,
       mission.status,
       MAX_HOME_ARTIFACTS,
+      error === null,
     );
-  }, [artifacts, mission]);
+  }, [artifacts, error, mission]);
   const missionArtifacts = resultHandoff.artifacts;
   const missingResultNotice = resultHandoff.notice;
 
