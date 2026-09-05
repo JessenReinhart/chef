@@ -14,6 +14,7 @@ import {
   moveThreadSubmissionPending,
   resolveHomeThreadSelection,
   setThreadSubmissionPending,
+  threadActionOwnsForeground,
   threadSubmissionKey,
   threadSubmissionOwnsForeground,
 } from "../web/src/threadSelection.ts";
@@ -148,6 +149,21 @@ assert.equal(
   actionErrorForThreadSelection(null, "thread-created", "New Thread creation failed"),
   null,
   "a newly selected Thread must not inherit an error from the no-Thread context",
+);
+assert.equal(
+  threadActionOwnsForeground("thread-a", "thread-b"),
+  false,
+  "an async action started in Thread A must not publish a late failure after the user moves to Thread B",
+);
+assert.equal(
+  threadActionOwnsForeground("thread-b", "thread-b"),
+  true,
+  "a failure from an action still owned by the selected Thread may remain visible",
+);
+assert.equal(
+  threadActionOwnsForeground(null, null),
+  true,
+  "a no-Thread action may report failure while the no-Thread context is still foreground",
 );
 
 // Submission-in-progress UI is owned by the Thread that submitted the work.
