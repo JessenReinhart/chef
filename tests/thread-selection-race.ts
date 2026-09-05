@@ -1,6 +1,7 @@
 import { strict as assert } from "node:assert";
 import {
   createThreadHistoryLoader,
+  draftForThreadSelection,
   foregroundThreadId,
   isThreadSubmissionPending,
   latestAssistantThreadNote,
@@ -97,6 +98,33 @@ assert.deepEqual(
   messagesForThreadSelection("thread-b", "thread-c", bMessages),
   [],
   "archive-driven selection of another active Thread must clear the archived Thread conversation before loading the replacement",
+);
+
+const threadADraft = "Create a small todo app";
+assert.equal(
+  draftForThreadSelection("thread-a", "thread-b", threadADraft),
+  "",
+  "switching Threads must clear unsent composer text owned by the previous Thread",
+);
+assert.equal(
+  draftForThreadSelection("thread-a", "thread-a", threadADraft),
+  threadADraft,
+  "a heartbeat refresh that resolves to the same foreground Thread must preserve its unsent draft",
+);
+assert.equal(
+  draftForThreadSelection("thread-a", null, threadADraft),
+  "",
+  "archiving the last active Thread must not leave its unsent draft in a workspace with no foreground Thread",
+);
+assert.equal(
+  draftForThreadSelection("thread-a", "thread-c", threadADraft),
+  "",
+  "archive-driven selection of another active Thread must clear the archived Thread draft",
+);
+assert.equal(
+  draftForThreadSelection(null, "thread-created", threadADraft),
+  "",
+  "starting a distinct new Thread must not inherit a draft from the previous no-Thread composer context",
 );
 
 // Submission-in-progress UI is owned by the Thread that submitted the work.
@@ -347,4 +375,4 @@ const missingSelection = resolveHomeThreadSelection(threads, "missing");
 assert.equal(missingSelection.selectedThread?.id, "active-a", "a stale remembered id should recover to an active Thread");
 assert.equal(foregroundThreadId(missingSelection), "active-a", "a stale persisted id must resolve to the same Thread the user sees before new work starts");
 
-console.log("thread-selection-race: ok — Thread switching, message ownership, submission feedback, live activity, Mission state, and terminal summaries stay isolated");
+console.log("thread-selection-race: ok — Thread switching, message/draft ownership, submission feedback, live activity, Mission state, and terminal summaries stay isolated");
