@@ -10,7 +10,7 @@ const completedNotice = "Work is marked complete, but Chef did not publish a dur
 const attentionPartialNotice = "Chef saved a partial result, but this Mission still needs attention before the handoff is complete.";
 const pausedPartialNotice = "Chef saved a partial result, but this Mission is paused before the handoff is complete.";
 const pausedEmptyNotice = "No durable result is available because this Mission is paused.";
-const stoppedPartialNotice = "Chef saved a partial result, but this Mission was stopped before the handoff was complete.";
+const stoppedPartialNotice = "Chef saved a partial result, but this Mission was stopped before the handoff is complete.";
 const scope = { missionId: "mission-current", taskIds: ["task-current"], threadId: "thread-current" };
 const result: LivingArtifact = {
   id: "todo-result",
@@ -39,6 +39,76 @@ assert.deepEqual(
   missionResultHandoffProjection([result], scope, "thread-current", "completed"),
   { artifacts: [result], notice: null },
   "a completed Mission with its durable result must project the result without a false warning",
+);
+
+const overflowLeafArtifacts: LivingArtifact[] = Array.from({ length: 5 }, (_, index) => ({
+  ...result,
+  id: `leaf-${index + 1}`,
+  name: `leaf-${index + 1}.tsx`,
+  uri: `file:///tmp/todo-app/leaf-${index + 1}.tsx`,
+  metadata: {
+    missionId: "mission-current",
+    content: `Generated leaf file ${index + 1}`,
+  },
+}));
+const overflowProjection = missionResultHandoffProjection(
+  [result, ...overflowLeafArtifacts],
+  scope,
+  "thread-current",
+  "completed",
+);
+assert.equal(overflowProjection.artifacts.length, 4, "Simple Mode result handoff must remain bounded when a Mission publishes many files");
+assert.deepEqual(
+  overflowProjection.artifacts.map((artifact) => artifact.id),
+  ["leaf-5", "leaf-4", "leaf-3", "todo-result"],
+  "overflow must preserve recent outputs while reserving one visible slot for the most recent runnable Mission handoff",
+);
+assert.equal(
+  overflowProjection.artifacts.at(-1)?.metadata.run,
+  "node /tmp/todo-app.mjs",
+  "the preserved runnable handoff must retain the exact durable run instruction instead of synthesizing one",
+);
+
+const newerRunnableResult: LivingArtifact = {
+  ...result,
+  id: "todo-result-newer",
+  version: 2,
+  metadata: {
+    ...result.metadata,
+    run: "npm run dev",
+  },
+};
+const multipleRunnableProjection = missionResultHandoffProjection(
+  [result, newerRunnableResult, ...overflowLeafArtifacts],
+  scope,
+  "thread-current",
+  "completed",
+);
+assert.equal(
+  multipleRunnableProjection.artifacts.at(-1)?.id,
+  newerRunnableResult.id,
+  "when multiple runnable handoffs overflow, Simple Mode should preserve the most recent one",
+);
+
+const unrelatedRunnable: LivingArtifact = {
+  ...result,
+  id: "other-thread-runnable",
+  taskId: "task-other",
+  metadata: {
+    missionId: "mission-other",
+    run: "npm start",
+  },
+};
+const scopedOverflowProjection = missionResultHandoffProjection(
+  [unrelatedRunnable, ...overflowLeafArtifacts],
+  scope,
+  "thread-current",
+  "completed",
+);
+assert.deepEqual(
+  scopedOverflowProjection.artifacts.map((artifact) => artifact.id),
+  ["leaf-5", "leaf-4", "leaf-3", "leaf-2"],
+  "overflow must never promote a runnable artifact that does not belong to the current Mission",
 );
 
 assert.equal(
@@ -173,4 +243,4 @@ assert.equal(
   "an empty workspace must not render an empty artifact shelf affordance",
 );
 
-console.log("result-handoff-projection: ok — incomplete handoffs stay truthful, refresh failures preserve only selected-Thread results, and durable workspace artifacts remain rediscoverable whenever results are hidden");
+console.log("result-handoff-projection: ok — runnable overflow stays visible, incomplete handoffs stay truthful, refresh failures preserve only selected-Thread results, and durable workspace artifacts remain rediscoverable whenever results are hidden");
