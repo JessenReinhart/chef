@@ -2,7 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { loadSelectedThreadId, SELECTED_THREAD_EVENT } from "./threadApi";
 import { artifactHandoff, canRevealArtifact, isFileUriArtifact } from "./artifactHandoff";
-import { missionResultHandoffProjection, shouldRetainMissionResultOnRefreshFailure } from "./artifactProjection";
+import {
+  missionResultHandoffProjection,
+  shouldRetainMissionArtifactsOnRefreshFailure,
+  shouldRetainMissionResultOnRefreshFailure,
+} from "./artifactProjection";
 import { watchArtifactDownloadability } from "./artifactDownloadCapability";
 import {
   artifactActionStateKey,
@@ -33,6 +37,19 @@ type DownloadState = { status: "saving" | "saved" | "error"; message?: string };
 
 const MAX_HOME_ARTIFACTS = 4;
 
+async function loadStateSnapshot(): Promise<StateSnapshot> {
+  const response = await fetch("/api/state");
+  if (!response.ok) throw new Error("Current work is temporarily unavailable");
+  return response.json() as Promise<StateSnapshot>;
+}
+
+async function loadArtifactSnapshot(): Promise<HomeArtifact[]> {
+  const response = await fetch("/api/artifacts");
+  if (!response.ok) throw new Error("Mission outputs are temporarily unavailable");
+  const body = await response.json() as { ok?: boolean; data?: HomeArtifact[] };
+  return body.ok && Array.isArray(body.data) ? body.data : [];
+}
+
 export function HomeMissionArtifacts() {
   const [target, setTarget] = useState<Element | null>(null);
   const [mission, setMission] = useState<UiMission | null>(null);
@@ -44,6 +61,7 @@ export function HomeMissionArtifacts() {
   const [downloadCapability, setDownloadCapability] = useState<Record<string, boolean>>({});
   const refreshSequence = useRef(0);
   const loadedThreadId = useRef<string | null>(null);
+  const loadedMissionId = useRef<string | null>(null);
   const revealArtifactOnce = useRef(createSingleFlightArtifactRevealer()).current;
   const downloadArtifactOnce = useRef(createSingleFlightArtifactDownloader()).current;
 
@@ -53,46 +71,67 @@ export function HomeMissionArtifacts() {
     const selectedThreadId = loadSelectedThreadId();
     if (!selectedThreadId) {
       loadedThreadId.current = null;
+      loadedMissionId.current = null;
       setMission(null);
       setArtifacts([]);
       setError(null);
       return;
     }
 
-    try {
-      const [stateResponse, artifactResponse] = await Promise.all([
-        fetch("/api/state"),
-        fetch("/api/artifacts"),
-      ]);
-      if (!stateResponse.ok) throw new Error("Current work is temporarily unavailable");
-      if (!artifactResponse.ok) throw new Error("Mission outputs are temporarily unavailable");
+    const [stateResult, artifactResult] = await Promise.allSettled([
+      loadStateSnapshot(),
+      loadArtifactSnapshot(),
+    ]);
+    if (sequence !== refreshSequence.current || loadSelectedThreadId() !== selectedThreadId) return;
 
-      const state = await stateResponse.json() as StateSnapshot;
-      const artifactBody = await artifactResponse.json() as { ok?: boolean; data?: HomeArtifact[] };
-      if (sequence !== refreshSequence.current || loadSelectedThreadId() !== selectedThreadId) return;
-
-      const currentMission = selectLivingWorkspaceMission(
-        (state.missions ?? []).filter((candidate) => candidate.metadata?.threadId === selectedThreadId),
-      );
-      const scopedMission = currentMission
-        ? {
-            ...currentMission,
-            taskIds: [...missionTaskIdsFromEvents(state.events ?? [], [currentMission.id], currentMission.taskIds)],
-          }
-        : null;
-
-      loadedThreadId.current = selectedThreadId;
-      setMission(scopedMission);
-      setArtifacts(artifactBody.ok && Array.isArray(artifactBody.data) ? artifactBody.data : []);
-      setError(null);
-    } catch (cause) {
-      if (sequence !== refreshSequence.current || loadSelectedThreadId() !== selectedThreadId) return;
+    if (stateResult.status === "rejected") {
       if (!shouldRetainMissionResultOnRefreshFailure(loadedThreadId.current, selectedThreadId)) {
+        loadedThreadId.current = null;
+        loadedMissionId.current = null;
         setMission(null);
         setArtifacts([]);
       }
-      setError(cause instanceof Error ? cause.message : "Mission outputs are temporarily unavailable");
+      setError(stateResult.reason instanceof Error
+        ? stateResult.reason.message
+        : "Current work is temporarily unavailable");
+      return;
     }
+
+    const state = stateResult.value;
+    const currentMission = selectLivingWorkspaceMission(
+      (state.missions ?? []).filter((candidate) => candidate.metadata?.threadId === selectedThreadId),
+    );
+    const scopedMission = currentMission
+      ? {
+          ...currentMission,
+          taskIds: [...missionTaskIdsFromEvents(state.events ?? [], [currentMission.id], currentMission.taskIds)],
+        }
+      : null;
+    const previousLoadedThreadId = loadedThreadId.current;
+    const previousLoadedMissionId = loadedMissionId.current;
+    const currentMissionId = scopedMission?.id ?? null;
+
+    loadedThreadId.current = selectedThreadId;
+    loadedMissionId.current = currentMissionId;
+    setMission(scopedMission);
+
+    if (artifactResult.status === "fulfilled") {
+      setArtifacts(artifactResult.value);
+      setError(null);
+      return;
+    }
+
+    if (!shouldRetainMissionArtifactsOnRefreshFailure(
+      previousLoadedThreadId,
+      selectedThreadId,
+      previousLoadedMissionId,
+      currentMissionId,
+    )) {
+      setArtifacts([]);
+    }
+    setError(artifactResult.reason instanceof Error
+      ? artifactResult.reason.message
+      : "Mission outputs are temporarily unavailable");
   }, []);
 
   useEffect(() => {
