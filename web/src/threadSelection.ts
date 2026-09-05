@@ -1,3 +1,4 @@
+import { acceptedMissionSubmissionForThread } from "./missionSubmissionFeedback";
 import type { UiThread } from "./threadApi";
 import type { ChatMessage, MissionStatus, UiMission } from "./types";
 
@@ -36,7 +37,8 @@ export function isThreadSubmissionPending(
   pending: ReadonlySet<string>,
   threadId: string | null,
 ): boolean {
-  return pending.has(threadSubmissionKey(threadId));
+  return pending.has(threadSubmissionKey(threadId))
+    || acceptedMissionSubmissionForThread(threadId) !== null;
 }
 
 export function setThreadSubmissionPending(
