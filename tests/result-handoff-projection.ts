@@ -35,11 +35,26 @@ assert.deepEqual(
   { artifacts: [], notice: completedNotice },
   "a completed selected-Thread Mission with no durable artifact must project an explicit missing-result handoff",
 );
+assert.deepEqual(
+  missionResultHandoffProjection([], scope, "thread-current", "completed", 4, false),
+  { artifacts: [], notice: null },
+  "an unavailable artifact snapshot must not turn zero cached cards into a false claim that completion published no durable result",
+);
+assert.deepEqual(
+  missionResultHandoffProjection([], scope, "thread-current", "failed", 4, false),
+  { artifacts: [], notice: null },
+  "an artifact outage must also suppress zero-result recovery claims until Chef can observe the durable result set again",
+);
 
 assert.deepEqual(
   missionResultHandoffProjection([result], scope, "thread-current", "completed"),
   { artifacts: [result], notice: null },
   "a completed Mission with its durable result must project the result without a false warning",
+);
+assert.deepEqual(
+  missionResultHandoffProjection([result], scope, "thread-current", "failed", 4, false),
+  { artifacts: [result], notice: attentionPartialNotice },
+  "a cached same-Mission artifact remains truthful evidence during an artifact refresh outage",
 );
 
 const overflowLeafArtifacts: LivingArtifact[] = Array.from({ length: 5 }, (_, index) => ({
@@ -265,4 +280,4 @@ assert.equal(
   "an empty workspace must not render an empty artifact shelf affordance",
 );
 
-console.log("result-handoff-projection: ok — runnable overflow stays visible, incomplete handoffs stay truthful, refresh failures retain cards only for the same selected Mission, and durable workspace artifacts remain rediscoverable whenever results are hidden");
+console.log("result-handoff-projection: ok — runnable overflow stays visible, incomplete handoffs stay truthful, result absence stays unknown during artifact outages, refresh failures retain cards only for the same selected Mission, and durable workspace artifacts remain rediscoverable whenever results are hidden");
