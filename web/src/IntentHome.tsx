@@ -14,6 +14,7 @@ import {
   type UiThread,
 } from "./threadApi";
 import {
+  actionErrorForThreadSelection,
   createThreadHistoryLoader,
   draftForThreadSelection,
   messagesForThreadSelection,
@@ -151,6 +152,7 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
       const nextThreadId = selection.selectedThread?.id ?? null;
       setMessages((current) => messagesForThreadSelection(refreshThreadId, nextThreadId, current));
       setGoal((current) => draftForThreadSelection(refreshThreadId, nextThreadId, current));
+      setActionError((current) => actionErrorForThreadSelection(refreshThreadId, nextThreadId, current));
       setSelectedThreadId(nextThreadId);
       saveSelectedThreadId(nextThreadId);
       if (!nextThreadId) return;
@@ -377,13 +379,13 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
     setSelectedThreadId(threadId);
     setMessages((current) => messagesForThreadSelection(previousThreadId, threadId, current));
     setGoal((current) => draftForThreadSelection(previousThreadId, threadId, current));
+    setActionError((current) => actionErrorForThreadSelection(previousThreadId, threadId, current));
     setOptimisticGoal("");
     setLastReport(null);
     try {
       const result = await threadHistory.load(threadId);
       if (!result.current) return;
       setMessages(result.messages);
-      setActionError(null);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "Chef could not open this Thread");
     }
