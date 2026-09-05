@@ -1,16 +1,22 @@
 import { strict as assert } from "node:assert";
 
+import { Api } from "../web/src/api.ts";
 import {
+  acceptedMissionSubmissionForThread,
   acceptedMissionSubmissionIsPending,
+  clearAcceptedMissionSubmission,
   clearMissionSubmissionFailure,
   missionSubmissionAccepted,
   missionSubmissionAcknowledgement,
   missionSubmissionFailureRecovery,
   missionSubmissionStarted,
   missionSubmissionSucceeded,
+  observeAcceptedMissionSubmission,
+  rememberAcceptedMissionSubmission,
   rememberMissionSubmissionFailure,
   takeMissionSubmissionFailure,
 } from "../web/src/missionSubmissionFeedback.ts";
+import { isThreadSubmissionPending } from "../web/src/threadSelection.ts";
 
 const acknowledgement = missionSubmissionAcknowledgement();
 
@@ -57,6 +63,35 @@ assert.equal(
   acceptedMissionSubmissionIsPending(accepted, "thread-a", [{ id: "mission-a" }]),
   false,
   "the provisional starting state must retire as soon as authoritative Mission state contains the accepted Mission",
+);
+
+rememberAcceptedMissionSubmission(accepted);
+assert.deepEqual(
+  acceptedMissionSubmissionForThread("thread-a"),
+  accepted,
+  "accepted Mission ownership must survive a Simple Mode surface remount",
+);
+assert.equal(
+  isThreadSubmissionPending(new Set(), "thread-a"),
+  true,
+  "the owning Thread must stay single-flight after the immediate HTTP request itself has settled",
+);
+assert.equal(
+  isThreadSubmissionPending(new Set(), "thread-b"),
+  false,
+  "an accepted Mission must not block submissions in another Thread",
+);
+observeAcceptedMissionSubmission("thread-a", [{ id: "older-mission" }]);
+assert.equal(
+  isThreadSubmissionPending(new Set(), "thread-a"),
+  true,
+  "an unrelated Mission snapshot must not retire the exact accepted-Mission guard",
+);
+observeAcceptedMissionSubmission("thread-a", [{ id: "mission-a" }]);
+assert.equal(
+  isThreadSubmissionPending(new Set(), "thread-a"),
+  false,
+  "the accepted-Mission guard must retire only when authoritative state contains that Mission id",
 );
 
 const successful = missionSubmissionSucceeded("  Mission started.  ");
@@ -121,5 +156,91 @@ assert.equal(
   null,
   "starting the next submission must clear prior retry state so stale failure UI cannot resurrect later",
 );
+
+const originalFetch = globalThis.fetch;
+const originalLocalStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+const storage = new Map<string, string>([
+  ["chef:view-mode", "simple"],
+  ["chef:selected-thread", "thread-a"],
+]);
+Object.defineProperty(globalThis, "localStorage", {
+  configurable: true,
+  value: {
+    getItem(key: string) { return storage.get(key) ?? null; },
+    setItem(key: string, value: string) { storage.set(key, value); },
+    removeItem(key: string) { storage.delete(key); },
+  },
+});
+
+let stateMissions: Array<Record<string, unknown>> = [];
+globalThis.fetch = async (input) => {
+  const url = String(input);
+  if (url.endsWith("/api/threads/thread-a/chat")) {
+    return new Response(JSON.stringify({
+      ok: true,
+      data: {
+        ok: true,
+        accepted: true,
+        taskIds: [],
+        report: "",
+        missionId: "mission-live",
+        threadId: "thread-a",
+      },
+    }), { status: 202, headers: { "content-type": "application/json" } });
+  }
+  if (url.endsWith("/api/state")) {
+    return new Response(JSON.stringify({
+      tasks: [],
+      sessions: [],
+      approvals: [],
+      canvasNodes: [],
+      canvasEdges: [],
+      missions: stateMissions,
+      automations: [],
+      events: [],
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  }
+  throw new Error(`unexpected request ${url}`);
+};
+
+try {
+  clearAcceptedMissionSubmission("thread-a");
+  const api = new Api();
+  const result = await api.chat(submittedText);
+  assert.equal(result.missionId, "mission-live", "the immediate chat acknowledgement must expose its durable Mission id");
+  assert.equal(
+    isThreadSubmissionPending(new Set(), "thread-a"),
+    true,
+    "the real API acknowledgement path must keep the composer guarded after the POST has settled",
+  );
+
+  await api.stateRaw();
+  assert.equal(
+    isThreadSubmissionPending(new Set(), "thread-a"),
+    true,
+    "a successful state refresh that has not caught up to the accepted Mission must keep the guard active",
+  );
+
+  stateMissions = [{
+    id: "mission-live",
+    goal: submittedText,
+    status: "planning",
+    taskIds: [],
+    metadata: { threadId: "thread-a" },
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  }];
+  await api.stateRaw();
+  assert.equal(
+    isThreadSubmissionPending(new Set(), "thread-a"),
+    false,
+    "the real state projection must release the guard once the exact acknowledged Mission is authoritative",
+  );
+} finally {
+  clearAcceptedMissionSubmission("thread-a");
+  globalThis.fetch = originalFetch;
+  if (originalLocalStorage) Object.defineProperty(globalThis, "localStorage", originalLocalStorage);
+  else delete (globalThis as { localStorage?: unknown }).localStorage;
+}
 
 console.log("Simple Mode submission feedback behavior passed.");
