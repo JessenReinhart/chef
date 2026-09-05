@@ -97,6 +97,15 @@ export function messagesForThreadSelection(
   return currentThreadId === nextThreadId ? [...currentMessages] : [];
 }
 
+/** Unsent composer text must never cross a foreground Thread ownership boundary. */
+export function draftForThreadSelection(
+  currentThreadId: string | null,
+  nextThreadId: string | null,
+  currentDraft: string,
+): string {
+  return currentThreadId === nextThreadId ? currentDraft : "";
+}
+
 export function threadSubmissionOwnsForeground(
   submittedThreadId: string | null,
   selectedThreadId: string | null,
