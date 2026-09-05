@@ -41,6 +41,19 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
+function simpleModeActionOwner(): { threadId: string | null; guarded: boolean } {
+  return {
+    threadId: loadSelectedThreadId(),
+    guarded: localStorage.getItem("chef:view-mode") !== "power",
+  };
+}
+
+function assertThreadActionStillOwnsForeground(owner: { threadId: string | null; guarded: boolean }): void {
+  if (owner.guarded && loadSelectedThreadId() !== owner.threadId) {
+    throw new Error("Thread selection changed while the action was completing");
+  }
+}
+
 export async function listThreads(): Promise<UiThread[]> {
   const response = await request<{ ok: boolean; data: UiThread[] }>("/api/threads");
   const rememberedId = loadSelectedThreadId();
@@ -50,10 +63,14 @@ export async function listThreads(): Promise<UiThread[]> {
 }
 
 export async function createThread(title: string): Promise<UiThread> {
+  const owner = simpleModeActionOwner();
   const response = await request<{ ok: boolean; data: UiThread }>("/api/threads", {
     method: "POST",
     body: JSON.stringify({ title }),
   });
+  // The server mutation remains authoritative and will appear in the next list refresh,
+  // but a late success must not let its caller replace a newer Simple Mode foreground.
+  assertThreadActionStillOwnsForeground(owner);
   return response.data;
 }
 
@@ -66,9 +83,13 @@ export async function renameThread(threadId: string, title: string): Promise<UiT
 }
 
 export async function archiveThread(threadId: string): Promise<UiThread> {
+  const owner = simpleModeActionOwner();
   const response = await request<{ ok: boolean; data: UiThread }>(`/api/threads/${encodeURIComponent(threadId)}/archive`, {
     method: "POST",
   });
+  // Archive still succeeds server-side. Suppressing a stale foreground settlement lets
+  // the periodic Thread refresh reconcile bookkeeping without stealing user context.
+  assertThreadActionStillOwnsForeground(owner);
   return response.data;
 }
 
