@@ -14,12 +14,14 @@ import {
   type UiThread,
 } from "./threadApi";
 import {
+  actionErrorForThreadSelection,
   createThreadHistoryLoader,
   draftForThreadSelection,
   messagesForThreadSelection,
   moveThreadSubmissionPending,
   resolveHomeThreadSelection,
   setThreadSubmissionPending,
+  threadActionOwnsForeground,
   threadSubmissionKey,
   threadSubmissionOwnsForeground,
 } from "./threadSelection";
@@ -151,6 +153,7 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
       const nextThreadId = selection.selectedThread?.id ?? null;
       setMessages((current) => messagesForThreadSelection(refreshThreadId, nextThreadId, current));
       setGoal((current) => draftForThreadSelection(refreshThreadId, nextThreadId, current));
+      setActionError((current) => actionErrorForThreadSelection(refreshThreadId, nextThreadId, current));
       setSelectedThreadId(nextThreadId);
       saveSelectedThreadId(nextThreadId);
       if (!nextThreadId) return;
@@ -377,13 +380,13 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
     setSelectedThreadId(threadId);
     setMessages((current) => messagesForThreadSelection(previousThreadId, threadId, current));
     setGoal((current) => draftForThreadSelection(previousThreadId, threadId, current));
+    setActionError((current) => actionErrorForThreadSelection(previousThreadId, threadId, current));
     setOptimisticGoal("");
     setLastReport(null);
     try {
       const result = await threadHistory.load(threadId);
       if (!result.current) return;
       setMessages(result.messages);
-      setActionError(null);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "Chef could not open this Thread");
     }
@@ -391,6 +394,7 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
 
   async function startNewThread() {
     if (creatingThread) return;
+    const actionThreadId = selectedThreadId;
     setCreatingThread(true);
     setActionError(null);
     try {
@@ -404,7 +408,9 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
       setOptimisticGoal("");
       setLastReport(null);
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Chef could not create a Thread");
+      if (threadActionOwnsForeground(actionThreadId, loadSelectedThreadId())) {
+        setActionError(err instanceof Error ? err.message : "Chef could not create a Thread");
+      }
     } finally {
       setCreatingThread(false);
     }
@@ -414,13 +420,16 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
     if (!selectedThread || selectedThread.status !== "active" || managingThread) return;
     const nextTitle = window.prompt("Rename Thread", selectedThread.title)?.trim();
     if (!nextTitle || nextTitle === selectedThread.title) return;
+    const actionThreadId = selectedThread.id;
     setManagingThread(true);
     setActionError(null);
     try {
       const updated = await renameThread(selectedThread.id, nextTitle);
       setThreads((current) => current.map((thread) => thread.id === updated.id ? updated : thread));
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Chef could not rename this Thread");
+      if (threadActionOwnsForeground(actionThreadId, loadSelectedThreadId())) {
+        setActionError(err instanceof Error ? err.message : "Chef could not rename this Thread");
+      }
     } finally {
       setManagingThread(false);
     }
@@ -429,6 +438,7 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
   async function archiveSelectedThread() {
     if (!selectedThread || selectedThread.status !== "active" || managingThread) return;
     if (!window.confirm(`Archive “${selectedThread.title}”? You can keep its history, but it will leave the active Thread list.`)) return;
+    const actionThreadId = selectedThread.id;
     setManagingThread(true);
     setActionError(null);
     try {
@@ -441,8 +451,12 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
       setMessages((current) => messagesForThreadSelection(selectedThread.id, nextActive?.id ?? null, current));
       setGoal((current) => draftForThreadSelection(selectedThread.id, nextActive?.id ?? null, current));
       if (nextActive) {
-        const result = await threadHistory.load(nextActive.id);
-        if (result.current) setMessages(result.messages);
+        void threadHistory.load(nextActive.id).then((result) => {
+          if (result.current) setMessages(result.messages);
+        }).catch((err) => {
+          if (!threadActionOwnsForeground(nextActive.id, loadSelectedThreadId())) return;
+          setActionError(err instanceof Error ? err.message : "Chef could not open the replacement Thread");
+        });
       } else {
         threadHistory.invalidate();
         setMessages([]);
@@ -450,7 +464,9 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
       setOptimisticGoal("");
       setLastReport(null);
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Chef could not archive this Thread");
+      if (threadActionOwnsForeground(actionThreadId, loadSelectedThreadId())) {
+        setActionError(err instanceof Error ? err.message : "Chef could not archive this Thread");
+      }
     } finally {
       setManagingThread(false);
     }
@@ -509,23 +525,29 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
   }
 
   async function decideApproval(id: string, decision: "accept" | "reject") {
+    const actionThreadId = selectedThreadId;
     try {
       await api.approve(id, decision);
       refreshQueue.trigger();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Chef could not update the approval");
+      if (threadActionOwnsForeground(actionThreadId, loadSelectedThreadId())) {
+        setActionError(err instanceof Error ? err.message : "Chef could not update the approval");
+      }
     }
   }
 
   async function retryTask(taskId: string) {
     if (retryingTaskId) return;
+    const actionThreadId = selectedThreadId;
     setRetryingTaskId(taskId);
     setActionError(null);
     try {
       await api.retryNode(taskId);
       refreshQueue.trigger();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Chef could not retry this work");
+      if (threadActionOwnsForeground(actionThreadId, loadSelectedThreadId())) {
+        setActionError(err instanceof Error ? err.message : "Chef could not retry this work");
+      }
     } finally {
       setRetryingTaskId(null);
     }
