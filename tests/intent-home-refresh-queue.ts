@@ -3,7 +3,6 @@ import { strict as assert } from "node:assert";
 import { loadIntentHomeRefresh } from "../web/src/intentHomeRefresh.ts";
 import { createMissionProgressRefreshQueue } from "../web/src/missionProgressStream.ts";
 import type { UiThread } from "../web/src/threadApi.ts";
-import type { ChatMessage } from "../web/src/types.ts";
 
 function nextTurn(): Promise<void> {
   return new Promise((resolve) => setImmediate(resolve));
@@ -70,78 +69,61 @@ const selectedThread: UiThread = {
   createdAt: 1,
   updatedAt: 1,
 };
-const history = deferred<ChatMessage[]>();
-const coreApplied = deferred<void>();
-let visibleRuntimeMarker: string | null = null;
-let fullRefreshSettled = false;
-const refreshWithSlowHistory = loadIntentHomeRefresh({
-  loadSnapshot: async () => ({ marker: "worker-running" }),
-  loadThreads: async () => [selectedThread],
-  rememberedThreadId: () => selectedThread.id,
-  loadMessages: () => history.promise,
-  onCore: ({ snapshot }) => {
-    visibleRuntimeMarker = snapshot.marker;
-    coreApplied.resolve();
-  },
-});
-refreshWithSlowHistory.then(
-  () => { fullRefreshSettled = true; },
-  () => { fullRefreshSettled = true; },
-);
 
-await coreApplied.promise;
-assert.equal(
-  visibleRuntimeMarker,
-  "worker-running",
-  "Simple Mode must publish fresh Mission/task/event state before selected Thread history settles",
-);
-await Promise.resolve();
-assert.equal(
-  fullRefreshSettled,
-  false,
-  "conversation history may remain pending after runtime progress has already become visible",
-);
-
-const todoHistory = [{ role: "assistant", content: "Todo app is still running", timestamp: 2 }] as ChatMessage[];
-history.resolve(todoHistory);
-const completedRefresh = await refreshWithSlowHistory;
-assert.deepEqual(completedRefresh.messages, todoHistory, "selected Thread history must still join the refresh once it becomes available");
-
-const failingHistory = deferred<ChatMessage[]>();
-const failingCoreApplied = deferred<void>();
-let runtimePublishedBeforeHistoryFailure = false;
-const refreshWithFailedHistory = loadIntentHomeRefresh({
-  loadSnapshot: async () => ({ marker: "verifying" }),
-  loadThreads: async () => [selectedThread],
-  rememberedThreadId: () => selectedThread.id,
-  loadMessages: () => failingHistory.promise,
-  onCore: ({ snapshot }) => {
-    runtimePublishedBeforeHistoryFailure = snapshot.marker === "verifying";
-    failingCoreApplied.resolve();
-  },
+// Model the production boundary: runtime state goes through the bounded refresh
+// queue, while selected-Thread conversation history is explicitly launched in
+// the background after the core snapshot is published.
+const slowHistory = deferred<void>();
+let runtimeVersion = 0;
+const visibleRuntimeMarkers: string[] = [];
+let backgroundHistoryStarts = 0;
+const progressQueue = createMissionProgressRefreshQueue(async () => {
+  const version = ++runtimeVersion;
+  const core = await loadIntentHomeRefresh({
+    loadSnapshot: async () => ({ marker: version === 1 ? "worker-running" : "verifying" }),
+    loadThreads: async () => [selectedThread],
+    rememberedThreadId: () => selectedThread.id,
+  });
+  visibleRuntimeMarkers.push(core.snapshot.marker);
+  backgroundHistoryStarts += 1;
+  void slowHistory.promise.catch(() => undefined);
 });
 
-await failingCoreApplied.promise;
-failingHistory.reject(new Error("Thread history unavailable"));
-await assert.rejects(refreshWithFailedHistory, /Thread history unavailable/);
-assert.equal(
-  runtimePublishedBeforeHistoryFailure,
-  true,
-  "a conversation-history failure must not discard the successful runtime progress refresh that preceded it",
+progressQueue.trigger();
+await nextTurn();
+assert.deepEqual(
+  visibleRuntimeMarkers,
+  ["worker-running"],
+  "Simple Mode must publish fresh Mission/task/event state without waiting for selected Thread history",
 );
+assert.equal(backgroundHistoryStarts, 1, "the selected Thread history refresh may still start after runtime state is published");
 
-let historyCallsWithoutThread = 0;
+progressQueue.trigger();
+await nextTurn();
+assert.deepEqual(
+  visibleRuntimeMarkers,
+  ["worker-running", "verifying"],
+  "a still-pending conversation history request must not occupy the heartbeat queue or block the next runtime snapshot",
+);
+assert.equal(backgroundHistoryStarts, 2, "later heartbeat refreshes may independently refresh conversation history without blocking progress");
+
+slowHistory.reject(new Error("Thread history unavailable"));
+await nextTurn();
+progressQueue.trigger();
+await nextTurn();
+assert.equal(
+  visibleRuntimeMarkers.length,
+  3,
+  "a conversation-history failure must not poison later authoritative runtime progress refreshes",
+);
+progressQueue.close();
+
 const noThreadRefresh = await loadIntentHomeRefresh({
   loadSnapshot: async () => ({ marker: "ready" }),
   loadThreads: async () => [],
   rememberedThreadId: () => null,
-  loadMessages: async () => {
-    historyCallsWithoutThread += 1;
-    return [];
-  },
-  onCore: () => undefined,
 });
-assert.equal(historyCallsWithoutThread, 0, "a workspace with no selected Thread must not manufacture a conversation-history read");
-assert.deepEqual(noThreadRefresh.messages, [], "no selected Thread should yield empty conversation history normally");
+assert.equal(noThreadRefresh.selection.selectedThread, null, "a workspace with no Threads must resolve without inventing a conversation owner");
+assert.equal(noThreadRefresh.snapshot.marker, "ready", "runtime state remains available even when no conversation history exists");
 
 console.log("intent-home-refresh-queue: ok");
