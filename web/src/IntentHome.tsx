@@ -451,8 +451,12 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
       setMessages((current) => messagesForThreadSelection(selectedThread.id, nextActive?.id ?? null, current));
       setGoal((current) => draftForThreadSelection(selectedThread.id, nextActive?.id ?? null, current));
       if (nextActive) {
-        const result = await threadHistory.load(nextActive.id);
-        if (result.current) setMessages(result.messages);
+        void threadHistory.load(nextActive.id).then((result) => {
+          if (result.current) setMessages(result.messages);
+        }).catch((err) => {
+          if (!threadActionOwnsForeground(nextActive.id, loadSelectedThreadId())) return;
+          setActionError(err instanceof Error ? err.message : "Chef could not open the replacement Thread");
+        });
       } else {
         threadHistory.invalidate();
         setMessages([]);
