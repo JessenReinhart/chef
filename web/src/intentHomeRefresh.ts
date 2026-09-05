@@ -1,6 +1,5 @@
 import type { UiThread } from "./threadApi";
 import { resolveHomeThreadSelection, type HomeThreadSelection } from "./threadSelection";
-import type { ChatMessage } from "./types";
 
 export type IntentHomeRefreshCore<TSnapshot> = {
   snapshot: TSnapshot;
@@ -9,30 +8,19 @@ export type IntentHomeRefreshCore<TSnapshot> = {
   rememberedThreadId: string | null;
 };
 
-export type IntentHomeRefreshResult<TSnapshot> = IntentHomeRefreshCore<TSnapshot> & {
-  messages: ChatMessage[];
-};
-
 /**
- * Publish workspace runtime state as soon as its authoritative reads settle.
- * Conversation history is a separate, slower surface and must not hold back
- * Mission/task/event progress that is already available to Simple Mode.
+ * Runtime progress has a smaller availability boundary than conversation
+ * history. Resolve the authoritative workspace + Thread metadata snapshot and
+ * let the caller refresh selected-Thread history independently, so a slow
+ * history endpoint cannot occupy the heartbeat refresh queue.
  */
 export async function loadIntentHomeRefresh<TSnapshot>(input: {
   loadSnapshot: () => Promise<TSnapshot>;
   loadThreads: () => Promise<UiThread[]>;
   rememberedThreadId: () => string | null;
-  loadMessages: (threadId: string) => Promise<ChatMessage[]>;
-  onCore: (core: IntentHomeRefreshCore<TSnapshot>) => void;
-}): Promise<IntentHomeRefreshResult<TSnapshot>> {
+}): Promise<IntentHomeRefreshCore<TSnapshot>> {
   const [snapshot, threads] = await Promise.all([input.loadSnapshot(), input.loadThreads()]);
   const rememberedThreadId = input.rememberedThreadId();
   const selection = resolveHomeThreadSelection(threads, rememberedThreadId);
-  const core = { snapshot, threads, selection, rememberedThreadId };
-
-  input.onCore(core);
-
-  const selectedThreadId = selection.selectedThread?.id;
-  const messages = selectedThreadId ? await input.loadMessages(selectedThreadId) : [];
-  return { ...core, messages };
+  return { snapshot, threads, selection, rememberedThreadId };
 }
