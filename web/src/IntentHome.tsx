@@ -15,6 +15,7 @@ import {
 } from "./threadApi";
 import {
   createThreadHistoryLoader,
+  draftForThreadSelection,
   messagesForThreadSelection,
   moveThreadSubmissionPending,
   resolveHomeThreadSelection,
@@ -149,6 +150,7 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
       if (!threadHistory.isCurrent(selectionSnapshot)) return;
       const nextThreadId = selection.selectedThread?.id ?? null;
       setMessages((current) => messagesForThreadSelection(refreshThreadId, nextThreadId, current));
+      setGoal((current) => draftForThreadSelection(refreshThreadId, nextThreadId, current));
       setSelectedThreadId(nextThreadId);
       saveSelectedThreadId(nextThreadId);
       if (!nextThreadId) return;
@@ -374,6 +376,7 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
     saveSelectedThreadId(threadId);
     setSelectedThreadId(threadId);
     setMessages((current) => messagesForThreadSelection(previousThreadId, threadId, current));
+    setGoal((current) => draftForThreadSelection(previousThreadId, threadId, current));
     setOptimisticGoal("");
     setLastReport(null);
     try {
@@ -397,6 +400,7 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
       saveSelectedThreadId(thread.id);
       setSelectedThreadId(thread.id);
       setMessages([]);
+      setGoal((current) => draftForThreadSelection(selectedThreadId, thread.id, current));
       setOptimisticGoal("");
       setLastReport(null);
     } catch (err) {
@@ -435,6 +439,7 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
       setSelectedThreadId(nextActive?.id ?? null);
       saveSelectedThreadId(nextActive?.id ?? null);
       setMessages((current) => messagesForThreadSelection(selectedThread.id, nextActive?.id ?? null, current));
+      setGoal((current) => draftForThreadSelection(selectedThread.id, nextActive?.id ?? null, current));
       if (nextActive) {
         const result = await threadHistory.load(nextActive.id);
         if (result.current) setMessages(result.messages);
