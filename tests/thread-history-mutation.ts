@@ -68,24 +68,39 @@ try {
   assert.deepEqual(
     await duringSubmitHistory,
     { current: false },
-    "history loaded while the chat POST is still committing must stay non-authoritative",
+    "history loaded for the mutated Thread while its chat POST is still committing must stay non-authoritative",
+  );
+
+  const unrelatedHistory = history.load("thread-b");
+  pendingHistory[2].resolve([
+    { role: "assistant", content: "Thread B remains readable", timestamp: 2 },
+  ] as ChatMessage[]);
+  assert.deepEqual(
+    await unrelatedHistory,
+    {
+      current: true,
+      messages: [
+        { role: "assistant", content: "Thread B remains readable", timestamp: 2 },
+      ],
+    },
+    "switching Threads during a slow submission must not suppress the newly selected Thread's history",
   );
 
   pendingChats[0].resolve();
   await submission;
 
   const freshHistory = history.load("thread-a");
-  pendingHistory[2].resolve([
-    { role: "user", content: "Create a simple todo app", timestamp: 2 },
-    { role: "assistant", content: "Chef accepted the work", timestamp: 3 },
+  pendingHistory[3].resolve([
+    { role: "user", content: "Create a simple todo app", timestamp: 3 },
+    { role: "assistant", content: "Chef accepted the work", timestamp: 4 },
   ] as ChatMessage[]);
   assert.deepEqual(
     await freshHistory,
     {
       current: true,
       messages: [
-        { role: "user", content: "Create a simple todo app", timestamp: 2 },
-        { role: "assistant", content: "Chef accepted the work", timestamp: 3 },
+        { role: "user", content: "Create a simple todo app", timestamp: 3 },
+        { role: "assistant", content: "Chef accepted the work", timestamp: 4 },
       ],
     },
     "the first post-submission history read should become authoritative normally",
@@ -93,7 +108,7 @@ try {
 
   const staleFailure = history.load("thread-a");
   const secondSubmission = sendThreadMessage("thread-a", "Add persistence");
-  pendingHistory[3].reject(new Error("old history request failed"));
+  pendingHistory[4].reject(new Error("old history request failed"));
   assert.deepEqual(
     await staleFailure,
     { current: false },
@@ -107,4 +122,4 @@ try {
   globalThis.fetch = originalFetch;
 }
 
-console.log("thread-history-mutation: ok — history stays non-authoritative for the full Thread chat mutation window");
+console.log("thread-history-mutation: ok — mutation ownership stays scoped to the submitted Thread");
