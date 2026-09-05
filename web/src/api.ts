@@ -23,6 +23,11 @@ import type {
 } from "./types";
 import { loadSelectedThreadId } from "./threadApi.ts";
 import {
+  missionSubmissionAccepted,
+  observeAcceptedMissionSubmission,
+  rememberAcceptedMissionSubmission,
+} from "./missionSubmissionFeedback.ts";
+import {
   scopeStateToThread,
   threadChatPath,
   threadMessagesPath,
@@ -70,6 +75,10 @@ function selectedSimpleModeThreadId(): string | null {
   if (typeof localStorage === "undefined") return null;
   if (localStorage.getItem("chef:view-mode") === "power") return null;
   return loadSelectedThreadId();
+}
+
+function simpleModeEnabled(): boolean {
+  return typeof localStorage !== "undefined" && localStorage.getItem("chef:view-mode") !== "power";
 }
 
 export class Api {
@@ -177,7 +186,10 @@ export class Api {
   // ── State & graph ────────────────────────────────────────────────
   async stateRaw(): Promise<ThreadScopedState> {
     const state = await this.rawStateSnapshot();
-    return scopeStateToThread(state, selectedSimpleModeThreadId());
+    const threadId = selectedSimpleModeThreadId();
+    const scoped = scopeStateToThread(state, threadId);
+    if (simpleModeEnabled()) observeAcceptedMissionSubmission(threadId, scoped.missions ?? []);
+    return scoped;
   }
 
   // ── Canvas graph patch (runtime-owned projection) ───────────────
@@ -322,11 +334,20 @@ export class Api {
   }
 
   // ── Chat ────────────────────────────────────────────────────────
-  async chat(message: string): Promise<{ ok: boolean; taskIds: string[]; report: string }> {
-    return this.request<{ ok: boolean; data: { ok: boolean; taskIds: string[]; report: string } }>(threadChatPath(selectedSimpleModeThreadId()), {
+  async chat(message: string): Promise<{ ok: boolean; taskIds: string[]; report: string; missionId?: string; threadId?: string; accepted?: boolean }> {
+    const threadId = selectedSimpleModeThreadId();
+    const result = await this.request<{
+      ok: boolean;
+      data: { ok: boolean; taskIds: string[]; report: string; missionId?: string; threadId?: string; accepted?: boolean };
+    }>(threadChatPath(threadId), {
       method: "POST",
       body: JSON.stringify({ message }),
     }).then((r) => r.data);
+
+    if (simpleModeEnabled() && result.ok && result.accepted && result.missionId) {
+      rememberAcceptedMissionSubmission(missionSubmissionAccepted(threadId, result.missionId, message));
+    }
+    return result;
   }
 
   async chatMessages(): Promise<ChatMessage[]> {
@@ -353,7 +374,7 @@ export class Api {
   }
 
   async interruptSession(sessionId: string): Promise<void> {
-    await this.request("/api/sessions/interrupt", { method: "POST", body: JSON.stringify({ sessionId }) });
+    await this.request("/api/sessions/interrupt", { method: "POST" });
   }
 
   async sendPeerMessage(sessionId: string, from: string, text: string): Promise<void> {
