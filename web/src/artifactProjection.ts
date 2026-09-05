@@ -43,6 +43,27 @@ export function recentArtifacts<T>(artifacts: T[], limit: number): T[] {
   return artifacts.slice(-limit).reverse();
 }
 
+function hasRunInstruction(artifact: MissionLinkedArtifact): boolean {
+  return ["run", "runCommand", "command"].some((key) => {
+    const value = artifact.metadata[key];
+    return typeof value === "string" && value.trim().length > 0;
+  });
+}
+
+function keepRunnableHandoffVisible<T extends MissionLinkedArtifact>(
+  missionArtifacts: T[],
+  visibleArtifacts: T[],
+  limit: number,
+): T[] {
+  if (limit <= 0 || visibleArtifacts.some(hasRunInstruction)) return visibleArtifacts;
+
+  const runnableHandoff = [...missionArtifacts].reverse().find(hasRunInstruction);
+  if (!runnableHandoff) return visibleArtifacts;
+  if (visibleArtifacts.length < limit) return [...visibleArtifacts, runnableHandoff];
+
+  return [...visibleArtifacts.slice(0, Math.max(0, limit - 1)), runnableHandoff];
+}
+
 export function artifactsForMission<T extends MissionLinkedArtifact>(
   artifacts: T[],
   missionId: string,
@@ -68,7 +89,9 @@ export function visibleArtifactsForCurrentMission<T extends MissionLinkedArtifac
   scope: MissionArtifactScope | null | undefined,
   limit = MAX_VISIBLE_RESULTS,
 ): T[] {
-  return recentArtifacts(artifactsForCurrentMission(artifacts, scope), limit);
+  const missionArtifacts = artifactsForCurrentMission(artifacts, scope);
+  const recent = recentArtifacts(missionArtifacts, limit);
+  return keepRunnableHandoffVisible(missionArtifacts, recent, limit);
 }
 
 export function visibleArtifactsForSelectedThreadMission<T extends MissionLinkedArtifact>(
