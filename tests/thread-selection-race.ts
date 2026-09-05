@@ -6,6 +6,7 @@ import {
   latestAssistantThreadNote,
   latestMissionForSelectedThread,
   loadForSelectedThread,
+  messagesForThreadSelection,
   missionsForSelectedThread,
   missionStatusForSelectedThread,
   moveThreadSubmissionPending,
@@ -48,6 +49,55 @@ pending.get("thread-c")?.reject(new Error("stale Thread request failed"));
 
 assert.deepEqual(await latestSuccess, { current: true, messages: dMessages }, "the newest Thread history should remain authoritative");
 assert.deepEqual(await staleFailure, { current: false }, "a stale Thread failure must not surface over the latest selection");
+
+// The foreground Thread identity changes before its history request can settle.
+// Fail closed during that window: the previous Thread's conversation must not
+// remain visible under the newly selected Thread, including when loading fails.
+const selectionPending = new Map<string, PendingLoad>();
+const selectionHistory = createThreadHistoryLoader((threadId) => new Promise<ChatMessage[]>((resolve, reject) => {
+  selectionPending.set(threadId, { resolve, reject });
+}));
+let visibleSelectionMessages = messagesForThreadSelection("thread-a", "thread-b", aMessages);
+assert.deepEqual(
+  visibleSelectionMessages,
+  [],
+  "switching Threads must immediately remove the previous Thread conversation while the new history is pending",
+);
+
+const failedThreadBLoad = selectionHistory.load("thread-b");
+selectionPending.get("thread-b")?.reject(new Error("Thread B history unavailable"));
+await assert.rejects(failedThreadBLoad, /Thread B history unavailable/);
+assert.deepEqual(
+  visibleSelectionMessages,
+  [],
+  "a failed selected-Thread history request must not restore or retain the previous Thread conversation",
+);
+
+const successfulThreadBLoad = selectionHistory.load("thread-b");
+selectionPending.get("thread-b")?.resolve(bMessages);
+const loadedThreadB = await successfulThreadBLoad;
+assert.equal(loadedThreadB.current, true, "the selected Thread should still accept its own successful history response");
+if (loadedThreadB.current) visibleSelectionMessages = loadedThreadB.messages;
+assert.deepEqual(
+  visibleSelectionMessages,
+  bMessages,
+  "successful selected-Thread history should become the visible conversation normally",
+);
+assert.deepEqual(
+  messagesForThreadSelection("thread-b", "thread-b", bMessages),
+  bMessages,
+  "reselecting the already visible Thread may keep its owned conversation",
+);
+assert.deepEqual(
+  messagesForThreadSelection("thread-b", null, bMessages),
+  [],
+  "archiving the last active Thread must clear its conversation when no foreground Thread remains",
+);
+assert.deepEqual(
+  messagesForThreadSelection("thread-b", "thread-c", bMessages),
+  [],
+  "archive-driven selection of another active Thread must clear the archived Thread conversation before loading the replacement",
+);
 
 // Submission-in-progress UI is owned by the Thread that submitted the work.
 // Switching to another Thread must leave that Thread usable, switching back
@@ -297,4 +347,4 @@ const missingSelection = resolveHomeThreadSelection(threads, "missing");
 assert.equal(missingSelection.selectedThread?.id, "active-a", "a stale remembered id should recover to an active Thread");
 assert.equal(foregroundThreadId(missingSelection), "active-a", "a stale persisted id must resolve to the same Thread the user sees before new work starts");
 
-console.log("thread-selection-race: ok — Thread switching, submission feedback, live activity, Mission state, and terminal summaries stay isolated");
+console.log("thread-selection-race: ok — Thread switching, message ownership, submission feedback, live activity, Mission state, and terminal summaries stay isolated");

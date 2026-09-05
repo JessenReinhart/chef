@@ -14,6 +14,7 @@ import {
 } from "./threadApi";
 import {
   createThreadHistoryLoader,
+  messagesForThreadSelection,
   moveThreadSubmissionPending,
   resolveHomeThreadSelection,
   setThreadSubmissionPending,
@@ -353,8 +354,10 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
   }
 
   async function selectThread(threadId: string) {
+    const previousThreadId = selectedThreadId;
     saveSelectedThreadId(threadId);
     setSelectedThreadId(threadId);
+    setMessages((current) => messagesForThreadSelection(previousThreadId, threadId, current));
     setOptimisticGoal("");
     setLastReport(null);
     try {
@@ -415,6 +418,7 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
       setThreads(nextThreads);
       setSelectedThreadId(nextActive?.id ?? null);
       saveSelectedThreadId(nextActive?.id ?? null);
+      setMessages((current) => messagesForThreadSelection(selectedThread.id, nextActive?.id ?? null, current));
       if (nextActive) {
         const result = await threadHistory.load(nextActive.id);
         if (result.current) setMessages(result.messages);
