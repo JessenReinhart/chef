@@ -37,6 +37,11 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.end(JSON.stringify(body));
 }
 
+function sendEmpty(res: ServerResponse, status: number, headers: Record<string, string> = {}): void {
+  res.writeHead(status, headers);
+  res.end();
+}
+
 function isWithinRoot(rootPath: string, candidatePath: string): boolean {
   const rel = relative(rootPath, candidatePath);
   return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
@@ -129,6 +134,30 @@ export function artifactRevealCommand(
 async function defaultRevealPath(filePath: string, isDirectory: boolean): Promise<void> {
   const reveal = artifactRevealCommand(filePath, isDirectory);
   await execFileAsync(reveal.command, reveal.args, process.platform === "win32" ? { windowsHide: true } : undefined);
+}
+
+async function sendArtifactDownloadCapability(runtime: ChefRuntime, artifactId: string, res: ServerResponse): Promise<void> {
+  let location: Awaited<ReturnType<typeof resolveArtifactLocation>>;
+  try {
+    location = await resolveArtifactLocation(runtime, artifactId);
+  } catch (error) {
+    if (error instanceof ArtifactLocationError) {
+      sendEmpty(res, error.status);
+      return;
+    }
+    throw error;
+  }
+
+  if (location.isDirectory) {
+    sendEmpty(res, 409, { "x-chef-artifact-downloadable": "false" });
+    return;
+  }
+
+  sendEmpty(res, 204, {
+    "x-chef-artifact-downloadable": "true",
+    "x-chef-artifact-id": location.artifact.id,
+    "x-chef-artifact-version": String(location.artifact.version),
+  });
 }
 
 async function sendArtifactDownload(runtime: ChefRuntime, artifactId: string, res: ServerResponse): Promise<void> {
@@ -239,6 +268,10 @@ export function createArtifactServer(runtime: ChefRuntime, baseServer: Server, o
       }
 
       const downloadMatch = url.pathname.match(/^\/api\/artifacts\/([^/]+)\/download$/);
+      if (req.method === "HEAD" && downloadMatch) {
+        await sendArtifactDownloadCapability(runtime, decodeURIComponent(downloadMatch[1]), res);
+        return;
+      }
       if (req.method === "GET" && downloadMatch) {
         await sendArtifactDownload(runtime, decodeURIComponent(downloadMatch[1]), res);
         return;

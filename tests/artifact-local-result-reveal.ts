@@ -7,6 +7,7 @@ import { createChef } from "../src/main.ts";
 import { createHttpServer } from "../src/server/http-server.ts";
 import { createArtifactServer } from "../src/server/artifact-http.ts";
 import { canRevealArtifact, isFileUriArtifact } from "../web/src/artifactHandoff.ts";
+import { probeArtifactDownloadability, watchArtifactDownloadability } from "../web/src/artifactDownloadCapability.ts";
 import { artifactRevealLabel, revealArtifact } from "../web/src/resultActions.ts";
 
 const projectDir = await mkdtemp(join(tmpdir(), "chef-local-result-reveal-"));
@@ -28,6 +29,51 @@ const fallbackReveal = await revealArtifact("result-with-error", async () => ({
   json: async () => { throw new Error("non-json response"); },
 }));
 assert.deepEqual(fallbackReveal, { ok: false, error: "Could not show this result" }, "reveal failure fallback must remain platform-neutral");
+assert.equal(
+  await probeArtifactDownloadability("transient", 1, async () => ({ ok: false, status: 503, headers: new Headers() })),
+  null,
+  "transient capability failures must remain retryable instead of permanently hiding Save copy",
+);
+assert.equal(
+  await probeArtifactDownloadability("missing", 1, async () => ({ ok: false, status: 404, headers: new Headers() })),
+  false,
+  "deterministic artifact rejections must not advertise Save copy",
+);
+assert.equal(
+  await probeArtifactDownloadability("version-race", 1, async () => ({
+    ok: true,
+    status: 204,
+    headers: new Headers({ "x-chef-artifact-version": "2" }),
+  })),
+  null,
+  "a capability response for a newer artifact version must never enable Save copy on a stale result card",
+);
+
+let transientAttempts = 0;
+await new Promise<void>((resolve, reject) => {
+  const timeout = setTimeout(() => reject(new Error("transient artifact capability did not recover")), 1_000);
+  const stop = watchArtifactDownloadability("recovering", 3, (downloadable) => {
+    try {
+      assert.equal(downloadable, true, "a transient capability failure must recover without an unrelated artifact refresh");
+      assert.equal(transientAttempts, 2, "capability watcher should retry the same exact artifact version after transient failure");
+      clearTimeout(timeout);
+      stop();
+      resolve();
+    } catch (error) {
+      clearTimeout(timeout);
+      stop();
+      reject(error);
+    }
+  }, {
+    retryDelayMs: 0,
+    requester: async () => {
+      transientAttempts += 1;
+      return transientAttempts === 1
+        ? { ok: false, status: 503, headers: new Headers() }
+        : { ok: true, status: 204, headers: new Headers({ "x-chef-artifact-version": "3" }) };
+    },
+  });
+});
 
 const runtime = createChef({ dbPath: join(projectDir, "chef.sqlite"), projectDir });
 const revealed: Array<{ path: string; isDirectory: boolean }> = [];
@@ -35,15 +81,25 @@ const server = createArtifactServer(runtime, createHttpServer(runtime), {
   revealPath: async (path, isDirectory) => { revealed.push({ path, isDirectory }); },
 });
 
-const requestReveal = async (artifactId: string) => {
+const serverBaseUrl = () => {
   const address = server.address();
   assert.ok(address && typeof address === "object");
-  const response = await fetch(`http://127.0.0.1:${address.port}/api/artifacts/${encodeURIComponent(artifactId)}/reveal`, {
+  return `http://127.0.0.1:${address.port}`;
+};
+
+const requestReveal = async (artifactId: string) => {
+  const response = await fetch(`${serverBaseUrl()}/api/artifacts/${encodeURIComponent(artifactId)}/reveal`, {
     method: "POST",
     headers: { "x-chef-action": "reveal-artifact" },
   });
   return { status: response.status, body: await response.json() as { error?: string } };
 };
+
+const requestDownloadCapability = (artifactId: string, artifactVersion: number) => probeArtifactDownloadability(
+  artifactId,
+  artifactVersion,
+  (input, init) => fetch(new URL(String(input), serverBaseUrl()), init),
+);
 
 try {
   const canonicalTodo = runtime.repository.insertArtifact({
@@ -56,6 +112,19 @@ try {
     metadata: {
       content: `Created runnable todo app at ${resultPath}`,
       run: `${process.execPath} ${resultPath}`,
+      verifiedBy: "golden-path",
+    },
+  });
+  const canonicalTodoDirectory = runtime.repository.insertArtifact({
+    id: "canonical-todo-directory",
+    workspaceId: runtime.workspaceId,
+    type: "result",
+    name: "todo-app-root",
+    uri: pathToFileURL(resultDir).href,
+    createdBy: "todo-builder",
+    metadata: {
+      content: `Created runnable todo app at ${resultDir}`,
+      run: "npm start",
       verifiedBy: "golden-path",
     },
   });
@@ -115,6 +184,7 @@ try {
   });
 
   assert.equal(canRevealArtifact(canonicalTodo), true, "the canonical todo result must advertise Show result in Simple Mode");
+  assert.equal(canRevealArtifact(canonicalTodoDirectory), true, "the canonical todo app root must remain revealable even though it is not a downloadable file");
   assert.equal(canRevealArtifact(local), true, "Simple Mode should keep reveal available for an explicit durable local result path");
   assert.equal(canRevealArtifact(mixedCaseMetadataLocation), true, "mixed-case file URI metadata must remain revealable for opaque artifacts");
   assert.equal(canRevealArtifact(mixedCaseFileUri), true, "file URI schemes are case-insensitive and must remain revealable");
@@ -126,9 +196,21 @@ try {
 
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
 
+  assert.equal(await requestDownloadCapability(canonicalTodo.id, canonicalTodo.version), true, "a real project-contained file must advertise Save copy through the production HTTP boundary");
+  assert.equal(await requestDownloadCapability(canonicalTodoDirectory.id, canonicalTodoDirectory.version), false, "a runnable app directory must not advertise a file-only Save copy action");
+  assert.equal(await requestDownloadCapability(unsupported.id, unsupported.version), false, "an artifact without a local backing file must not become downloadable");
+  assert.equal(await requestDownloadCapability(remote.id, remote.version), false, "a remote result must not become a local download capability");
+  assert.equal(await requestDownloadCapability(outside.id, outside.version), false, "an out-of-project path must fail closed during capability checks");
+  assert.equal(await requestDownloadCapability("missing-artifact", 1), false, "a missing durable result must not advertise Save copy");
+  assert.equal(revealed.length, 0, "download capability checks must never invoke the desktop opener");
+
   const canonicalTodoReveal = await requestReveal(canonicalTodo.id);
   assert.equal(canonicalTodoReveal.status, 200, "the canonical generated todo result must cross the production Show result endpoint");
   assert.deepEqual(revealed, [{ path: resultPath, isDirectory: false }], "Show result must resolve the canonical todo artifact to its generated file inside the selected project");
+
+  const directoryReveal = await requestReveal(canonicalTodoDirectory.id);
+  assert.equal(directoryReveal.status, 200, "directory results must remain available through Show result");
+  assert.deepEqual(revealed.at(-1), { path: resultDir, isDirectory: true }, "Show result must continue to open the runnable app root without treating it as a file download");
 
   const localReveal = await requestReveal(local.id);
   assert.equal(localReveal.status, 200);
@@ -149,14 +231,14 @@ try {
   const remoteReveal = await requestReveal(remote.id);
   assert.equal(remoteReveal.status, 409);
   assert.match(remoteReveal.body.error ?? "", /not a local file/);
-  assert.equal(revealed.length, 4, "remote result locations must never be reinterpreted as project-relative filesystem paths");
+  assert.equal(revealed.length, 5, "remote result locations must never be reinterpreted as project-relative filesystem paths");
 
   const outsideReveal = await requestReveal(outside.id);
   assert.equal(outsideReveal.status, 403);
   assert.match(outsideReveal.body.error ?? "", /outside the project root/);
-  assert.equal(revealed.length, 4, "rejected result locations must never invoke the OS opener");
+  assert.equal(revealed.length, 5, "rejected result locations must never invoke the OS opener");
 
-  console.log("artifact-local-result-reveal: ok — canonical todo and local results stay safe, project-scoped, and platform-neutral in Simple Mode");
+  console.log("artifact-local-result-reveal: ok — Simple Mode exposes truthful file/download capabilities while keeping local result reveal safe, retryable, version-bound, and project-scoped");
 } finally {
   if (server.listening) await new Promise<void>((resolve) => server.close(() => resolve()));
   await runtime.close();

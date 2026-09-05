@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { loadSelectedThreadId, SELECTED_THREAD_EVENT } from "./threadApi";
 import { artifactHandoff, canRevealArtifact, isFileUriArtifact } from "./artifactHandoff";
 import { missionResultHandoffProjection, shouldRetainMissionResultOnRefreshFailure } from "./artifactProjection";
+import { watchArtifactDownloadability } from "./artifactDownloadCapability";
 import {
   artifactActionStateKey,
   artifactRevealLabel,
@@ -40,6 +41,7 @@ export function HomeMissionArtifacts() {
   const [runCopyState, setRunCopyState] = useState<Record<string, RunCopyState>>({});
   const [revealState, setRevealState] = useState<Record<string, RevealState>>({});
   const [downloadState, setDownloadState] = useState<Record<string, DownloadState>>({});
+  const [downloadCapability, setDownloadCapability] = useState<Record<string, boolean>>({});
   const refreshSequence = useRef(0);
   const loadedThreadId = useRef<string | null>(null);
   const revealArtifactOnce = useRef(createSingleFlightArtifactRevealer()).current;
@@ -123,6 +125,22 @@ export function HomeMissionArtifacts() {
   const missionArtifacts = resultHandoff.artifacts;
   const missingResultNotice = resultHandoff.notice;
 
+  useEffect(() => {
+    const stopWatching: Array<() => void> = [];
+    for (const artifact of missionArtifacts) {
+      if (!isFileUriArtifact(artifact)) continue;
+      const actionKey = artifactActionStateKey(artifact.id, artifact.version);
+      stopWatching.push(watchArtifactDownloadability(artifact.id, artifact.version, (downloadable) => {
+        setDownloadCapability((current) => current[actionKey] === downloadable
+          ? current
+          : { ...current, [actionKey]: downloadable });
+      }));
+    }
+    return () => {
+      for (const stop of stopWatching) stop();
+    };
+  }, [missionArtifacts]);
+
   const handleCopyRunCommand = useCallback(async (actionKey: string, runCommand: string) => {
     const result = await copyRunCommand(runCommand, navigator.clipboard);
     setRunCopyState((current) => ({ ...current, [actionKey]: result.ok ? "copied" : "error" }));
@@ -193,6 +211,7 @@ export function HomeMissionArtifacts() {
             const reveal = revealState[actionKey];
             const download = downloadState[actionKey];
             const revealable = canRevealArtifact(artifact);
+            const downloadable = downloadCapability[actionKey] === true;
             return (
               <article key={actionKey} className="rounded-xl border border-white/[0.07] bg-black/20 p-3">
                 <div className="flex items-start justify-between gap-3">
@@ -210,7 +229,7 @@ export function HomeMissionArtifacts() {
                       >
                         {artifactRevealLabel(reveal?.status ?? "idle")}
                       </button>
-                      {isFileUriArtifact(artifact) && (
+                      {downloadable && (
                         <button
                           type="button"
                           onClick={() => void handleDownloadArtifact(artifact.id, actionKey)}
