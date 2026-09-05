@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "./api";
 import { dismissVisibleAppError, stateRefreshErrorMessage, visibleAppError } from "./appErrorProjection";
+import { loadIntentHomeRefresh } from "./intentHomeRefresh";
 import {
   archiveThread,
   createThread,
@@ -129,24 +130,39 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
   }, []);
 
   const refresh = useCallback(async () => {
-    const selectionSnapshot = threadHistory.snapshot();
+    const refreshThreadId = loadSelectedThreadId();
+    const selectionSnapshot = threadHistory.snapshot(refreshThreadId);
     try {
-      const [snapshot, listedThreads] = await Promise.all([api.stateRaw(), listThreads()]);
-      const rememberedId = loadSelectedThreadId();
-      const selected = resolveHomeThreadSelection(listedThreads, rememberedId).selectedThread;
-      const selectedMessages = selected ? await threadMessages(selected.id) : [];
+      const { snapshot, threads: listedThreads, selection } = await loadIntentHomeRefresh({
+        loadSnapshot: api.stateRaw,
+        loadThreads: listThreads,
+        rememberedThreadId: loadSelectedThreadId,
+      });
 
       setTasks(snapshot.tasks);
       setMissions(snapshot.missions ?? []);
       setEvents(snapshot.events);
       setApprovals(snapshot.approvals.filter((approval) => approval.status === "pending"));
       setThreads(listedThreads);
-      if (threadHistory.isCurrent(selectionSnapshot)) {
-        setMessages(selectedMessages);
-        setSelectedThreadId(selected?.id ?? null);
-        saveSelectedThreadId(selected?.id ?? null);
+      setStateRefreshError(null);
+
+      if (!threadHistory.isCurrent(selectionSnapshot)) return;
+      const nextThreadId = selection.selectedThread?.id ?? null;
+      setMessages((current) => messagesForThreadSelection(refreshThreadId, nextThreadId, current));
+      setSelectedThreadId(nextThreadId);
+      saveSelectedThreadId(nextThreadId);
+      if (!nextThreadId) return;
+
+      void threadHistory.load(nextThreadId).then((history) => {
+        if (!history.current) return;
+        setMessages(history.messages);
         setStateRefreshError(null);
-      }
+      }).catch((err) => {
+        if (loadSelectedThreadId() !== nextThreadId) return;
+        setStateRefreshError(stateRefreshErrorMessage(
+          err instanceof Error ? err : new Error("Chef could not refresh this Thread's conversation"),
+        ));
+      });
     } catch (err) {
       if (threadHistory.isCurrent(selectionSnapshot)) {
         setStateRefreshError(stateRefreshErrorMessage(
