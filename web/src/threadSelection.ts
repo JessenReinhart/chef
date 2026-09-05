@@ -115,6 +115,14 @@ export function actionErrorForThreadSelection(
   return currentThreadId === nextThreadId ? currentError : null;
 }
 
+/** Async Thread actions may publish foreground feedback only while their initiating Thread still owns the UI. */
+export function threadActionOwnsForeground(
+  actionThreadId: string | null,
+  selectedThreadId: string | null,
+): boolean {
+  return actionThreadId === selectedThreadId;
+}
+
 export function threadSubmissionOwnsForeground(
   submittedThreadId: string | null,
   selectedThreadId: string | null,
