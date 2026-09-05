@@ -132,7 +132,7 @@ export function HomeMissionArtifacts() {
       const actionKey = artifactActionStateKey(artifact.id, artifact.version);
       if (downloadCapabilityRequested.current.has(actionKey)) continue;
       downloadCapabilityRequested.current.add(actionKey);
-      void probeArtifactDownloadability(artifact.id).then((downloadable) => {
+      void probeArtifactDownloadability(artifact.id, artifact.version).then((downloadable) => {
         if (downloadable === null) {
           downloadCapabilityRequested.current.delete(actionKey);
           return;
