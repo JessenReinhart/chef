@@ -5,6 +5,11 @@ type CapabilityRequester = (
   init?: RequestInit,
 ) => Promise<CapabilityResponse>;
 
+type CapabilityWatcherOptions = {
+  requester?: CapabilityRequester;
+  retryDelayMs?: number;
+};
+
 /**
  * Check whether an exact durable artifact version can be downloaded as a file
  * without downloading it or triggering any desktop side effect.
@@ -31,4 +36,37 @@ export async function probeArtifactDownloadability(
   } catch {
     return null;
   }
+}
+
+/**
+ * Keep probing through transient/network uncertainty until the exact artifact
+ * version resolves to a durable yes/no answer. Returns a cancellation hook for
+ * callers whose visible artifact set changes while a retry is pending.
+ */
+export function watchArtifactDownloadability(
+  artifactId: string,
+  artifactVersion: number,
+  onResolved: (downloadable: boolean) => void,
+  options: CapabilityWatcherOptions = {},
+): () => void {
+  const requester = options.requester ?? fetch;
+  const retryDelayMs = Math.max(0, options.retryDelayMs ?? 2_000);
+  let cancelled = false;
+  let retryTimer: ReturnType<typeof setTimeout> | undefined;
+
+  const probe = async () => {
+    const downloadable = await probeArtifactDownloadability(artifactId, artifactVersion, requester);
+    if (cancelled) return;
+    if (downloadable === null) {
+      retryTimer = setTimeout(() => void probe(), retryDelayMs);
+      return;
+    }
+    onResolved(downloadable);
+  };
+
+  void probe();
+  return () => {
+    cancelled = true;
+    if (retryTimer !== undefined) clearTimeout(retryTimer);
+  };
 }
