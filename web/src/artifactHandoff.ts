@@ -38,7 +38,7 @@ function fileUriLocation(uri: string): string | null {
     const url = new URL(uri);
     let pathname = decodeURIComponent(url.pathname);
     if (/^\/[A-Za-z]:\//.test(pathname)) pathname = pathname.slice(1);
-    if (url.host) return `//${url.host}${pathname}`;
+    if (url.host) return pathname && pathname !== "/" ? `//${url.host}${pathname}` : null;
     return pathname || null;
   } catch {
     return null;
@@ -61,7 +61,7 @@ function summaryText(artifact: ArtifactHandoffInput, durableLocation: string | n
 }
 
 function isLocalLocation(location: string): boolean {
-  if (hasFileScheme(location)) return true;
+  if (hasFileScheme(location)) return fileUriLocation(location) !== null;
   if (/^[A-Za-z]:[\\/]/.test(location)) return true;
   return !/^[A-Za-z][A-Za-z0-9+.-]*:/.test(location);
 }
@@ -69,7 +69,7 @@ function isLocalLocation(location: string): boolean {
 export function canRevealArtifact(artifact: ArtifactHandoffInput): boolean {
   const explicitLocation = firstText(artifact.metadata, ["resultLocation", "path", "location"]);
   if (explicitLocation !== null) return isLocalLocation(explicitLocation);
-  return isFileUriArtifact(artifact);
+  return fileUriLocation(artifact.uri) !== null;
 }
 
 const NEGATIVE_LEGACY_VERIFICATION = new Set([
