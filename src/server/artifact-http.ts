@@ -68,6 +68,19 @@ function fileUriPath(value: string): string | null {
   }
 }
 
+function requestedArtifactVersion(req: IncomingMessage): number | undefined {
+  const raw = req.headers["x-chef-artifact-version"];
+  if (raw === undefined) return undefined;
+  if (Array.isArray(raw) || !/^\d+$/.test(raw)) {
+    throw new ArtifactLocationError(400, "artifact version must be a positive integer");
+  }
+  const version = Number(raw);
+  if (!Number.isSafeInteger(version) || version <= 0) {
+    throw new ArtifactLocationError(400, "artifact version must be a positive integer");
+  }
+  return version;
+}
+
 function artifactPathCandidate(runtime: ChefRuntime, artifact: { uri: string; metadata: Record<string, unknown> }): string {
   const uriPath = fileUriPath(artifact.uri);
   if (uriPath) return uriPath;
@@ -89,10 +102,13 @@ function artifactPathCandidate(runtime: ChefRuntime, artifact: { uri: string; me
   return isAbsolute(path) ? path : resolve(runtime.projectDir, path);
 }
 
-async function resolveArtifactLocation(runtime: ChefRuntime, artifactId: string) {
+async function resolveArtifactLocation(runtime: ChefRuntime, artifactId: string, expectedVersion?: number) {
   const artifact = runtime.repository.getArtifact(artifactId);
   if (!artifact || artifact.workspaceId !== runtime.workspaceId) {
     throw new ArtifactLocationError(404, "artifact not found");
+  }
+  if (expectedVersion !== undefined && artifact.version !== expectedVersion) {
+    throw new ArtifactLocationError(409, "artifact changed; refresh and try again");
   }
 
   let projectRoot: string;
@@ -136,10 +152,10 @@ async function defaultRevealPath(filePath: string, isDirectory: boolean): Promis
   await execFileAsync(reveal.command, reveal.args, process.platform === "win32" ? { windowsHide: true } : undefined);
 }
 
-async function sendArtifactDownloadCapability(runtime: ChefRuntime, artifactId: string, res: ServerResponse): Promise<void> {
+async function sendArtifactDownloadCapability(runtime: ChefRuntime, artifactId: string, expectedVersion: number | undefined, res: ServerResponse): Promise<void> {
   let location: Awaited<ReturnType<typeof resolveArtifactLocation>>;
   try {
-    location = await resolveArtifactLocation(runtime, artifactId);
+    location = await resolveArtifactLocation(runtime, artifactId, expectedVersion);
   } catch (error) {
     if (error instanceof ArtifactLocationError) {
       sendEmpty(res, error.status);
@@ -160,10 +176,10 @@ async function sendArtifactDownloadCapability(runtime: ChefRuntime, artifactId: 
   });
 }
 
-async function sendArtifactDownload(runtime: ChefRuntime, artifactId: string, res: ServerResponse): Promise<void> {
+async function sendArtifactDownload(runtime: ChefRuntime, artifactId: string, expectedVersion: number | undefined, res: ServerResponse): Promise<void> {
   let location: Awaited<ReturnType<typeof resolveArtifactLocation>>;
   try {
-    location = await resolveArtifactLocation(runtime, artifactId);
+    location = await resolveArtifactLocation(runtime, artifactId, expectedVersion);
   } catch (error) {
     if (error instanceof ArtifactLocationError) {
       const message = error.message === "artifact is not backed by a local file"
@@ -205,10 +221,11 @@ async function sendArtifactDownload(runtime: ChefRuntime, artifactId: string, re
  * Adds a workspace-scoped, read-only Artifact Library projection plus an
  * explicit local reveal action for project-contained file-backed results.
  *
- * The reveal endpoint accepts only a durable artifact id. It resolves and
- * realpaths the stored URI or persisted result location server-side before
- * invoking a shell-free OS opener, so browser input can never choose an
- * arbitrary filesystem path or command.
+ * The reveal endpoint accepts only a durable artifact id and optional exact
+ * artifact version. It resolves and realpaths the stored URI or persisted
+ * result location server-side before invoking a shell-free OS opener, so
+ * browser input can never choose an arbitrary filesystem path or command and
+ * a stale result card cannot redirect to a newer artifact version.
  */
 export function createArtifactServer(runtime: ChefRuntime, baseServer: Server, options: ArtifactServerOptions = {}): Server {
   const baseHandler = baseServer.listeners("request")[0] as RequestHandler | undefined;
@@ -254,9 +271,9 @@ export function createArtifactServer(runtime: ChefRuntime, baseServer: Server, o
         }
         const artifactId = decodeURIComponent(revealMatch[1]);
         try {
-          const location = await resolveArtifactLocation(runtime, artifactId);
+          const location = await resolveArtifactLocation(runtime, artifactId, requestedArtifactVersion(req));
           await revealPath(location.filePath, location.isDirectory);
-          sendJson(res, 200, { ok: true, data: { artifactId, location: location.filePath } });
+          sendJson(res, 200, { ok: true, data: { artifactId, version: location.artifact.version, location: location.filePath } });
         } catch (error) {
           if (error instanceof ArtifactLocationError) {
             sendJson(res, error.status, { error: error.message });
@@ -269,11 +286,11 @@ export function createArtifactServer(runtime: ChefRuntime, baseServer: Server, o
 
       const downloadMatch = url.pathname.match(/^\/api\/artifacts\/([^/]+)\/download$/);
       if (req.method === "HEAD" && downloadMatch) {
-        await sendArtifactDownloadCapability(runtime, decodeURIComponent(downloadMatch[1]), res);
+        await sendArtifactDownloadCapability(runtime, decodeURIComponent(downloadMatch[1]), requestedArtifactVersion(req), res);
         return;
       }
       if (req.method === "GET" && downloadMatch) {
-        await sendArtifactDownload(runtime, decodeURIComponent(downloadMatch[1]), res);
+        await sendArtifactDownload(runtime, decodeURIComponent(downloadMatch[1]), requestedArtifactVersion(req), res);
         return;
       }
 
@@ -291,7 +308,8 @@ export function createArtifactServer(runtime: ChefRuntime, baseServer: Server, o
       await baseHandler(req, res);
     } catch (error) {
       if (!res.headersSent) {
-        sendJson(res, 500, { error: error instanceof Error ? error.message : String(error) });
+        const status = error instanceof ArtifactLocationError ? error.status : 500;
+        sendJson(res, status, { error: error instanceof Error ? error.message : String(error) });
       } else {
         res.destroy(error instanceof Error ? error : new Error(String(error)));
       }
