@@ -143,9 +143,21 @@ function resumesHeartbeat(event: UiRuntimeEvent): boolean {
   return status === "planning" || status === "active" || status === "verifying";
 }
 
+function taskIdForEvent(event: UiRuntimeEvent): string | undefined {
+  return event.taskId ?? stringValue(objectPayload(event), "taskId");
+}
+
 function recoveryClearsBlocker(recovery: UiRuntimeEvent, blocker: UiRuntimeEvent): boolean {
-  if (recovery.type !== "approval.resolved") return true;
-  return blocker.type === "approval.requested" && recovery.source.id === blocker.source.id;
+  if (blocker.type === "approval.requested") {
+    return recovery.type === "approval.resolved" && recovery.source.id === blocker.source.id;
+  }
+  if (blocker.type === "task.failed" || blocker.type === "task.blocked" || blocker.type === "task.cancelled") {
+    const blockedTaskId = taskIdForEvent(blocker);
+    return blockedTaskId !== undefined
+      && taskIdForEvent(recovery) === blockedTaskId
+      && (recovery.type === "task.assigned" || recovery.type === "task.running");
+  }
+  return recovery.type !== "approval.resolved";
 }
 
 export function deriveMissionHomeState(input: {
@@ -372,11 +384,14 @@ export function deriveMissionHeartbeat(
   if (latestTimeout && (!latestMissionStatus || latestTimeout.seq >= latestMissionStatus.seq)) return null;
 
   const latestBlocker = scoped.find(blocksHeartbeat);
-  const latestRecovery = scoped.find(resumesHeartbeat);
-  if (
-    latestBlocker
-    && (!latestRecovery || latestBlocker.seq > latestRecovery.seq || !recoveryClearsBlocker(latestRecovery, latestBlocker))
-  ) return null;
+  if (latestBlocker) {
+    const clearingRecovery = scoped.find((event) =>
+      event.seq > latestBlocker.seq
+      && resumesHeartbeat(event)
+      && recoveryClearsBlocker(event, latestBlocker)
+    );
+    if (!clearingRecovery) return null;
+  }
 
   const status = latestMissionStatus ? stringValue(objectPayload(latestMissionStatus), "status") : undefined;
   const label = status === "active" && allOwnedTasksCompleted(scoped, ownedTaskIds)
