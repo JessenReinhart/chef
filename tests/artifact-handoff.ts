@@ -249,6 +249,49 @@ const booleanUnverified = artifactHandoff({
 });
 assert.equal(booleanUnverified.verification, null, "verified=false must never be rendered as successful verification");
 
+const negativeLegacyVerificationValues = ["false", "failed", "failure", "no", "not verified", "unverified"];
+for (const verified of negativeLegacyVerificationValues) {
+  const handoff = artifactHandoff({
+    uri: "file:///tmp/chef-project/todo-app.mjs",
+    metadata: { verified },
+  });
+  assert.equal(
+    handoff.verification,
+    null,
+    `legacy verified=${JSON.stringify(verified)} must not appear beneath the positive Verified heading`,
+  );
+}
+
+const negativeStatusWithVerifier = artifactHandoff({
+  uri: "file:///tmp/chef-project/todo-app.mjs",
+  metadata: { verified: false, verifiedBy: "golden-path" },
+});
+assert.equal(
+  negativeStatusWithVerifier.verification,
+  null,
+  "an explicit negative verification status must outrank verifier attribution instead of becoming false success",
+);
+
+const positiveLegacyVerificationText = artifactHandoff({
+  uri: "file:///tmp/chef-project/todo-app.mjs",
+  metadata: { verified: "Smoke test passed" },
+});
+assert.equal(
+  positiveLegacyVerificationText.verification,
+  "Smoke test passed",
+  "useful legacy string verification evidence should remain backward compatible",
+);
+
+const explicitVerificationOverridesLegacyNegative = artifactHandoff({
+  uri: "file:///tmp/chef-project/todo-app.mjs",
+  metadata: { verification: "Smoke test passed", verified: false },
+});
+assert.equal(
+  explicitVerificationOverridesLegacyNegative.verification,
+  "Smoke test passed",
+  "the explicit verification field remains the authoritative positive handoff when supplied",
+);
+
 const attributedBooleanVerification = artifactHandoff({
   uri: "file:///tmp/chef-project/todo-app.mjs",
   metadata: { verified: true, verifiedBy: "golden-path" },
