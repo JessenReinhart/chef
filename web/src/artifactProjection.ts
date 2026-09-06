@@ -128,8 +128,14 @@ export function shouldOfferArtifactShelf(
   return workspaceArtifactCount > visibleResultCount;
 }
 
-export function missingResultHandoffNotice(missionStatus: string | undefined, resultCount: number): string | null {
+export function missingResultHandoffNotice(
+  missionStatus: string | undefined,
+  resultCount: number,
+  resultSnapshotAvailable = true,
+): string | null {
   if (!missionStatus) return null;
+  // Zero results are only a durable claim when the artifact snapshot itself is known.
+  if (!resultSnapshotAvailable && resultCount === 0) return null;
   if (missionStatus === "completed" && resultCount === 0) {
     return "Work is marked complete, but Chef did not publish a durable result for this Mission.";
   }
@@ -157,6 +163,7 @@ export function missionResultHandoffProjection<T extends MissionLinkedArtifact>(
   selectedThreadId: string | null | undefined,
   missionStatus: string | undefined,
   limit = MAX_VISIBLE_RESULTS,
+  resultSnapshotAvailable = true,
 ): MissionResultHandoffProjection<T> {
   if (!scope || !selectedThreadId || scope.threadId !== selectedThreadId) {
     return { artifacts: [], notice: null };
@@ -164,7 +171,7 @@ export function missionResultHandoffProjection<T extends MissionLinkedArtifact>(
   const visibleArtifacts = visibleArtifactsForCurrentMission(artifacts, scope, limit);
   return {
     artifacts: visibleArtifacts,
-    notice: missingResultHandoffNotice(missionStatus, visibleArtifacts.length),
+    notice: missingResultHandoffNotice(missionStatus, visibleArtifacts.length, resultSnapshotAvailable),
   };
 }
 
