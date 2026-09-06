@@ -1,4 +1,4 @@
-import { acceptedMissionSubmissionForThread } from "./missionSubmissionFeedback";
+import { acceptedMissionSubmissionForThread } from "./missionSubmissionFeedback.ts";
 import type { UiThread } from "./threadApi";
 import type { ChatMessage, MissionStatus, UiMission } from "./types";
 
