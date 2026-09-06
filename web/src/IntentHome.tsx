@@ -45,6 +45,7 @@ import {
 } from "./missionProgress";
 import { createMissionProgressRefreshQueue } from "./missionProgressStream";
 import { canRetryMissionTask } from "./missionRecovery";
+import { partitionMissionTasksForSimpleMode } from "./missionTaskVisibility";
 import type { ChatMessage, UiMission, UiRuntimeEvent, UiTask } from "./types";
 
 type Approval = { id: string; reason: string; taskId: string; status: string };
@@ -265,15 +266,12 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
       .filter((task): task is UiTask => task !== undefined);
   }, [latestMission, tasks]);
 
-  const earlierMissionTasks = useMemo(
-    () => currentMissionTasks.slice(0, -6),
+  const missionTaskVisibility = useMemo(
+    () => partitionMissionTasksForSimpleMode(currentMissionTasks, 6),
     [currentMissionTasks],
   );
-
-  const missionTasks = useMemo(
-    () => currentMissionTasks.slice(-6),
-    [currentMissionTasks],
-  );
+  const earlierMissionTasks = missionTaskVisibility.earlier;
+  const missionTasks = missionTaskVisibility.visible;
 
   const currentMissionTaskIds = useMemo(
     () => new Set(latestMission?.taskIds ?? []),
