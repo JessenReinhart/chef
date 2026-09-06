@@ -38,7 +38,7 @@ function fileUriLocation(uri: string): string | null {
     const url = new URL(uri);
     let pathname = decodeURIComponent(url.pathname);
     if (/^\/[A-Za-z]:\//.test(pathname)) pathname = pathname.slice(1);
-    if (url.host) return pathname ? `//${url.host}${pathname}` : null;
+    if (url.host) return pathname && pathname !== "/" ? `//${url.host}${pathname}` : null;
     return pathname || null;
   } catch {
     return null;
