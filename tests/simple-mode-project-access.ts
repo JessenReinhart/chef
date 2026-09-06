@@ -1,6 +1,7 @@
 import { strict as assert } from "node:assert";
 import {
   confirmPickedProject,
+  createSingleFlightProjectSelection,
   projectSelectionSummary,
   sameSelectedProjectPath,
   waitForSelectedProject,
@@ -90,11 +91,7 @@ const activated = await waitForSelectedProject(
   4,
 );
 assert.equal(activated.path, "/home/alice/todo-app");
-assert.deepEqual(
-  observed,
-  ["/home/alice/old-project", "/home/alice/todo-app"],
-  "a stale old-runtime response must not be accepted as successful project selection",
-);
+assert.deepEqual(observed, ["/home/alice/old-project", "/home/alice/todo-app"]);
 
 let cancelledLoadCalls = 0;
 const cancelled = await confirmPickedProject(
@@ -105,8 +102,8 @@ const cancelled = await confirmPickedProject(
   },
   async () => {},
 );
-assert.equal(cancelled, null, "cancelling the native picker must not start a handoff or reload path");
-assert.equal(cancelledLoadCalls, 0, "cancelled selection must not poll project ownership");
+assert.equal(cancelled, null);
+assert.equal(cancelledLoadCalls, 0);
 
 const handoffResponses: Array<{ name: string; path: string } | Error> = [
   new Error("runtime restarting"),
@@ -125,11 +122,7 @@ const confirmed = await confirmPickedProject(
   4,
 );
 assert.equal(confirmed?.name, "Todo-App");
-assert.equal(
-  confirmed?.path,
-  "C:\\Dev\\Todo-App\\",
-  "picker completion must wait through restart/stale runtime evidence until the requested Windows project is authoritative",
-);
+assert.equal(confirmed?.path, "C:\\Dev\\Todo-App\\");
 
 await assert.rejects(
   () => waitForSelectedProject(
@@ -139,7 +132,54 @@ await assert.rejects(
     2,
   ),
   /selected project did not become active/,
-  "selection timeout must fail visibly instead of reloading the wrong workspace",
 );
 
-console.log("simple-mode-project-access: ok — project selection stays truthful through Linux/Windows handoffs and waits for the requested runtime");
+const singleFlight = createSingleFlightProjectSelection();
+let releaseFirst!: () => void;
+const firstPending = new Promise<void>((resolve) => { releaseFirst = resolve; });
+let actionCalls = 0;
+const first = singleFlight(async () => {
+  actionCalls += 1;
+  await firstPending;
+  return "first";
+});
+const duplicate = await singleFlight(async () => {
+  actionCalls += 1;
+  return "duplicate";
+});
+assert.deepEqual(duplicate, { accepted: false });
+assert.equal(actionCalls, 1);
+releaseFirst();
+assert.deepEqual(await first, { accepted: true, value: "first" });
+
+const afterSuccess = await singleFlight(async () => {
+  actionCalls += 1;
+  return "after-success";
+});
+assert.deepEqual(afterSuccess, { accepted: true, value: "after-success" });
+
+await assert.rejects(
+  () => singleFlight(async () => {
+    actionCalls += 1;
+    throw new Error("selection failed");
+  }),
+  /selection failed/,
+);
+const afterFailure = await singleFlight(async () => {
+  actionCalls += 1;
+  return "after-failure";
+});
+assert.deepEqual(afterFailure, { accepted: true, value: "after-failure" });
+
+const afterCancellation = await singleFlight(async () => {
+  actionCalls += 1;
+  return null;
+});
+assert.deepEqual(afterCancellation, { accepted: true, value: null });
+const afterCancellationRetry = await singleFlight(async () => {
+  actionCalls += 1;
+  return "after-cancel";
+});
+assert.deepEqual(afterCancellationRetry, { accepted: true, value: "after-cancel" });
+
+console.log("simple-mode-project-access: ok — project selection stays truthful through Linux/Windows handoffs and serializes reopen ownership");
