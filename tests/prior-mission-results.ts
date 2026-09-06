@@ -1,4 +1,5 @@
 import { strict as assert } from "node:assert";
+import { terminalMissionSummaryIsCurrent } from "../web/src/missionOutcomeSummary.ts";
 import { priorMissionResults } from "../web/src/priorMissionResults.ts";
 import type { ChatMessage, UiMission } from "../web/src/types.ts";
 
@@ -32,5 +33,45 @@ const longResult = priorMissionResults(
   "thread-a",
 )[0]?.result;
 assert.ok(longResult && longResult.length <= 220 && longResult.endsWith("…"));
+
+const completedMission: UiMission = {
+  id: "mission-completed",
+  goal: "Create a simple todo app",
+  status: "completed",
+  taskIds: [],
+  metadata: { threadId: "thread-summary" },
+  createdAt: 100,
+  updatedAt: 200,
+};
+assert.equal(
+  terminalMissionSummaryIsCurrent([completedMission], completedMission.id),
+  true,
+  "a terminal Mission may publish its summary while it remains the foreground Mission",
+);
+assert.equal(
+  terminalMissionSummaryIsCurrent([completedMission], completedMission.id, "mission-next"),
+  false,
+  "a newly accepted Mission must suppress the old terminal summary before authoritative state catches up",
+);
+
+const newerActiveMission: UiMission = {
+  id: "mission-next",
+  goal: "Add filtering to the todo app",
+  status: "active",
+  taskIds: [],
+  metadata: { threadId: "thread-summary" },
+  createdAt: 300,
+  updatedAt: 300,
+};
+assert.equal(
+  terminalMissionSummaryIsCurrent([completedMission, newerActiveMission], completedMission.id),
+  false,
+  "an older terminal summary must become stale as soon as a newer active Mission owns the foreground",
+);
+assert.equal(
+  terminalMissionSummaryIsCurrent([completedMission, newerActiveMission], newerActiveMission.id),
+  false,
+  "active Missions must never be mistaken for terminal summary owners",
+);
 
 console.log("prior Mission result projection behavior passed");
