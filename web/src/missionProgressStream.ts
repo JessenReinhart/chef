@@ -9,10 +9,13 @@ export const MISSION_PROGRESS_EVENT_TYPES = [
   "session.*",
 ] as const;
 
+export const MISSION_PROGRESS_HEARTBEAT_REFRESH_MS = 5_000;
+
 export type MissionProgressEventStream = Pick<EventSource, "onmessage" | "close">;
 export type MissionProgressEventStreamFactory = (url: string) => MissionProgressEventStream;
 export type MissionProgressRefresh = () => void | Promise<void>;
 export type MissionProgressRefreshQueue = { trigger: () => void; close: () => void };
+export type MissionProgressRefreshTimer = (onTick: () => void) => () => void;
 type MissionProgressSelectionEvents = Pick<EventTarget, "addEventListener" | "removeEventListener">;
 
 /** Keep human-readable Mission progress subscribed to every runtime family it can translate. */
@@ -93,6 +96,11 @@ const subscribeSharedMissionProgressRefresh = createMissionProgressRefreshHub(
   (url) => new EventSource(url),
 );
 
+function scheduleMissionProgressHeartbeatRefresh(onTick: () => void): () => void {
+  const interval = globalThis.setInterval(onTick, MISSION_PROGRESS_HEARTBEAT_REFRESH_MS);
+  return () => globalThis.clearInterval(interval);
+}
+
 /**
  * Refresh a mounted progress projection whenever authoritative runtime evidence arrives.
  * Browser consumers share one ref-counted EventSource, while each projection keeps its
@@ -108,15 +116,17 @@ export function subscribeMissionProgressRefresh(
 }
 
 /**
- * Treat the live stream and Simple Mode foreground Thread changes as invalidation signals,
- * then rebuild UI state from an authoritative projection. Every source shares one
- * coalesced queue so a slow read cannot multiply requests while ownership is changing.
+ * Treat the live stream, Simple Mode foreground Thread changes, and elapsed heartbeat
+ * time as invalidation signals, then rebuild UI state from an authoritative projection.
+ * Every source shares one coalesced queue so a slow read cannot multiply requests while
+ * ownership is changing or runtime output is quiet.
  */
 export function subscribeMissionProgressProjection<T>(
   loadProjection: () => Promise<T>,
   applyProjection: (projection: T) => void,
   createStream?: MissionProgressEventStreamFactory,
   selectionEvents: MissionProgressSelectionEvents | null = typeof window !== "undefined" ? window : null,
+  scheduleRefresh: MissionProgressRefreshTimer = scheduleMissionProgressHeartbeatRefresh,
 ): () => void {
   let closed = false;
   const projectionRefresh = createMissionProgressRefreshQueue(async () => {
@@ -124,6 +134,7 @@ export function subscribeMissionProgressProjection<T>(
     if (!closed) applyProjection(projection);
   });
   const unsubscribe = subscribeMissionProgressRefresh(projectionRefresh.trigger, createStream);
+  const cancelHeartbeatRefresh = scheduleRefresh(projectionRefresh.trigger);
   const handleThreadSelection = () => projectionRefresh.trigger();
   selectionEvents?.addEventListener(SELECTED_THREAD_EVENT, handleThreadSelection);
 
@@ -132,6 +143,7 @@ export function subscribeMissionProgressProjection<T>(
   return () => {
     closed = true;
     selectionEvents?.removeEventListener(SELECTED_THREAD_EVENT, handleThreadSelection);
+    cancelHeartbeatRefresh();
     projectionRefresh.close();
     unsubscribe();
   };
