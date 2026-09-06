@@ -57,23 +57,43 @@ const progressStream = {
   onmessage: null as ((event: MessageEvent) => void) | null,
   close() { progressStreamClosed = true; },
 };
+let heartbeatTick: (() => void) | null = null;
+let heartbeatTimerCancelled = false;
+let heartbeatVisible = false;
 const unsubscribeProgress = subscribeMissionProgressProjection(
   async () => {
     progressLoads += 1;
     activeProgressLoads += 1;
     maxConcurrentProgressLoads = Math.max(maxConcurrentProgressLoads, activeProgressLoads);
     if (progressLoads === 1) await firstProgressLoad;
-    const projection = loadSelectedThreadId() === "thread-progress-active" ? ["Chef is working in Thread A"] : [];
+    const projection = loadSelectedThreadId() === "thread-progress-active"
+      ? ["Chef is working in Thread A"]
+      : heartbeatVisible
+        ? ["Chef is still working"]
+        : [];
     activeProgressLoads -= 1;
     return projection;
   },
   (projection) => { projectedProgress = projection; },
   () => progressStream,
   eventTarget,
+  (onTick) => {
+    heartbeatTick = onTick;
+    return () => {
+      heartbeatTimerCancelled = true;
+      heartbeatTick = null;
+    };
+  },
 );
 await Promise.resolve();
 assert.equal(progressLoads, 1, "mounting Mission progress should start one authoritative projection load");
 
+heartbeatTick?.();
+assert.equal(
+  progressLoads,
+  1,
+  "a heartbeat refresh during a slow progress read must queue rather than start a concurrent state load",
+);
 saveSelectedThreadId("thread-progress-quiet");
 assert.equal(
   progressLoads,
@@ -82,19 +102,32 @@ assert.equal(
 );
 releaseFirstProgressLoad();
 await new Promise<void>((resolve) => setImmediate(resolve));
-assert.equal(progressLoads, 2, "the Thread-selection invalidation must run one trailing authoritative refresh after the slow load settles");
-assert.equal(maxConcurrentProgressLoads, 1, "runtime and Thread-selection invalidations must share the same single-flight refresh budget");
+assert.equal(progressLoads, 2, "timer and Thread-selection invalidations must coalesce into one trailing authoritative refresh after the slow load settles");
+assert.equal(maxConcurrentProgressLoads, 1, "runtime, timer, and Thread-selection invalidations must share the same single-flight refresh budget");
 assert.deepEqual(
   projectedProgress,
   [],
   "switching to a quiet Thread must clear the previous Thread's progress without waiting for runtime SSE",
 );
 
+heartbeatVisible = true;
+heartbeatTick?.();
+await new Promise<void>((resolve) => setImmediate(resolve));
+assert.equal(progressLoads, 3, "silent elapsed heartbeat time must trigger a fresh authoritative projection even when SSE emits nothing");
+assert.deepEqual(
+  projectedProgress,
+  ["Chef is still working"],
+  "the periodic invalidation must let a time-based heartbeat become visible without unrelated runtime events",
+);
+
+const tickBeforeUnmount = heartbeatTick;
 unsubscribeProgress();
+assert.equal(heartbeatTimerCancelled, true, "unmounting Mission progress must cancel its periodic heartbeat refresh");
 const loadsBeforeUnmountedSelection = progressLoads;
+tickBeforeUnmount?.();
 saveSelectedThreadId("thread-progress-after-unmount");
 await new Promise<void>((resolve) => setImmediate(resolve));
-assert.equal(progressLoads, loadsBeforeUnmountedSelection, "unmounted Mission progress must stop reacting to Thread-selection changes");
+assert.equal(progressLoads, loadsBeforeUnmountedSelection, "unmounted Mission progress must stop reacting to timer and Thread-selection changes");
 assert.equal(progressStreamClosed, true, "unmounting Mission progress must release its runtime stream alongside the selection listener");
 
 // IntentHome waits for Thread history before committing its refreshed Mission,
@@ -137,4 +170,4 @@ assert.deepEqual(
 );
 globalThis.fetch = originalFetch;
 
-console.log("thread-selection-event: ok — Simple Mode selection changes immediately re-scope Mission progress and stale history without disturbing Power Mode");
+console.log("thread-selection-event: ok — Simple Mode selection and silent-heartbeat invalidations re-scope Mission progress through one bounded refresh queue without disturbing Power Mode");
