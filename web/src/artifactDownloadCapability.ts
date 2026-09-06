@@ -27,6 +27,7 @@ export async function probeArtifactDownloadability(
   try {
     const response = await requester(`/api/artifacts/${encodeURIComponent(artifactId)}/download`, {
       method: "HEAD",
+      headers: { "x-chef-artifact-version": String(artifactVersion) },
     });
     if (response.ok) {
       return response.headers.get("x-chef-artifact-version") === String(artifactVersion) ? true : null;
