@@ -172,6 +172,7 @@ async function defaultPickDirectory(): Promise<string | null> {
 }
 
 function startsProjectWork(method: string | undefined, pathname: string): boolean {
+  if (method === "PATCH" && /^\/api\/missions\/[^/]+$/.test(pathname)) return true;
   if (method !== "POST") return false;
   return pathname === "/api/chat"
     || pathname === "/api/threads"
