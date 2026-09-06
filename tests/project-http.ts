@@ -146,6 +146,11 @@ try {
   const blockedApprovalAcceptBody = await blockedApprovalAccept.json() as { error?: string };
   assert.match(blockedApprovalAcceptBody.error ?? "", /selected project is active/i);
 
+  const blockedLegacyApprovalAccept = await fetch(`${origin}/api/approvals/approval-old/accept`, { method: "POST" });
+  assert.equal(blockedLegacyApprovalAccept.status, 409, "legacy approval acceptance must not resume old-project work after another project is selected");
+  const blockedLegacyApprovalAcceptBody = await blockedLegacyApprovalAccept.json() as { error?: string };
+  assert.match(blockedLegacyApprovalAcceptBody.error ?? "", /selected project is active/i);
+
   const blockedMissionResume = await fetch(`${origin}/api/missions/mission-old/resume`, { method: "POST" });
   assert.equal(blockedMissionResume.status, 409, "Resume must not restart an old-project Mission after another project is selected");
   const blockedMissionResumeBody = await blockedMissionResume.json() as { error?: string };
@@ -153,6 +158,11 @@ try {
 
   const allowedApprovalReject = await fetch(`${origin}/api/tools/approvals/approval-old/reject`, { method: "POST" });
   assert.equal(allowedApprovalReject.status, 418, "Reject does not resume work and should remain available during project handoff");
+  assert.equal(
+    (await fetch(`${origin}/api/approvals/approval-old/reject`, { method: "POST" })).status,
+    418,
+    "legacy approval rejection does not resume work and should remain available during project handoff",
+  );
   assert.equal(
     (await fetch(`${origin}/api/missions/mission-old/pause`, { method: "POST" })).status,
     418,
@@ -201,6 +211,11 @@ try {
       "approval acceptance must stay gated while the old runtime is attempting the selected-project handoff",
     );
     assert.equal(
+      (await fetch(`${failingOrigin}/api/approvals/approval-old/accept`, { method: "POST" })).status,
+      409,
+      "legacy approval acceptance must stay gated while the old runtime is attempting the selected-project handoff",
+    );
+    assert.equal(
       (await fetch(`${failingOrigin}/api/missions/mission-old/resume`, { method: "POST" })).status,
       409,
       "Mission resume must stay gated while the old runtime is attempting the selected-project handoff",
@@ -220,6 +235,11 @@ try {
       (await fetch(`${failingOrigin}/api/tools/approvals/approval-old/accept`, { method: "POST" })).status,
       418,
       "a failed runtime reopen must release approval acceptance back to the old runtime for recovery",
+    );
+    assert.equal(
+      (await fetch(`${failingOrigin}/api/approvals/approval-old/accept`, { method: "POST" })).status,
+      418,
+      "a failed runtime reopen must release legacy approval acceptance back to the old runtime for recovery",
     );
     assert.equal(
       (await fetch(`${failingOrigin}/api/missions/mission-old/resume`, { method: "POST" })).status,
