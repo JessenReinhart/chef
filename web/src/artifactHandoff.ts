@@ -72,6 +72,32 @@ export function canRevealArtifact(artifact: ArtifactHandoffInput): boolean {
   return location !== null && isLocalLocation(location);
 }
 
+const NEGATIVE_LEGACY_VERIFICATION = new Set([
+  "false",
+  "failed",
+  "failure",
+  "no",
+  "not verified",
+  "unverified",
+]);
+
+function verificationText(metadata: Record<string, unknown>): string | null {
+  const explicitVerification = firstText(metadata, ["verification"]);
+  if (explicitVerification) return explicitVerification;
+
+  const legacyVerified = metadata.verified;
+  if (legacyVerified === false) return null;
+  if (typeof legacyVerified === "string") {
+    const value = legacyVerified.trim();
+    if (!value || NEGATIVE_LEGACY_VERIFICATION.has(value.toLowerCase())) return null;
+    return value;
+  }
+
+  const verifiedBy = firstText(metadata, ["verifiedBy"]);
+  if (verifiedBy) return `Verified by ${verifiedBy}`;
+  return legacyVerified === true ? "Verified" : null;
+}
+
 /**
  * Project result metadata is optional, so Simple Mode degrades gracefully while
  * still exposing a named durable result and location when richer handoff data
@@ -82,15 +108,11 @@ export function artifactHandoff(artifact: ArtifactHandoffInput): ArtifactHandoff
   const fileLocation = fileUriLocation(artifact.uri);
   const durableLocation = explicitLocation ?? fileLocation;
   const runCommand = firstText(artifact.metadata, ["run", "runCommand", "command"]);
-  const verifiedBy = firstText(artifact.metadata, ["verifiedBy"]);
-  const explicitVerification = firstText(artifact.metadata, ["verification", "verified"]);
-  const verification = explicitVerification
-    ?? (verifiedBy ? `Verified by ${verifiedBy}` : artifact.metadata.verified === true ? "Verified" : null);
 
   return {
     summary: summaryText(artifact, durableLocation),
     location: durableLocation,
     runCommand,
-    verification,
+    verification: verificationText(artifact.metadata),
   };
 }
