@@ -15,7 +15,7 @@ import type {
   RuntimeEvent,
   WorkspaceId,
 } from "../src/core/types.ts";
-import { summarizeMissionProgressForMission } from "../web/src/missionProgress.ts";
+import { deriveMissionHeartbeat, summarizeMissionProgressForMission } from "../web/src/missionProgress.ts";
 import { createMissionProgressRefreshQueue } from "../web/src/missionProgressStream.ts";
 import type { UiRuntimeEvent } from "../web/src/types.ts";
 
@@ -95,6 +95,74 @@ async function waitForEvent(
   assert.fail(`${label} was not observable within ${timeoutMs} ms`);
 }
 
+function approvalHeartbeatEvents(decision?: "accepted" | "rejected"): UiRuntimeEvent[] {
+  const missionId = "mission-approval-heartbeat";
+  const taskId = "task-approval-heartbeat";
+  const events: UiRuntimeEvent[] = [
+    {
+      id: "mission-active",
+      seq: 1,
+      timestamp: 1_000,
+      source: { type: "mission", id: missionId },
+      type: "mission.status",
+      payload: { status: "active" },
+      correlationId: missionId,
+    },
+    {
+      id: "approval-requested",
+      seq: 2,
+      timestamp: 2_000,
+      source: { type: "approval", id: "approval-heartbeat" },
+      type: "approval.requested",
+      payload: { reason: "Allow the worker to continue" },
+      taskId,
+      correlationId: missionId,
+    },
+  ];
+  if (decision) {
+    events.push({
+      id: `approval-${decision}`,
+      seq: 3,
+      timestamp: 3_000,
+      source: { type: "approval", id: "approval-heartbeat" },
+      type: "approval.resolved",
+      payload: { decision },
+      taskId,
+      correlationId: missionId,
+    });
+  }
+  return events;
+}
+
+function proveApprovalHeartbeatRecovery(): void {
+  const missionId = "mission-approval-heartbeat";
+  const taskId = "task-approval-heartbeat";
+
+  assert.equal(
+    deriveMissionHeartbeat(approvalHeartbeatEvents(), missionId, [taskId], 12_000),
+    null,
+    "an unresolved approval must keep the Mission heartbeat suppressed",
+  );
+
+  const accepted = deriveMissionHeartbeat(
+    approvalHeartbeatEvents("accepted"),
+    missionId,
+    [taskId],
+    13_000,
+  );
+  assert.equal(
+    accepted?.text,
+    "Chef is still working. Last runtime activity was 10 seconds ago.",
+    "an accepted approval must resume the truthful working heartbeat even before another worker event arrives",
+  );
+
+  assert.equal(
+    deriveMissionHeartbeat(approvalHeartbeatEvents("rejected"), missionId, [taskId], 13_000),
+    null,
+    "a rejected approval must remain a terminal heartbeat blocker",
+  );
+}
+
 async function proveSharedRefreshBudget(): Promise<void> {
   let refreshCount = 0;
   let releaseFirstRefresh!: () => void;
@@ -132,6 +200,7 @@ async function proveSharedRefreshBudget(): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  proveApprovalHeartbeatRecovery();
   await proveSharedRefreshBudget();
 
   const projectDir = await mkdtemp(join(tmpdir(), "chef-heartbeat-runtime-"));
