@@ -195,7 +195,7 @@ function proveTaskScopedHeartbeatRecovery(): void {
     correlationId: missionId,
   };
 
-  for (const blockerType of ["task.failed", "task.blocked", "task.cancelled"] as const) {
+  for (const blockerType of ["task.failed", "task.blocked", "task.cancelled", "session.crashed"] as const) {
     const blocked: UiRuntimeEvent[] = [
       active,
       {
@@ -256,6 +256,62 @@ function proveTaskScopedHeartbeatRecovery(): void {
       `${blockerType} must clear after the same task really retries even when newer unrelated activity exists`,
     );
   }
+
+  const twoFailures: UiRuntimeEvent[] = [
+    active,
+    {
+      id: "task-a-failed",
+      seq: 2,
+      timestamp: 2_000,
+      source: { type: "task", id: taskA },
+      type: "task.failed",
+      payload: { error: "task A failed" },
+      taskId: taskA,
+      correlationId: missionId,
+    },
+    {
+      id: "task-b-failed",
+      seq: 3,
+      timestamp: 3_000,
+      source: { type: "task", id: taskB },
+      type: "task.failed",
+      payload: { error: "task B failed" },
+      taskId: taskB,
+      correlationId: missionId,
+    },
+    {
+      id: "task-b-retry",
+      seq: 4,
+      timestamp: 4_000,
+      source: { type: "task", id: taskB },
+      type: "task.running",
+      payload: { retryCount: 1 },
+      taskId: taskB,
+      correlationId: missionId,
+    },
+  ];
+
+  assert.equal(
+    deriveMissionHeartbeat(twoFailures, missionId, [taskA, taskB], 14_000),
+    null,
+    "recovering the newest failed task must not hide an older parallel task that is still unresolved",
+  );
+
+  twoFailures.push({
+    id: "task-a-retry-after-b",
+    seq: 5,
+    timestamp: 5_000,
+    source: { type: "task", id: taskA },
+    type: "task.running",
+    payload: { retryCount: 1 },
+    taskId: taskA,
+    correlationId: missionId,
+  });
+  assert.equal(
+    deriveMissionHeartbeat(twoFailures, missionId, [taskA, taskB], 15_000)?.text,
+    "Chef is still working. Last runtime activity was 10 seconds ago.",
+    "heartbeat may resume only after every parallel task blocker has a compatible recovery",
+  );
 }
 
 async function proveSharedRefreshBudget(): Promise<void> {
