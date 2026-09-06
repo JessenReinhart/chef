@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "./api";
 import { projectMissionActivity, selectLivingWorkspaceMission, type MissionActivitySnapshot } from "./missionActivityProjection";
+import { terminalMissionSummaryIsCurrent } from "./missionOutcomeSummary";
+import { acceptedMissionSubmissionForThread } from "./missionSubmissionFeedback";
 import { createMissionProgressRefreshQueue, subscribeMissionProgressRefresh } from "./missionProgressStream";
 import { loadSelectedThreadId, SELECTED_THREAD_EVENT, threadMessages } from "./threadApi";
 import { latestAssistantThreadNote, loadForSelectedThread, missionsForSelectedThread } from "./threadSelection";
@@ -46,6 +48,25 @@ export function MissionActivityRail() {
       setResultNote(null);
       const messages = await threadMessages(selectedThreadId);
       if (loadSelectedThreadId() !== selectedThreadId) return;
+
+      // The message load can be slow enough for a new Mission to start in the
+      // same Thread. Reconfirm authoritative state before publishing the old
+      // Mission's completion summary so terminal history cannot bleed into
+      // current planning/working activity. The accepted-Mission handoff closes
+      // the smaller window where the durable 202 exists before /api/state sees it.
+      const confirmationLoad = await loadForSelectedThread(
+        selectedThreadId,
+        loadSelectedThreadId,
+        () => api.stateRaw(),
+      );
+      if (!confirmationLoad.current) return;
+      const currentMissions = missionsForSelectedThread(
+        confirmationLoad.value.missions ?? [],
+        selectedThreadId,
+      );
+      const acceptedMissionId = acceptedMissionSubmissionForThread(selectedThreadId)?.missionId ?? null;
+      if (!terminalMissionSummaryIsCurrent(currentMissions, mission.id, acceptedMissionId)) return;
+
       const summary = latestAssistantThreadNote(messages, mission.id)?.content ?? null;
       setResultNote(summary);
       if (summary) summarizedMissionKey.current = missionKey;
