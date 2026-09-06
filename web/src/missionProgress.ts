@@ -151,7 +151,12 @@ function recoveryClearsBlocker(recovery: UiRuntimeEvent, blocker: UiRuntimeEvent
   if (blocker.type === "approval.requested") {
     return recovery.type === "approval.resolved" && recovery.source.id === blocker.source.id;
   }
-  if (blocker.type === "task.failed" || blocker.type === "task.blocked" || blocker.type === "task.cancelled") {
+  if (
+    blocker.type === "task.failed"
+    || blocker.type === "task.blocked"
+    || blocker.type === "task.cancelled"
+    || blocker.type === "session.crashed"
+  ) {
     const blockedTaskId = taskIdForEvent(blocker);
     return blockedTaskId !== undefined
       && taskIdForEvent(recovery) === blockedTaskId
@@ -383,12 +388,11 @@ export function deriveMissionHeartbeat(
   const latestTimeout = scoped.find((event) => event.type === "mission.timeout");
   if (latestTimeout && (!latestMissionStatus || latestTimeout.seq >= latestMissionStatus.seq)) return null;
 
-  const latestBlocker = scoped.find(blocksHeartbeat);
-  if (latestBlocker) {
+  for (const blocker of scoped.filter(blocksHeartbeat)) {
     const clearingRecovery = scoped.find((event) =>
-      event.seq > latestBlocker.seq
+      event.seq > blocker.seq
       && resumesHeartbeat(event)
-      && recoveryClearsBlocker(event, latestBlocker)
+      && recoveryClearsBlocker(event, blocker)
     );
     if (!clearingRecovery) return null;
   }
