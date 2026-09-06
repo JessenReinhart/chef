@@ -161,6 +161,24 @@ function proveApprovalHeartbeatRecovery(): void {
     null,
     "a rejected approval must remain a terminal heartbeat blocker",
   );
+
+  const overlappingApprovals = approvalHeartbeatEvents("accepted");
+  overlappingApprovals[2] = { ...overlappingApprovals[2]!, seq: 4, timestamp: 4_000 };
+  overlappingApprovals.splice(2, 0, {
+    id: "other-approval-requested",
+    seq: 3,
+    timestamp: 3_000,
+    source: { type: "approval", id: "other-approval" },
+    type: "approval.requested",
+    payload: { reason: "A second independent approval is still pending" },
+    taskId,
+    correlationId: missionId,
+  });
+  assert.equal(
+    deriveMissionHeartbeat(overlappingApprovals, missionId, [taskId], 14_000),
+    null,
+    "accepting one approval must not clear another approval that is still pending",
+  );
 }
 
 async function proveSharedRefreshBudget(): Promise<void> {
