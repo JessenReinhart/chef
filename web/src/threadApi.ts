@@ -54,6 +54,10 @@ function simpleModeActionOwner(): { threadId: string | null; guarded: boolean } 
   };
 }
 
+function simpleModeSubmissionGuardEnabled(): boolean {
+  return typeof localStorage !== "undefined" && localStorage.getItem("chef:view-mode") !== "power";
+}
+
 function assertThreadActionStillOwnsForeground(
   owner: { threadId: string | null; guarded: boolean },
   transferredThreadId: string | null = null,
@@ -116,7 +120,7 @@ export async function threadMessages(threadId: string): Promise<ChatMessage[]> {
 }
 
 export async function sendThreadMessage(threadId: string, message: string): Promise<ThreadChatResult> {
-  if (localStorage.getItem("chef:view-mode") !== "power" && acceptedMissionSubmissionForThread(threadId)) {
+  if (simpleModeSubmissionGuardEnabled() && acceptedMissionSubmissionForThread(threadId)) {
     throw new Error("Chef is already starting accepted work in this Thread. Wait for it to appear before starting another request.");
   }
 
@@ -126,7 +130,7 @@ export async function sendThreadMessage(threadId: string, message: string): Prom
       method: "POST",
       body: JSON.stringify({ message }),
     });
-    if (localStorage.getItem("chef:view-mode") !== "power" && response.data.ok && response.data.accepted && response.data.missionId) {
+    if (simpleModeSubmissionGuardEnabled() && response.data.ok && response.data.accepted && response.data.missionId) {
       rememberAcceptedMissionSubmission(missionSubmissionAccepted(threadId, response.data.missionId, message));
     }
     return response.data;
