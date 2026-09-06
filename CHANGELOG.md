@@ -2,6 +2,9 @@
 
 ## 2026-09-06
 
+- **Old completion summaries no longer bleed into follow-up work (#438):** When a new Mission starts in the same Thread while the previous summary is still loading, Simple Mode now rechecks Mission ownership and suppresses the old summary instead of presenting finished work beneath current planning or execution.
+- **Accepted approvals resume truthful progress feedback (#436):** Once the approval that paused a Mission is accepted, Simple Mode can resume its working heartbeat while rejected approvals and other still-pending approval gates continue to block that feedback.
+- **Save copy now follows the result location Chef actually shows (#434):** Results with an internal artifact URI but a safe project-local file location can now expose Save copy for that displayed file, while remote, missing, directory, and out-of-project results remain protected by the existing server checks.
 - **Accepted Thread-chat work now stays single-flight per conversation (#421):** After Simple Mode receives an accepted Mission for a Thread, repeated submissions in that same Thread are blocked until authoritative state shows that exact Mission. Other Threads remain independently usable.
 - **Active and blocked workers stay visible in crowded Missions (#423):** When a Mission has more than four tasks, Simple Mode now keeps blocked, running, and queued work visible ahead of older completed steps instead of looking falsely finished or stalled.
 - **Negative verification metadata no longer appears as successful verification (#425):** Simple Mode now suppresses legacy verification values such as `failed`, `false`, or `not verified` from the positive Verified handoff while preserving real positive verification evidence.
