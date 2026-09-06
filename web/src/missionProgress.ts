@@ -162,7 +162,7 @@ function recoveryClearsBlocker(recovery: UiRuntimeEvent, blocker: UiRuntimeEvent
       && taskIdForEvent(recovery) === blockedTaskId
       && (recovery.type === "task.assigned" || recovery.type === "task.running");
   }
-  return recovery.type !== "approval.resolved";
+  return resumesHeartbeat(recovery) && recovery.type !== "approval.resolved";
 }
 
 export function deriveMissionHomeState(input: {
@@ -390,9 +390,7 @@ export function deriveMissionHeartbeat(
 
   for (const blocker of scoped.filter(blocksHeartbeat)) {
     const clearingRecovery = scoped.find((event) =>
-      event.seq > blocker.seq
-      && resumesHeartbeat(event)
-      && recoveryClearsBlocker(event, blocker)
+      event.seq > blocker.seq && recoveryClearsBlocker(event, blocker)
     );
     if (!clearingRecovery) return null;
   }
