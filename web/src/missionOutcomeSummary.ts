@@ -1,5 +1,5 @@
-import { selectLivingWorkspaceMission } from "./missionActivityProjection";
-import type { UiMission } from "./types";
+import { selectLivingWorkspaceMission } from "./missionActivityProjection.ts";
+import type { UiMission } from "./types.ts";
 
 const TERMINAL_MISSION_STATUSES = new Set<UiMission["status"]>(["completed", "failed", "cancelled"]);
 
