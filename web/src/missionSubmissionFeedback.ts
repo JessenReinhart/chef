@@ -9,7 +9,7 @@ export type MissionSubmissionFailureRecovery = MissionSubmissionFeedback & {
 };
 
 export type AcceptedMissionSubmission = {
-  threadId: string;
+  threadId: string | null;
   missionId: string;
   goal: string;
 };
@@ -19,10 +19,15 @@ export const MISSION_SUBMISSION_FAILURE_EVENT = "chef:mission-submission-failure
 const SELECTED_THREAD_KEY = "chef:selected-thread";
 const NEW_THREAD_SUBMISSION_KEY = "__chef-new-thread-submission__";
 const pendingMissionSubmissionFailures = new Map<string, MissionSubmissionFailureRecovery>();
+const pendingAcceptedMissionSubmissions = new Map<string, AcceptedMissionSubmission>();
+
+function submissionOwnerKey(threadId: string | null): string {
+  return threadId ?? NEW_THREAD_SUBMISSION_KEY;
+}
 
 function currentSubmissionOwnerKey(): string | null {
   if (typeof localStorage === "undefined") return null;
-  return localStorage.getItem(SELECTED_THREAD_KEY) ?? NEW_THREAD_SUBMISSION_KEY;
+  return submissionOwnerKey(localStorage.getItem(SELECTED_THREAD_KEY));
 }
 
 export function missionSubmissionAcknowledgement(): string {
@@ -40,11 +45,34 @@ export function missionSubmissionStarted(submittedText: string): MissionSubmissi
 }
 
 export function missionSubmissionAccepted(
-  threadId: string,
+  threadId: string | null,
   missionId: string,
   submittedText: string,
 ): AcceptedMissionSubmission {
   return { threadId, missionId, goal: submittedText };
+}
+
+export function rememberAcceptedMissionSubmission(accepted: AcceptedMissionSubmission): void {
+  pendingAcceptedMissionSubmissions.set(submissionOwnerKey(accepted.threadId), accepted);
+}
+
+export function acceptedMissionSubmissionForThread(threadId: string | null): AcceptedMissionSubmission | null {
+  return pendingAcceptedMissionSubmissions.get(submissionOwnerKey(threadId)) ?? null;
+}
+
+export function observeAcceptedMissionSubmission(
+  threadId: string | null,
+  missions: Array<{ id: string }>,
+): void {
+  const ownerKey = submissionOwnerKey(threadId);
+  const accepted = pendingAcceptedMissionSubmissions.get(ownerKey);
+  if (accepted && missions.some((mission) => mission.id === accepted.missionId)) {
+    pendingAcceptedMissionSubmissions.delete(ownerKey);
+  }
+}
+
+export function clearAcceptedMissionSubmission(threadId: string | null): void {
+  pendingAcceptedMissionSubmissions.delete(submissionOwnerKey(threadId));
 }
 
 export function acceptedMissionSubmissionIsPending(
