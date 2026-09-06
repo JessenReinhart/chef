@@ -215,6 +215,7 @@ try {
 
   assert.equal(await requestDownloadCapability(canonicalTodo.id, canonicalTodo.version), true, "a real project-contained file must advertise Save copy through the production HTTP boundary");
   assert.equal(await requestDownloadCapability(canonicalTodoDirectory.id, canonicalTodoDirectory.version), false, "a runnable app directory must not advertise a file-only Save copy action");
+  assert.equal(await requestDownloadCapability(local.id, local.version), true, "an opaque/internal artifact URI with an explicit project-contained result file must still resolve Save copy capability");
   assert.equal(await requestDownloadCapability(explicitLocationOverFileUri.id, explicitLocationOverFileUri.version), true, "the displayed explicit file location must drive Save copy capability even when the artifact URI points somewhere else");
   assert.equal(await requestDownloadCapability(unsupported.id, unsupported.version), false, "an artifact without a local backing file must not become downloadable");
   assert.equal(await requestDownloadCapability(remote.id, remote.version), false, "a remote result must not become a local download capability");

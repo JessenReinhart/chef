@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { loadSelectedThreadId, SELECTED_THREAD_EVENT } from "./threadApi";
-import { artifactHandoff, canRevealArtifact, isFileUriArtifact } from "./artifactHandoff";
+import { artifactHandoff, canRevealArtifact } from "./artifactHandoff";
 import {
   missionResultHandoffProjection,
   shouldRetainMissionArtifactsOnRefreshFailure,
@@ -168,7 +168,7 @@ export function HomeMissionArtifacts() {
   useEffect(() => {
     const stopWatching: Array<() => void> = [];
     for (const artifact of missionArtifacts) {
-      if (!isFileUriArtifact(artifact)) continue;
+      if (!canRevealArtifact(artifact)) continue;
       const actionKey = artifactActionStateKey(artifact.id, artifact.version);
       stopWatching.push(watchArtifactDownloadability(artifact.id, artifact.version, (downloadable) => {
         setDownloadCapability((current) => current[actionKey] === downloadable
