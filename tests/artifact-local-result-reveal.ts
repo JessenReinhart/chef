@@ -14,9 +14,11 @@ const projectDir = await mkdtemp(join(tmpdir(), "chef-local-result-reveal-"));
 const outsideDir = await mkdtemp(join(tmpdir(), "chef-local-result-reveal-outside-"));
 const resultDir = join(projectDir, "todo-app");
 const resultPath = join(resultDir, "index.html");
+const internalWorkerPath = join(resultDir, "internal-worker-output.html");
 const outsidePath = join(outsideDir, "outside.html");
 await mkdir(resultDir, { recursive: true });
 await writeFile(resultPath, "<main>todo</main>");
+await writeFile(internalWorkerPath, "<main>internal worker output</main>");
 await writeFile(outsidePath, "outside");
 
 assert.equal(artifactRevealLabel("idle"), "Show result", "result reveal must describe the user outcome rather than a platform-specific folder action");
@@ -95,6 +97,11 @@ const requestReveal = async (artifactId: string) => {
   return { status: response.status, body: await response.json() as { error?: string } };
 };
 
+const requestDownload = async (artifactId: string) => {
+  const response = await fetch(`${serverBaseUrl()}/api/artifacts/${encodeURIComponent(artifactId)}/download`);
+  return { status: response.status, text: await response.text() };
+};
+
 const requestDownloadCapability = (artifactId: string, artifactVersion: number) => probeArtifactDownloadability(
   artifactId,
   artifactVersion,
@@ -134,6 +141,15 @@ try {
     type: "code",
     name: "todo-app",
     uri: "sideband://worker/result",
+    createdBy: "todo-builder",
+    metadata: { resultLocation: "todo-app/index.html" },
+  });
+  const explicitLocationOverFileUri = runtime.repository.insertArtifact({
+    id: "explicit-location-over-file-uri",
+    workspaceId: runtime.workspaceId,
+    type: "result",
+    name: "todo-app-visible-result",
+    uri: pathToFileURL(internalWorkerPath).href,
     createdBy: "todo-builder",
     metadata: { resultLocation: "todo-app/index.html" },
   });
@@ -186,6 +202,7 @@ try {
   assert.equal(canRevealArtifact(canonicalTodo), true, "the canonical todo result must advertise Show result in Simple Mode");
   assert.equal(canRevealArtifact(canonicalTodoDirectory), true, "the canonical todo app root must remain revealable even though it is not a downloadable file");
   assert.equal(canRevealArtifact(local), true, "Simple Mode should keep reveal available for an explicit durable local result path");
+  assert.equal(canRevealArtifact(explicitLocationOverFileUri), true, "a file-backed result with explicit durable output metadata must remain revealable");
   assert.equal(canRevealArtifact(mixedCaseMetadataLocation), true, "mixed-case file URI metadata must remain revealable for opaque artifacts");
   assert.equal(canRevealArtifact(mixedCaseFileUri), true, "file URI schemes are case-insensitive and must remain revealable");
   assert.equal(isFileUriArtifact(mixedCaseFileUri), true, "mixed-case file URIs must remain file-backed for download/save actions");
@@ -198,6 +215,7 @@ try {
 
   assert.equal(await requestDownloadCapability(canonicalTodo.id, canonicalTodo.version), true, "a real project-contained file must advertise Save copy through the production HTTP boundary");
   assert.equal(await requestDownloadCapability(canonicalTodoDirectory.id, canonicalTodoDirectory.version), false, "a runnable app directory must not advertise a file-only Save copy action");
+  assert.equal(await requestDownloadCapability(explicitLocationOverFileUri.id, explicitLocationOverFileUri.version), true, "the displayed explicit file location must drive Save copy capability even when the artifact URI points somewhere else");
   assert.equal(await requestDownloadCapability(unsupported.id, unsupported.version), false, "an artifact without a local backing file must not become downloadable");
   assert.equal(await requestDownloadCapability(remote.id, remote.version), false, "a remote result must not become a local download capability");
   assert.equal(await requestDownloadCapability(outside.id, outside.version), false, "an out-of-project path must fail closed during capability checks");
@@ -224,6 +242,17 @@ try {
   assert.equal(mixedCaseReveal.status, 200);
   assert.deepEqual(revealed.at(-1), { path: resultPath, isDirectory: false }, "server must accept equivalent mixed-case artifact file URI schemes");
 
+  const explicitLocationReveal = await requestReveal(explicitLocationOverFileUri.id);
+  assert.equal(explicitLocationReveal.status, 200, "Show result must accept the artifact whose visible result location differs from its file URI");
+  assert.deepEqual(
+    revealed.at(-1),
+    { path: resultPath, isDirectory: false },
+    "Show result must open the explicit resultLocation that Simple Mode displays, not the internal file URI fallback",
+  );
+  const explicitLocationDownload = await requestDownload(explicitLocationOverFileUri.id);
+  assert.equal(explicitLocationDownload.status, 200, "Save copy must remain available for the displayed explicit result file");
+  assert.equal(explicitLocationDownload.text, "<main>todo</main>", "Save copy must stream the same explicit resultLocation shown to the user, not the internal URI file");
+
   const unsupportedReveal = await requestReveal(unsupported.id);
   assert.equal(unsupportedReveal.status, 409);
   assert.match(unsupportedReveal.body.error ?? "", /not backed by a local file/);
@@ -231,14 +260,14 @@ try {
   const remoteReveal = await requestReveal(remote.id);
   assert.equal(remoteReveal.status, 409);
   assert.match(remoteReveal.body.error ?? "", /not a local file/);
-  assert.equal(revealed.length, 5, "remote result locations must never be reinterpreted as project-relative filesystem paths");
+  assert.equal(revealed.length, 6, "remote result locations must never be reinterpreted as project-relative filesystem paths");
 
   const outsideReveal = await requestReveal(outside.id);
   assert.equal(outsideReveal.status, 403);
   assert.match(outsideReveal.body.error ?? "", /outside the project root/);
-  assert.equal(revealed.length, 5, "rejected result locations must never invoke the OS opener");
+  assert.equal(revealed.length, 6, "rejected result locations must never invoke the OS opener");
 
-  console.log("artifact-local-result-reveal: ok — Simple Mode exposes truthful file/download capabilities while keeping local result reveal safe, retryable, version-bound, and project-scoped");
+  console.log("artifact-local-result-reveal: ok — Simple Mode opens and saves the same explicit durable result location it displays while keeping project-scoped safety intact");
 } finally {
   if (server.listening) await new Promise<void>((resolve) => server.close(() => resolve()));
   await runtime.close();

@@ -68,13 +68,7 @@ function fileUriPath(value: string): string | null {
   }
 }
 
-function artifactPathCandidate(runtime: ChefRuntime, artifact: { uri: string; metadata: Record<string, unknown> }): string {
-  const uriPath = fileUriPath(artifact.uri);
-  if (uriPath) return uriPath;
-
-  const persistedLocation = metadataLocation(artifact.metadata);
-  if (!persistedLocation) throw new ArtifactLocationError(409, "artifact is not backed by a local file");
-
+function localPathCandidate(runtime: ChefRuntime, persistedLocation: string): string {
   const isWindowsDrivePath = /^[A-Za-z]:[\\/]/.test(persistedLocation);
   const hasUriScheme = /^[A-Za-z][A-Za-z0-9+.-]*:/.test(persistedLocation);
   if (hasUriScheme && !hasFileScheme(persistedLocation) && !isWindowsDrivePath) {
@@ -87,6 +81,19 @@ function artifactPathCandidate(runtime: ChefRuntime, artifact: { uri: string; me
   }
   const path = persistedFileUriPath ?? persistedLocation;
   return isAbsolute(path) ? path : resolve(runtime.projectDir, path);
+}
+
+function artifactPathCandidate(runtime: ChefRuntime, artifact: { uri: string; metadata: Record<string, unknown> }): string {
+  // Keep server actions aligned with Simple Mode's visible handoff: explicit
+  // durable result metadata is authoritative, and the artifact URI is only a
+  // fallback when no explicit result location was published.
+  const persistedLocation = metadataLocation(artifact.metadata);
+  if (persistedLocation) return localPathCandidate(runtime, persistedLocation);
+
+  const uriPath = fileUriPath(artifact.uri);
+  if (uriPath) return uriPath;
+
+  throw new ArtifactLocationError(409, "artifact is not backed by a local file");
 }
 
 async function resolveArtifactLocation(runtime: ChefRuntime, artifactId: string) {
@@ -206,9 +213,9 @@ async function sendArtifactDownload(runtime: ChefRuntime, artifactId: string, re
  * explicit local reveal action for project-contained file-backed results.
  *
  * The reveal endpoint accepts only a durable artifact id. It resolves and
- * realpaths the stored URI or persisted result location server-side before
- * invoking a shell-free OS opener, so browser input can never choose an
- * arbitrary filesystem path or command.
+ * realpaths the stored explicit result location (or file URI fallback)
+ * server-side before invoking a shell-free OS opener, so browser input can
+ * never choose an arbitrary filesystem path or command.
  */
 export function createArtifactServer(runtime: ChefRuntime, baseServer: Server, options: ArtifactServerOptions = {}): Server {
   const baseHandler = baseServer.listeners("request")[0] as RequestHandler | undefined;

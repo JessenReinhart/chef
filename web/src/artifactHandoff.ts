@@ -67,9 +67,9 @@ function isLocalLocation(location: string): boolean {
 }
 
 export function canRevealArtifact(artifact: ArtifactHandoffInput): boolean {
-  if (isFileUriArtifact(artifact)) return true;
-  const location = firstText(artifact.metadata, ["resultLocation", "path", "location"]);
-  return location !== null && isLocalLocation(location);
+  const explicitLocation = firstText(artifact.metadata, ["resultLocation", "path", "location"]);
+  if (explicitLocation !== null) return isLocalLocation(explicitLocation);
+  return isFileUriArtifact(artifact);
 }
 
 const NEGATIVE_LEGACY_VERIFICATION = new Set([
