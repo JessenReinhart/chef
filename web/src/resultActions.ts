@@ -26,14 +26,21 @@ type DownloadRequester = (
   init?: RequestInit,
 ) => Promise<Pick<Response, "ok" | "json" | "blob" | "headers">>;
 
-type ArtifactRevealer = (artifactId: string, artifactVersion: number) => Promise<ArtifactRevealResult>;
-type ArtifactDownloader = (artifactId: string, artifactVersion: number) => Promise<ArtifactDownloadResult>;
-type VersionOwnedArtifactRevealer = (artifactId: string, artifactVersion: number, actionKey?: string) => Promise<ArtifactRevealResult>;
-type VersionOwnedArtifactDownloader = (artifactId: string, artifactVersion: number, actionKey?: string) => Promise<ArtifactDownloadResult>;
+type ArtifactRevealer = (artifactId: string, artifactVersion?: number) => Promise<ArtifactRevealResult>;
+type ArtifactDownloader = (artifactId: string, artifactVersion?: number) => Promise<ArtifactDownloadResult>;
+type VersionOwnedArtifactRevealer = (artifactId: string, actionKey?: string) => Promise<ArtifactRevealResult>;
+type VersionOwnedArtifactDownloader = (artifactId: string, actionKey?: string) => Promise<ArtifactDownloadResult>;
 
 /** Scope transient UI feedback to the exact durable result version it describes. */
 export function artifactActionStateKey(artifactId: string, version: number): string {
   return `${artifactId}:${version}`;
+}
+
+function artifactVersionFromActionKey(artifactId: string, actionKey: string): number | undefined {
+  const prefix = `${artifactId}:`;
+  if (!actionKey.startsWith(prefix)) return undefined;
+  const version = Number(actionKey.slice(prefix.length));
+  return Number.isInteger(version) && version > 0 ? version : undefined;
 }
 
 function artifactActionHeaders(action: string, artifactVersion?: number): Record<string, string> {
@@ -164,21 +171,22 @@ export async function downloadArtifact(
 }
 
 /**
- * Keep one reveal action in flight per exact result version.
+ * Keep one reveal action in flight per exact result action owner.
  *
- * Opening a desktop file manager is an external side effect. Repeated clicks
- * for the same artifact version share that request, while a newly published
- * version gets its own version-bound action instead of inheriting an older
- * version's pending side effect.
+ * Simple Mode's action owner is the durable `artifact.id:version` key. Repeated
+ * clicks for that exact version share one external side effect, while the
+ * version encoded by the owner is also sent to the server so a stale card can
+ * never reveal a newer result under the old card.
  */
 export function createSingleFlightArtifactRevealer(
   revealer: ArtifactRevealer = (artifactId, artifactVersion) => revealArtifact(artifactId, fetch, artifactVersion),
 ): VersionOwnedArtifactRevealer {
   const inFlight = new Map<string, Promise<ArtifactRevealResult>>();
 
-  return (artifactId, artifactVersion, actionKey = artifactActionStateKey(artifactId, artifactVersion)) => {
+  return (artifactId, actionKey = artifactId) => {
     const existing = inFlight.get(actionKey);
     if (existing) return existing;
+    const artifactVersion = artifactVersionFromActionKey(artifactId, actionKey);
 
     const request = Promise.resolve()
       .then(() => revealer(artifactId, artifactVersion))
@@ -190,15 +198,16 @@ export function createSingleFlightArtifactRevealer(
   };
 }
 
-/** Keep one Save copy request in flight per exact result version while allowing later retries. */
+/** Keep one Save copy request in flight per exact result action owner while allowing later retries. */
 export function createSingleFlightArtifactDownloader(
   downloader: ArtifactDownloader = (artifactId, artifactVersion) => downloadArtifact(artifactId, fetch, artifactVersion),
 ): VersionOwnedArtifactDownloader {
   const inFlight = new Map<string, Promise<ArtifactDownloadResult>>();
 
-  return (artifactId, artifactVersion, actionKey = artifactActionStateKey(artifactId, artifactVersion)) => {
+  return (artifactId, actionKey = artifactId) => {
     const existing = inFlight.get(actionKey);
     if (existing) return existing;
+    const artifactVersion = artifactVersionFromActionKey(artifactId, actionKey);
 
     const request = Promise.resolve()
       .then(() => downloader(artifactId, artifactVersion))
