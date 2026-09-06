@@ -9,6 +9,7 @@ import {
   clearMissionSubmissionFailure,
   missionSubmissionAccepted,
   missionSubmissionAcknowledgement,
+  missionSubmissionComposerState,
   missionSubmissionFailureRecovery,
   missionSubmissionStarted,
   missionSubmissionSucceeded,
@@ -64,6 +65,22 @@ assert.equal(
   acceptedMissionSubmissionIsPending(accepted, "thread-a", [{ id: "mission-a" }]),
   false,
   "the provisional starting state must retire as soon as authoritative Mission state contains the accepted Mission",
+);
+
+assert.deepEqual(
+  missionSubmissionComposerState({ submitting: true, acceptedPending: false }),
+  { locked: true, label: "Starting…" },
+  "the visible composer must lock while the submission request itself is still in flight",
+);
+assert.deepEqual(
+  missionSubmissionComposerState({ submitting: false, acceptedPending: true }),
+  { locked: true, label: "Starting…" },
+  "the visible composer must stay locked after 202 acknowledgement while the exact accepted Mission is still absent from authoritative state",
+);
+assert.deepEqual(
+  missionSubmissionComposerState({ submitting: false, acceptedPending: false }),
+  { locked: false, label: "Give to Chef" },
+  "the composer must visibly unlock once no request or accepted-Mission handoff is pending",
 );
 
 rememberAcceptedMissionSubmission(accepted);
