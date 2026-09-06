@@ -10,7 +10,7 @@ assert.equal(canRetryMissionTask({
   taskStatus: "failed",
   blockedByApproval: false,
   readOnly: false,
-}), true, "failed Mission work must remain retryable");
+}), false, "terminal failed Mission history must recover through a new Mission, not an orphan Task retry");
 
 assert.equal(canRetryMissionTask({
   missionStatus: "blocked",
@@ -170,4 +170,4 @@ assert.ok(
 );
 repo.close();
 
-console.log("simple-mode-recovery-actions: ok — Retry follows Mission lifecycle, approvals, read-only state, and clears stale Task failure state durably");
+console.log("simple-mode-recovery-actions: ok — terminal Mission history stays final while retryable runtime Tasks keep durable recovery semantics");
