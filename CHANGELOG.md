@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-09-06
+
+- **Accepted Simple Mode submissions stay single-flight until state catches up (#417):** After Chef immediately acknowledges accepted work, the owning Thread now stays protected from duplicate submissions until authoritative state contains that exact Mission. Other Threads remain independently usable.
+- **Mission progress now follows the foreground Thread immediately (#419):** Switching to another Thread now refreshes human-readable planning, working, verifying, and heartbeat progress through the same bounded refresh queue, so a quiet Thread cannot inherit stale progress from the previous conversation.
+- **Artifact outages no longer create false missing-result claims (#415):** If the artifact snapshot is temporarily unavailable, Chef now treats result absence as unknown instead of claiming a completed or failed Mission published nothing, while cached results from the same Mission remain visible.
+- **Rapid project-open actions can no longer race each other (#413):** Project reopen and picker handoffs are now single-flight before the first asynchronous API boundary, so duplicate activation cannot start competing workspace switches and the gate still releases after success, cancellation, or failure.
+
 ## 2026-09-04
 
 - **Completed Mission results stay visible through background refresh failures (#372):** Simple Mode now keeps the completed result location, run instructions, verification details, and result actions visible if a later best-effort result refresh fails, while switching Threads or starting newer work still clears stale handoff state normally.
