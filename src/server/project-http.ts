@@ -176,7 +176,8 @@ function startsProjectWork(method: string | undefined, pathname: string): boolea
   return pathname === "/api/chat"
     || pathname === "/api/threads"
     || /^\/api\/threads\/[^/]+\/chat$/.test(pathname)
-    || /^\/api\/nodes\/[^/]+\/retry$/.test(pathname);
+    || /^\/api\/nodes\/[^/]+\/retry$/.test(pathname)
+    || /^\/api\/tools\/approvals\/[^/]+\/accept$/.test(pathname);
 }
 
 export function createProjectServer(runtime: ChefRuntime, baseServer: Server, options: ProjectServerOptions): Server {
