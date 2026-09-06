@@ -29,6 +29,7 @@ import {
   acceptedMissionSubmissionIsPending,
   clearMissionSubmissionFailure,
   missionSubmissionAccepted,
+  missionSubmissionComposerState,
   missionSubmissionFailureRecovery,
   missionSubmissionStarted,
   missionSubmissionSucceeded,
@@ -217,7 +218,11 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
     selectedThreadId,
     missions,
   );
-  const showingStartingState = submitting || acceptedSubmissionPending;
+  const composerSubmission = missionSubmissionComposerState({
+    submitting,
+    acceptedPending: acceptedSubmissionPending,
+  });
+  const showingStartingState = composerSubmission.locked;
 
   const threadMissionSummaries = useMemo(() => {
     const summaries = new Map<string, { count: number; active: boolean }>();
@@ -475,7 +480,7 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
   async function submitGoal() {
     const message = goal.trim();
     const initialSubmissionKey = threadSubmissionKey(selectedThreadId);
-    if (!message || submittingThreadKeys.has(initialSubmissionKey)) return;
+    if (!message || composerSubmission.locked || submittingThreadKeys.has(initialSubmissionKey)) return;
     if (archivedThreadSelected) {
       setActionError("Archived Threads are read-only. Select an active Thread or start a new Thread to continue working.");
       return;
@@ -767,7 +772,7 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
               value={goal}
               onChange={(event) => setGoal(event.target.value)}
               onKeyDown={(event) => {
-                if (!archivedThreadSelected && event.key === "Enter" && !event.shiftKey) {
+                if (!archivedThreadSelected && !composerSubmission.locked && event.key === "Enter" && !event.shiftKey) {
                   event.preventDefault();
                   void submitGoal();
                 }
@@ -784,10 +789,10 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
               </span>
               <button
                 type="submit"
-                disabled={archivedThreadSelected || !goal.trim() || submitting}
+                disabled={archivedThreadSelected || !goal.trim() || composerSubmission.locked}
                 className="rounded-xl bg-red-400 px-4 py-2 text-xs font-bold text-[#190708] transition hover:bg-red-300 disabled:cursor-not-allowed disabled:opacity-30"
               >
-                {archivedThreadSelected ? "Read only" : submitting ? "Starting…" : "Give to Chef"}
+                {archivedThreadSelected ? "Read only" : composerSubmission.label}
               </button>
             </div>
           </form>

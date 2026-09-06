@@ -14,6 +14,11 @@ export type AcceptedMissionSubmission = {
   goal: string;
 };
 
+export type MissionSubmissionComposerState = {
+  locked: boolean;
+  label: "Starting…" | "Give to Chef";
+};
+
 export const MISSION_SUBMISSION_FAILURE_EVENT = "chef:mission-submission-failure";
 
 const SELECTED_THREAD_KEY = "chef:selected-thread";
@@ -85,6 +90,17 @@ export function acceptedMissionSubmissionIsPending(
       && accepted.threadId === selectedThreadId
       && !missions.some((mission) => mission.id === accepted.missionId),
   );
+}
+
+export function missionSubmissionComposerState(input: {
+  submitting: boolean;
+  acceptedPending: boolean;
+}): MissionSubmissionComposerState {
+  const locked = input.submitting || input.acceptedPending;
+  return {
+    locked,
+    label: locked ? "Starting…" : "Give to Chef",
+  };
 }
 
 export function missionSubmissionSucceeded(report?: string | null): MissionSubmissionFeedback {
