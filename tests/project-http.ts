@@ -141,6 +141,14 @@ try {
   const blockedRetryBody = await blockedRetry.json() as { error?: string };
   assert.match(blockedRetryBody.error ?? "", /selected project is active/i);
 
+  const blockedApprovalAccept = await fetch(`${origin}/api/tools/approvals/approval-old/accept`, { method: "POST" });
+  assert.equal(blockedApprovalAccept.status, 409, "Allow must not resume old-project work after another project is selected");
+  const blockedApprovalAcceptBody = await blockedApprovalAccept.json() as { error?: string };
+  assert.match(blockedApprovalAcceptBody.error ?? "", /selected project is active/i);
+
+  const allowedApprovalReject = await fetch(`${origin}/api/tools/approvals/approval-old/reject`, { method: "POST" });
+  assert.equal(allowedApprovalReject.status, 418, "Reject does not resume work and should remain available during project handoff");
+
   await new Promise((resolve) => setTimeout(resolve, 150));
   assert.equal(opened, next);
   assert.deepEqual(openAttempts, [next], "duplicate/conflicting project selections must schedule exactly one runtime handoff");
@@ -172,6 +180,11 @@ try {
       409,
       "Retry must stay gated while the old runtime is attempting the selected-project handoff",
     );
+    assert.equal(
+      (await fetch(`${failingOrigin}/api/tools/approvals/approval-old/accept`, { method: "POST" })).status,
+      409,
+      "approval acceptance must stay gated while the old runtime is attempting the selected-project handoff",
+    );
     await new Promise((resolve) => setTimeout(resolve, 150));
     assert.equal(
       (await fetch(`${failingOrigin}/api/threads`, { method: "POST" })).status,
@@ -182,6 +195,11 @@ try {
       (await fetch(`${failingOrigin}/api/nodes/task-old/retry`, { method: "POST" })).status,
       418,
       "a failed runtime reopen must release Retry back to the old runtime instead of leaving recovery deadlocked",
+    );
+    assert.equal(
+      (await fetch(`${failingOrigin}/api/tools/approvals/approval-old/accept`, { method: "POST" })).status,
+      418,
+      "a failed runtime reopen must release approval acceptance back to the old runtime for recovery",
     );
     const recoverySelection = await fetch(`${failingOrigin}/api/project/open`, {
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: other }),
