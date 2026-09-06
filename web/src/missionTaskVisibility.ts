@@ -1,4 +1,4 @@
-import type { UiTask } from "./types";
+import type { UiTask } from "./types.ts";
 
 export interface MissionTaskVisibility {
   visible: UiTask[];
