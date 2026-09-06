@@ -162,6 +162,23 @@ function proveApprovalHeartbeatRecovery(): void {
     "a rejected approval must remain a terminal heartbeat blocker",
   );
 
+  const rejectedThenRetried = approvalHeartbeatEvents("rejected");
+  rejectedThenRetried.push({
+    id: "retry-after-rejection",
+    seq: 4,
+    timestamp: 4_000,
+    source: { type: "task", id: taskId },
+    type: "task.running",
+    payload: { retryCount: 1 },
+    taskId,
+    correlationId: missionId,
+  });
+  assert.equal(
+    deriveMissionHeartbeat(rejectedThenRetried, missionId, [taskId], 14_000)?.text,
+    "Chef is still working. Last runtime activity was 10 seconds ago.",
+    "a rejected approval must close its request while a later real task retry restores heartbeat feedback",
+  );
+
   const overlappingApprovals = approvalHeartbeatEvents("accepted");
   overlappingApprovals[2] = { ...overlappingApprovals[2]!, seq: 4, timestamp: 4_000 };
   overlappingApprovals.splice(2, 0, {
