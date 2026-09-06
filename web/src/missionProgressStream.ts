@@ -1,3 +1,5 @@
+import { SELECTED_THREAD_EVENT } from "./threadApi.ts";
+
 export const MISSION_PROGRESS_EVENT_TYPES = [
   "mission.*",
   "orchestrator.*",
@@ -11,6 +13,7 @@ export type MissionProgressEventStream = Pick<EventSource, "onmessage" | "close"
 export type MissionProgressEventStreamFactory = (url: string) => MissionProgressEventStream;
 export type MissionProgressRefresh = () => void | Promise<void>;
 export type MissionProgressRefreshQueue = { trigger: () => void; close: () => void };
+type MissionProgressSelectionEvents = Pick<EventTarget, "addEventListener" | "removeEventListener">;
 
 /** Keep human-readable Mission progress subscribed to every runtime family it can translate. */
 export function missionProgressEventStreamUrl(): string {
@@ -105,14 +108,15 @@ export function subscribeMissionProgressRefresh(
 }
 
 /**
- * Treat the live stream as an invalidation signal, then rebuild UI state from an
- * authoritative projection. The initial read and live invalidations share one
- * coalesced queue so a slower mount-time read cannot overwrite newer progress.
+ * Treat the live stream and Simple Mode foreground Thread changes as invalidation signals,
+ * then rebuild UI state from an authoritative projection. Every source shares one
+ * coalesced queue so a slow read cannot multiply requests while ownership is changing.
  */
 export function subscribeMissionProgressProjection<T>(
   loadProjection: () => Promise<T>,
   applyProjection: (projection: T) => void,
   createStream?: MissionProgressEventStreamFactory,
+  selectionEvents: MissionProgressSelectionEvents | null = typeof window !== "undefined" ? window : null,
 ): () => void {
   let closed = false;
   const projectionRefresh = createMissionProgressRefreshQueue(async () => {
@@ -120,11 +124,14 @@ export function subscribeMissionProgressProjection<T>(
     if (!closed) applyProjection(projection);
   });
   const unsubscribe = subscribeMissionProgressRefresh(projectionRefresh.trigger, createStream);
+  const handleThreadSelection = () => projectionRefresh.trigger();
+  selectionEvents?.addEventListener(SELECTED_THREAD_EVENT, handleThreadSelection);
 
   projectionRefresh.trigger();
 
   return () => {
     closed = true;
+    selectionEvents?.removeEventListener(SELECTED_THREAD_EVENT, handleThreadSelection);
     projectionRefresh.close();
     unsubscribe();
   };

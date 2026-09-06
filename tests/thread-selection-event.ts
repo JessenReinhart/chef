@@ -22,6 +22,7 @@ Object.defineProperty(globalThis, "localStorage", { configurable: true, value: s
 Object.defineProperty(globalThis, "window", { configurable: true, value: eventTarget });
 
 const { SELECTED_THREAD_EVENT, loadSelectedThreadId, saveSelectedThreadId, threadMessages } = await import("../web/src/threadApi.ts");
+const { subscribeMissionProgressProjection } = await import("../web/src/missionProgressStream.ts");
 const observed: Array<string | null> = [];
 eventTarget.addEventListener(SELECTED_THREAD_EVENT, (event) => {
   observed.push((event as CustomEvent<{ threadId: string | null }>).detail.threadId);
@@ -43,6 +44,58 @@ assert.deepEqual(observed, ["thread-a"], "Power Mode must not emit the Simple Mo
 storage.setItem("chef:view-mode", "simple");
 saveSelectedThreadId("thread-c");
 assert.deepEqual(observed, ["thread-a", "thread-c"], "returning to Simple Mode should restore immediate Thread-selection invalidation");
+
+saveSelectedThreadId("thread-progress-active");
+let progressLoads = 0;
+let activeProgressLoads = 0;
+let maxConcurrentProgressLoads = 0;
+let projectedProgress: string[] = ["stale progress"];
+let progressStreamClosed = false;
+let releaseFirstProgressLoad!: () => void;
+const firstProgressLoad = new Promise<void>((resolve) => { releaseFirstProgressLoad = resolve; });
+const progressStream = {
+  onmessage: null as ((event: MessageEvent) => void) | null,
+  close() { progressStreamClosed = true; },
+};
+const unsubscribeProgress = subscribeMissionProgressProjection(
+  async () => {
+    progressLoads += 1;
+    activeProgressLoads += 1;
+    maxConcurrentProgressLoads = Math.max(maxConcurrentProgressLoads, activeProgressLoads);
+    if (progressLoads === 1) await firstProgressLoad;
+    const projection = loadSelectedThreadId() === "thread-progress-active" ? ["Chef is working in Thread A"] : [];
+    activeProgressLoads -= 1;
+    return projection;
+  },
+  (projection) => { projectedProgress = projection; },
+  () => progressStream,
+  eventTarget,
+);
+await Promise.resolve();
+assert.equal(progressLoads, 1, "mounting Mission progress should start one authoritative projection load");
+
+saveSelectedThreadId("thread-progress-quiet");
+assert.equal(
+  progressLoads,
+  1,
+  "a Thread switch during a slow progress refresh must queue rather than start a concurrent state load",
+);
+releaseFirstProgressLoad();
+await new Promise<void>((resolve) => setImmediate(resolve));
+assert.equal(progressLoads, 2, "the Thread-selection invalidation must run one trailing authoritative refresh after the slow load settles");
+assert.equal(maxConcurrentProgressLoads, 1, "runtime and Thread-selection invalidations must share the same single-flight refresh budget");
+assert.deepEqual(
+  projectedProgress,
+  [],
+  "switching to a quiet Thread must clear the previous Thread's progress without waiting for runtime SSE",
+);
+
+unsubscribeProgress();
+const loadsBeforeUnmountedSelection = progressLoads;
+saveSelectedThreadId("thread-progress-after-unmount");
+await new Promise<void>((resolve) => setImmediate(resolve));
+assert.equal(progressLoads, loadsBeforeUnmountedSelection, "unmounted Mission progress must stop reacting to Thread-selection changes");
+assert.equal(progressStreamClosed, true, "unmounting Mission progress must release its runtime stream alongside the selection listener");
 
 // IntentHome waits for Thread history before committing its refreshed Mission,
 // Task, event, approval, and message projections. If the foreground Thread
@@ -84,4 +137,4 @@ assert.deepEqual(
 );
 globalThis.fetch = originalFetch;
 
-console.log("thread-selection-event: ok — Simple Mode selection changes invalidate stale refresh/history work immediately without disturbing Power Mode");
+console.log("thread-selection-event: ok — Simple Mode selection changes immediately re-scope Mission progress and stale history without disturbing Power Mode");
