@@ -156,6 +156,15 @@ try {
   const blockedMissionResumeBody = await blockedMissionResume.json() as { error?: string };
   assert.match(blockedMissionResumeBody.error ?? "", /selected project is active/i);
 
+  const blockedMissionRedirect = await fetch(`${origin}/api/missions/mission-old`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ goal: "Use a different implementation approach" }),
+  });
+  assert.equal(blockedMissionRedirect.status, 409, "Redirect must not replan old-project work after another project is selected");
+  const blockedMissionRedirectBody = await blockedMissionRedirect.json() as { error?: string };
+  assert.match(blockedMissionRedirectBody.error ?? "", /selected project is active/i);
+
   const allowedApprovalReject = await fetch(`${origin}/api/tools/approvals/approval-old/reject`, { method: "POST" });
   assert.equal(allowedApprovalReject.status, 418, "Reject does not resume work and should remain available during project handoff");
   assert.equal(
@@ -220,6 +229,15 @@ try {
       409,
       "Mission resume must stay gated while the old runtime is attempting the selected-project handoff",
     );
+    assert.equal(
+      (await fetch(`${failingOrigin}/api/missions/mission-old`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ goal: "Use a different implementation approach" }),
+      })).status,
+      409,
+      "Mission redirect must stay gated while the old runtime is attempting the selected-project handoff",
+    );
     await new Promise((resolve) => setTimeout(resolve, 150));
     assert.equal(
       (await fetch(`${failingOrigin}/api/threads`, { method: "POST" })).status,
@@ -245,6 +263,15 @@ try {
       (await fetch(`${failingOrigin}/api/missions/mission-old/resume`, { method: "POST" })).status,
       418,
       "a failed runtime reopen must release Mission resume back to the old runtime for recovery",
+    );
+    assert.equal(
+      (await fetch(`${failingOrigin}/api/missions/mission-old`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ goal: "Use a different implementation approach" }),
+      })).status,
+      418,
+      "a failed runtime reopen must release Mission redirect back to the old runtime for recovery",
     );
     const recoverySelection = await fetch(`${failingOrigin}/api/project/open`, {
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: other }),
