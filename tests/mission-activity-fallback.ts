@@ -294,6 +294,55 @@ assert.equal(
   "heartbeat wording must remain Working until every authoritative Mission task is durably completed",
 );
 
+const crowdedTasks: UiTask[] = [
+  ...Array.from({ length: 4 }, (_, index): UiTask => ({
+    ...activeTask,
+    id: `task-done-${index + 1}`,
+    title: `Completed step ${index + 1}`,
+    status: "completed",
+  })),
+  {
+    ...activeTask,
+    id: "task-queued-later",
+    title: "Prepare the final check",
+    status: "pending",
+  },
+  {
+    ...activeTask,
+    id: "task-running-later",
+    title: "Build the visible current work",
+    status: "running",
+  },
+  {
+    ...activeTask,
+    id: "task-blocked-later",
+    title: "Recover a blocked dependency",
+    status: "blocked",
+  },
+];
+const crowdedMission: UiMission = {
+  ...activeMission,
+  id: "mission-crowded-workers",
+  taskIds: crowdedTasks.map((task) => task.id),
+};
+const crowdedProjection = projectMissionActivity(
+  { missions: [crowdedMission], tasks: crowdedTasks, events: [] },
+  [],
+  30_000,
+);
+assert.ok(crowdedProjection, "a multi-task Mission must remain understandable when the worker strip is bounded");
+assert.equal(crowdedProjection.workers.length, 4, "Simple Mode must keep the worker strip bounded to four entries");
+assert.deepEqual(
+  crowdedProjection.workers.map((worker) => worker.id),
+  ["task-blocked-later", "task-running-later", "task-queued-later", "task-done-1"],
+  "needs-attention, active, and queued work must remain visible ahead of older completed tasks when the worker strip is truncated",
+);
+assert.equal(
+  crowdedProjection.workers.find((worker) => worker.id === "task-running-later")?.state,
+  "Working",
+  "the actual active worker must not disappear behind four earlier completed tasks",
+);
+
 const redirectedMission: UiMission = {
   ...activeMission,
   id: "mission-redirected",
@@ -399,4 +448,4 @@ assert.equal(
   "the promoted heartbeat must agree with the authoritative current Mission stage even when older events only imply working",
 );
 
-console.log("mission-activity-fallback: ok — planning, attention, recovery result continuity, current-attempt continuity, authoritative verification evidence, and stale-silence heartbeat states remain explicit and stage-consistent in Simple Mode");
+console.log("mission-activity-fallback: ok — planning, attention, recovery result continuity, current-attempt continuity, bounded active-worker visibility, authoritative verification evidence, and stale-silence heartbeat states remain explicit and stage-consistent in Simple Mode");

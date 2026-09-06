@@ -135,6 +135,14 @@ export function workerActivityState(task: UiTask): string {
   return "Queued";
 }
 
+function workerVisibilityPriority(task: UiTask): number {
+  if (task.status === "failed" || task.status === "blocked") return 0;
+  if (task.status === "running" || task.status === "spawning" || task.status === "assigned") return 1;
+  if (task.status === "completed") return 4;
+  if (task.status === "cancelled") return 3;
+  return 2;
+}
+
 export function missionActivityState(mission: UiMission | null): string {
   if (!mission) return "Ready";
   if (mission.status === "completed") return "Done";
@@ -206,8 +214,10 @@ export function projectMissionActivity(
   const workers = [...scoped.ownedTaskIds]
     .map((id) => tasksById.get(id))
     .filter((task): task is UiTask => Boolean(task))
+    .map((task, index) => ({ task, index }))
+    .sort((a, b) => workerVisibilityPriority(a.task) - workerVisibilityPriority(b.task) || a.index - b.index)
     .slice(0, 4)
-    .map((task) => ({
+    .map(({ task }) => ({
       id: task.id,
       name: task.assignedTo ? (harnessNames.get(task.assignedTo) ?? task.assignedTo) : "Chef",
       title: task.title,
