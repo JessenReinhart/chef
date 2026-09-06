@@ -143,6 +143,11 @@ function resumesHeartbeat(event: UiRuntimeEvent): boolean {
   return status === "planning" || status === "active" || status === "verifying";
 }
 
+function recoveryClearsBlocker(recovery: UiRuntimeEvent, blocker: UiRuntimeEvent): boolean {
+  if (recovery.type !== "approval.resolved") return true;
+  return blocker.type === "approval.requested" && recovery.source.id === blocker.source.id;
+}
+
 export function deriveMissionHomeState(input: {
   submitting: boolean;
   needsAttention: boolean;
@@ -368,7 +373,10 @@ export function deriveMissionHeartbeat(
 
   const latestBlocker = scoped.find(blocksHeartbeat);
   const latestRecovery = scoped.find(resumesHeartbeat);
-  if (latestBlocker && (!latestRecovery || latestBlocker.seq > latestRecovery.seq)) return null;
+  if (
+    latestBlocker
+    && (!latestRecovery || latestBlocker.seq > latestRecovery.seq || !recoveryClearsBlocker(latestRecovery, latestBlocker))
+  ) return null;
 
   const status = latestMissionStatus ? stringValue(objectPayload(latestMissionStatus), "status") : undefined;
   const label = status === "active" && allOwnedTasksCompleted(scoped, ownedTaskIds)
