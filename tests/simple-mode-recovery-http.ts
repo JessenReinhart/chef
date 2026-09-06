@@ -8,10 +8,23 @@ const tasks = new Map<string, Task>([
   ["failed-task", {
     id: "failed-task",
     workspaceId: "workspace-a",
-    title: "Retry me",
-    description: "failed work",
+    title: "Recover as new Mission",
+    description: "failed Mission work must remain terminal",
     status: "failed",
     missionId: "failed-mission",
+    dependencies: [],
+    contextRefs: [],
+    priority: 0,
+    retryCount: 0,
+    createdAt: 1,
+    updatedAt: 1,
+  }],
+  ["standalone-failed-task", {
+    id: "standalone-failed-task",
+    workspaceId: "workspace-a",
+    title: "Retry standalone work",
+    description: "runtime-owned failed work",
+    status: "failed",
     dependencies: [],
     contextRefs: [],
     priority: 0,
@@ -107,6 +120,13 @@ const runtime = {
     getApproval(approvalId: string) {
       return approvalId === "approval-pending" ? { id: approvalId, status: "pending" } : null;
     },
+    updateTask(taskId: string, patch: Partial<Task>) {
+      const task = tasks.get(taskId);
+      if (!task) throw new Error(`Task ${taskId} not found`);
+      const updated = { ...task, ...patch } as Task;
+      tasks.set(taskId, updated);
+      return updated;
+    },
   },
   async retryTask(taskId: string) {
     const task = tasks.get(taskId);
@@ -136,17 +156,25 @@ async function post(path: string) {
 try {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
 
-  const success = await post("/api/nodes/failed-task/retry");
+  const failedMission = await post("/api/nodes/failed-task/retry");
+  assert.equal(failedMission.status, 409);
+  assert.match(failedMission.json.error ?? "", /Mission has already failed/i);
+  assert.match(failedMission.json.error ?? "", /new work/i);
+  assert.deepEqual(retryCalls, [], "terminal failed Mission recovery must not dispatch an orphan worker retry");
+  assert.equal(tasks.get("failed-task")?.status, "failed", "failed Mission history must stay terminal");
+  assert.equal(tasks.get("failed-task")?.retryCount, 0);
+
+  const success = await post("/api/nodes/standalone-failed-task/retry");
   assert.equal(success.status, 200);
   assert.equal(success.json.ok, true);
   assert.equal(success.json.data?.status, "running");
-  assert.deepEqual(retryCalls, ["failed-task"], "failed Mission recovery must preserve the canonical same-task retry path");
+  assert.deepEqual(retryCalls, ["standalone-failed-task"], "runtime-owned failed work must preserve the same-task retry path");
 
   const terminalMission = await post("/api/nodes/terminal-mission-task/retry");
   assert.equal(terminalMission.status, 409);
   assert.match(terminalMission.json.error ?? "", /Mission was cancelled/i);
   assert.match(terminalMission.json.error ?? "", /Continue it as new work/i);
-  assert.deepEqual(retryCalls, ["failed-task"], "cancelled Mission history must not dispatch an orphan worker retry");
+  assert.deepEqual(retryCalls, ["standalone-failed-task"], "cancelled Mission history must not dispatch an orphan worker retry");
   assert.equal(tasks.get("terminal-mission-task")?.status, "failed");
   assert.equal(tasks.get("terminal-mission-task")?.retryCount, 0);
   assert.equal(tasks.get("terminal-mission-task")?.error, "worker failed before cancellation");
@@ -155,27 +183,27 @@ try {
   assert.equal(exhausted.status, 409);
   assert.equal(exhausted.json.error, "This work step has used all available retries.");
   assert.doesNotMatch(exhausted.json.error ?? "", /exhausted-task|retry budget/i, "Simple Mode must not leak scheduler/task jargon when recovery is exhausted");
-  assert.deepEqual(retryCalls, ["failed-task"], "exhausted recovery must not dispatch another worker attempt");
+  assert.deepEqual(retryCalls, ["standalone-failed-task"], "exhausted recovery must not dispatch another worker attempt");
 
   const approvalBlocked = await post("/api/nodes/approval-task/retry");
   assert.equal(approvalBlocked.status, 409);
   assert.match(approvalBlocked.json.error ?? "", /waiting for approval/);
-  assert.deepEqual(retryCalls, ["failed-task"], "pending approval must remain authoritative over retry");
+  assert.deepEqual(retryCalls, ["standalone-failed-task"], "pending approval must remain authoritative over retry");
 
   const completed = await post("/api/nodes/done-task/retry");
   assert.equal(completed.status, 409);
   assert.match(completed.json.error ?? "", /not retryable/);
-  assert.deepEqual(retryCalls, ["failed-task"], "non-retryable work must not reach the runtime retry mutation");
+  assert.deepEqual(retryCalls, ["standalone-failed-task"], "non-retryable work must not reach the runtime retry mutation");
 
   const otherWorkspace = await post("/api/nodes/other-task/retry");
   assert.equal(otherWorkspace.status, 404);
-  assert.deepEqual(retryCalls, ["failed-task"], "retry must never cross the active workspace boundary");
+  assert.deepEqual(retryCalls, ["standalone-failed-task"], "retry must never cross the active workspace boundary");
 
   const fallbackResult = await post("/api/unrelated");
   assert.equal(fallbackResult.status, 418);
   assert.equal(fallbackResult.json.fallback, true);
 
-  console.log("simple-mode-recovery-http: ok — failed Missions remain retryable while cancelled/completed Mission history stays final");
+  console.log("simple-mode-recovery-http: ok — terminal Mission history stays final while runtime-owned work keeps bounded Retry");
 } finally {
   if (server.listening) await new Promise<void>((resolve) => server.close(() => resolve()));
 }
