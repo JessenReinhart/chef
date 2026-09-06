@@ -1,6 +1,7 @@
 import { strict as assert } from "node:assert";
 
 import { Api } from "../web/src/api.ts";
+import { sendThreadMessage } from "../web/src/threadApi.ts";
 import {
   acceptedMissionSubmissionForThread,
   acceptedMissionSubmissionIsPending,
@@ -173,9 +174,13 @@ Object.defineProperty(globalThis, "localStorage", {
 });
 
 let stateMissions: Array<Record<string, unknown>> = [];
+const chatRequests = new Map<string, number>();
 globalThis.fetch = async (input) => {
   const url = String(input);
-  if (url.endsWith("/api/threads/thread-a/chat")) {
+  const chatMatch = url.match(/\/api\/threads\/(thread-[ab])\/chat$/);
+  if (chatMatch) {
+    const threadId = chatMatch[1];
+    chatRequests.set(threadId, (chatRequests.get(threadId) ?? 0) + 1);
     return new Response(JSON.stringify({
       ok: true,
       data: {
@@ -183,8 +188,8 @@ globalThis.fetch = async (input) => {
         accepted: true,
         taskIds: [],
         report: "",
-        missionId: "mission-live",
-        threadId: "thread-a",
+        missionId: threadId === "thread-a" ? "mission-live" : "mission-b",
+        threadId,
       },
     }), { status: 202, headers: { "content-type": "application/json" } });
   }
@@ -205,6 +210,7 @@ globalThis.fetch = async (input) => {
 
 try {
   clearAcceptedMissionSubmission("thread-a");
+  clearAcceptedMissionSubmission("thread-b");
   const api = new Api();
   const result = await api.chat(submittedText);
   assert.equal(result.missionId, "mission-live", "the immediate chat acknowledgement must expose its durable Mission id");
@@ -236,8 +242,65 @@ try {
     false,
     "the real state projection must release the guard once the exact acknowledged Mission is authoritative",
   );
+
+  stateMissions = [];
+  clearAcceptedMissionSubmission("thread-a");
+  const threadResultA = await sendThreadMessage("thread-a", submittedText);
+  assert.equal(threadResultA.missionId, "mission-live", "the canonical Thread-chat path must expose its durable Mission id");
+  assert.equal(
+    isThreadSubmissionPending(new Set(), "thread-a"),
+    true,
+    "the canonical Thread-chat path must remember accepted Mission ownership after the POST settles",
+  );
+  const requestsBeforeDuplicate = chatRequests.get("thread-a") ?? 0;
+  await assert.rejects(
+    sendThreadMessage("thread-a", "Create another todo app"),
+    /already starting accepted work in this Thread/,
+    "a second Thread-chat submission must fail closed before it can create a duplicate Mission",
+  );
+  assert.equal(
+    chatRequests.get("thread-a"),
+    requestsBeforeDuplicate,
+    "duplicate Simple Mode input must not reach the Thread chat endpoint while the accepted Mission is still pending",
+  );
+
+  storage.set("chef:selected-thread", "thread-b");
+  const threadResultB = await sendThreadMessage("thread-b", "Create a notes app");
+  assert.equal(threadResultB.missionId, "mission-b", "another Thread may independently accept work");
+  assert.equal(isThreadSubmissionPending(new Set(), "thread-a"), true, "Thread A ownership must survive work accepted in Thread B");
+  assert.equal(isThreadSubmissionPending(new Set(), "thread-b"), true, "Thread B must own its own accepted Mission guard");
+
+  stateMissions = [{
+    id: "mission-b",
+    goal: "Create a notes app",
+    status: "planning",
+    taskIds: [],
+    metadata: { threadId: "thread-b" },
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  }];
+  await api.stateRaw();
+  assert.equal(isThreadSubmissionPending(new Set(), "thread-b"), false, "observing Thread B's exact Mission must retire only B's guard");
+  assert.equal(isThreadSubmissionPending(new Set(), "thread-a"), true, "observing Thread B must not retire Thread A's accepted Mission");
+
+  storage.set("chef:selected-thread", "thread-a");
+  stateMissions = [];
+  await api.stateRaw();
+  assert.equal(isThreadSubmissionPending(new Set(), "thread-a"), true, "an unrelated Thread A snapshot must keep its exact accepted Mission guarded");
+  stateMissions = [{
+    id: "mission-live",
+    goal: submittedText,
+    status: "planning",
+    taskIds: [],
+    metadata: { threadId: "thread-a" },
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  }];
+  await api.stateRaw();
+  assert.equal(isThreadSubmissionPending(new Set(), "thread-a"), false, "Thread A must unlock only when its own accepted Mission becomes authoritative");
 } finally {
   clearAcceptedMissionSubmission("thread-a");
+  clearAcceptedMissionSubmission("thread-b");
   globalThis.fetch = originalFetch;
   if (originalLocalStorage) Object.defineProperty(globalThis, "localStorage", originalLocalStorage);
   else delete (globalThis as { localStorage?: unknown }).localStorage;
