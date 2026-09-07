@@ -119,10 +119,8 @@ function allOwnedTasksCompleted(scoped: UiRuntimeEvent[], taskIds: Set<string>):
 }
 
 function blocksHeartbeat(event: UiRuntimeEvent): boolean {
-  if (event.type === "approval.resolved") {
-    return stringValue(objectPayload(event), "decision") === "rejected";
-  }
-  return event.type === "task.failed"
+  return event.type === "approval.resolved"
+    || event.type === "task.failed"
     || event.type === "task.blocked"
     || event.type === "task.cancelled"
     || event.type === "session.crashed"
@@ -135,17 +133,38 @@ function blocksHeartbeat(event: UiRuntimeEvent): boolean {
 
 function resumesHeartbeat(event: UiRuntimeEvent): boolean {
   if (event.type === "task.assigned" || event.type === "task.running") return true;
-  if (event.type === "approval.resolved") {
-    return stringValue(objectPayload(event), "decision") === "accepted";
-  }
   if (event.type !== "mission.status") return false;
   const status = stringValue(objectPayload(event), "status");
   return status === "planning" || status === "active" || status === "verifying";
 }
 
+function taskIdForEvent(event: UiRuntimeEvent): string | undefined {
+  return event.taskId ?? stringValue(objectPayload(event), "taskId");
+}
+
 function recoveryClearsBlocker(recovery: UiRuntimeEvent, blocker: UiRuntimeEvent): boolean {
-  if (recovery.type !== "approval.resolved") return true;
-  return blocker.type === "approval.requested" && recovery.source.id === blocker.source.id;
+  if (blocker.type === "approval.requested") {
+    return recovery.type === "approval.resolved" && recovery.source.id === blocker.source.id;
+  }
+  if (blocker.type === "approval.resolved") {
+    const blockedTaskId = taskIdForEvent(blocker);
+    if (recovery.type === "mission.status") return resumesHeartbeat(recovery);
+    return blockedTaskId !== undefined
+      && taskIdForEvent(recovery) === blockedTaskId
+      && (recovery.type === "task.assigned" || recovery.type === "task.running");
+  }
+  if (
+    blocker.type === "task.failed"
+    || blocker.type === "task.blocked"
+    || blocker.type === "task.cancelled"
+    || blocker.type === "session.crashed"
+  ) {
+    const blockedTaskId = taskIdForEvent(blocker);
+    return blockedTaskId !== undefined
+      && taskIdForEvent(recovery) === blockedTaskId
+      && (recovery.type === "task.assigned" || recovery.type === "task.running");
+  }
+  return resumesHeartbeat(recovery);
 }
 
 export function deriveMissionHomeState(input: {
@@ -371,12 +390,12 @@ export function deriveMissionHeartbeat(
   const latestTimeout = scoped.find((event) => event.type === "mission.timeout");
   if (latestTimeout && (!latestMissionStatus || latestTimeout.seq >= latestMissionStatus.seq)) return null;
 
-  const latestBlocker = scoped.find(blocksHeartbeat);
-  const latestRecovery = scoped.find(resumesHeartbeat);
-  if (
-    latestBlocker
-    && (!latestRecovery || latestBlocker.seq > latestRecovery.seq || !recoveryClearsBlocker(latestRecovery, latestBlocker))
-  ) return null;
+  for (const blocker of scoped.filter(blocksHeartbeat)) {
+    const clearingRecovery = scoped.find((event) =>
+      event.seq > blocker.seq && recoveryClearsBlocker(event, blocker)
+    );
+    if (!clearingRecovery) return null;
+  }
 
   const status = latestMissionStatus ? stringValue(objectPayload(latestMissionStatus), "status") : undefined;
   const label = status === "active" && allOwnedTasksCompleted(scoped, ownedTaskIds)
