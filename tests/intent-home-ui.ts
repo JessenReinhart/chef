@@ -172,8 +172,8 @@ assert.ok(completedWithoutFeed, "a completed Mission should remain understandabl
 assert.equal(completedWithoutFeed.missionState, "Done");
 assert.equal(
   completedWithoutFeed.fallback,
-  "Work is complete. Results are available in this workspace.",
-  "completion fallback must not contradict the authoritative Done state",
+  "Work is complete.",
+  "completion fallback must report completion without inventing result availability",
 );
 
 const failedWithoutFeed = projectMissionActivity({
