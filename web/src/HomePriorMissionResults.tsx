@@ -1,15 +1,24 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { loadSelectedThreadId, SELECTED_THREAD_EVENT, threadMessages } from "./threadApi";
-import { priorMissionResults } from "./priorMissionResults";
-import type { ChatMessage, UiMission } from "./types";
+import {
+  priorMissionRefreshFallback,
+  priorMissionResults,
+  type PriorMissionRefreshSnapshot,
+} from "./priorMissionResults";
+import type { UiMission } from "./types";
 
 type StateSnapshot = { missions?: UiMission[] };
 
+const EMPTY_REFRESH_SNAPSHOT: PriorMissionRefreshSnapshot = {
+  threadId: null,
+  missions: [],
+  messages: [],
+};
+
 export function HomePriorMissionResults() {
   const [target, setTarget] = useState<Element | null>(null);
-  const [missions, setMissions] = useState<UiMission[]>([]);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [snapshot, setSnapshot] = useState<PriorMissionRefreshSnapshot>(EMPTY_REFRESH_SNAPSHOT);
   const refreshSequence = useRef(0);
 
   const refresh = useCallback(async () => {
@@ -17,8 +26,7 @@ export function HomePriorMissionResults() {
     const selectedThreadId = loadSelectedThreadId();
     setTarget(document.querySelector('[aria-label="Recent Mission outcomes"]'));
     if (!selectedThreadId) {
-      setMissions([]);
-      setMessages([]);
+      setSnapshot(EMPTY_REFRESH_SNAPSHOT);
       return;
     }
 
@@ -30,13 +38,15 @@ export function HomePriorMissionResults() {
       if (!stateResponse.ok) return;
       const state = await stateResponse.json() as StateSnapshot;
       if (sequence !== refreshSequence.current || loadSelectedThreadId() !== selectedThreadId) return;
-      setMissions(state.missions ?? []);
-      setMessages(selectedMessages);
+      setSnapshot({
+        threadId: selectedThreadId,
+        missions: state.missions ?? [],
+        messages: selectedMessages,
+      });
       setTarget(document.querySelector('[aria-label="Recent Mission outcomes"]'));
     } catch {
       if (sequence !== refreshSequence.current) return;
-      setMissions([]);
-      setMessages([]);
+      setSnapshot((previous) => priorMissionRefreshFallback(previous, selectedThreadId));
     }
   }, []);
 
@@ -53,8 +63,10 @@ export function HomePriorMissionResults() {
 
   const selectedThreadId = loadSelectedThreadId();
   const results = useMemo(
-    () => selectedThreadId ? priorMissionResults(missions, messages, selectedThreadId) : [],
-    [missions, messages, selectedThreadId],
+    () => selectedThreadId
+      ? priorMissionResults(snapshot.missions, snapshot.messages, selectedThreadId)
+      : [],
+    [snapshot, selectedThreadId],
   );
 
   if (!target || results.length === 0) return null;
