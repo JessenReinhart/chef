@@ -127,8 +127,11 @@ function verificationText(metadata: Record<string, unknown>): string | null {
  */
 export function artifactHandoff(artifact: ArtifactHandoffInput): ArtifactHandoff {
   const explicitLocation = firstText(artifact.metadata, ["resultLocation", "path", "location"]);
+  const normalizedExplicitLocation = explicitLocation && hasFileScheme(explicitLocation)
+    ? fileUriLocation(explicitLocation) ?? explicitLocation
+    : explicitLocation;
   const fileLocation = fileUriLocation(artifact.uri);
-  const durableLocation = explicitLocation ?? fileLocation;
+  const durableLocation = normalizedExplicitLocation ?? fileLocation;
   const runCommand = firstText(artifact.metadata, ["run", "runCommand", "command"]);
 
   return {
