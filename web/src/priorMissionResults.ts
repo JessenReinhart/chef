@@ -8,6 +8,20 @@ export type PriorMissionResult = {
   result: string;
 };
 
+export type PriorMissionRefreshSnapshot = {
+  threadId: string | null;
+  missions: UiMission[];
+  messages: ChatMessage[];
+};
+
+export function priorMissionRefreshFallback(
+  previous: PriorMissionRefreshSnapshot,
+  selectedThreadId: string,
+): PriorMissionRefreshSnapshot {
+  if (previous.threadId === selectedThreadId) return previous;
+  return { threadId: selectedThreadId, missions: [], messages: [] };
+}
+
 export function priorMissionResults(
   missions: UiMission[],
   messages: ChatMessage[],

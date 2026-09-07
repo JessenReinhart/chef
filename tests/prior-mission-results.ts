@@ -1,6 +1,10 @@
 import { strict as assert } from "node:assert";
 import { terminalMissionSummaryIsCurrent } from "../web/src/missionOutcomeSummary.ts";
-import { priorMissionResults } from "../web/src/priorMissionResults.ts";
+import {
+  priorMissionRefreshFallback,
+  priorMissionResults,
+  type PriorMissionRefreshSnapshot,
+} from "../web/src/priorMissionResults.ts";
 import type { ChatMessage, UiMission } from "../web/src/types.ts";
 
 const missions: UiMission[] = [
@@ -26,6 +30,22 @@ assert.equal(results[1]?.result, "second prior result");
 assert.ok(results.every((entry) => entry.result !== "current result"));
 assert.ok(results.every((entry) => entry.result !== "wrong sibling result"));
 assert.ok(results.every((entry) => entry.result !== "unscoped result"));
+
+const retainedSnapshot: PriorMissionRefreshSnapshot = {
+  threadId: "thread-a",
+  missions,
+  messages,
+};
+assert.equal(
+  priorMissionRefreshFallback(retainedSnapshot, "thread-a"),
+  retainedSnapshot,
+  "a transient refresh failure must retain the last trustworthy snapshot for the same Thread",
+);
+assert.deepEqual(
+  priorMissionRefreshFallback(retainedSnapshot, "thread-b"),
+  { threadId: "thread-b", missions: [], messages: [] },
+  "a refresh failure after switching Threads must not leak the previous Thread's results",
+);
 
 const longResult = priorMissionResults(
   missions,
