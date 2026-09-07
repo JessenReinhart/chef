@@ -158,8 +158,10 @@ function recoveryClearsBlocker(recovery: UiRuntimeEvent, blocker: UiRuntimeEvent
     || blocker.type === "task.blocked"
     || blocker.type === "task.cancelled"
     || blocker.type === "session.crashed"
+    || blocker.type === "node.failed"
   ) {
     const blockedTaskId = taskIdForEvent(blocker);
+    if (blocker.type === "node.failed" && blockedTaskId === undefined) return resumesHeartbeat(recovery);
     return blockedTaskId !== undefined
       && taskIdForEvent(recovery) === blockedTaskId
       && (recovery.type === "task.assigned" || recovery.type === "task.running");
