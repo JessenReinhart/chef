@@ -114,17 +114,15 @@ function scopeMissionActivity(events: UiRuntimeEvent[], mission: UiMission): {
   };
 }
 
-function isMissionOngoing(mission: UiMission): boolean {
+function isMissionActivelyProgressing(mission: UiMission): boolean {
   return mission.status === "planning"
     || mission.status === "active"
-    || mission.status === "verifying"
-    || mission.status === "waiting_for_approval"
-    || mission.status === "paused";
+    || mission.status === "verifying";
 }
 
 export function selectLivingWorkspaceMission(missions: UiMission[]): UiMission | null {
   const newestFirst = [...missions].sort((a, b) => b.createdAt - a.createdAt);
-  return newestFirst.find(isMissionOngoing) ?? newestFirst[0] ?? null;
+  return newestFirst.find(isMissionActivelyProgressing) ?? newestFirst[0] ?? null;
 }
 
 export function workerActivityState(task: UiTask): string {

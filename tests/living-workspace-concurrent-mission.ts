@@ -53,6 +53,54 @@ assert.equal(
   "result selection should fall back to the same newest terminal Mission when no ongoing work remains",
 );
 
+for (const staleStatus of ["waiting_for_approval", "paused"] as const) {
+  const staleAttentionMission: UiMission = {
+    ...ongoing,
+    id: `mission-stale-${staleStatus}`,
+    status: staleStatus,
+    createdAt: 100,
+    updatedAt: 150,
+  };
+  const completedFollowUp: UiMission = {
+    ...newerCompleted,
+    id: `mission-follow-up-${staleStatus}`,
+    goal: "Create the follow-up todo app",
+    createdAt: 300,
+    updatedAt: 400,
+    completedAt: 400,
+  };
+  const followUpProjection = projectMissionActivity({
+    missions: [staleAttentionMission, completedFollowUp],
+    tasks: [],
+    events: [],
+  }, []);
+
+  assert.ok(followUpProjection, `a newer completed Mission should remain visible after older ${staleStatus} work`);
+  assert.equal(
+    followUpProjection.mission.id,
+    completedFollowUp.id,
+    `older ${staleStatus} work must not steal the Simple Mode foreground from a newer completed follow-up`,
+  );
+  assert.equal(
+    selectLivingWorkspaceMission([staleAttentionMission, completedFollowUp])?.id,
+    completedFollowUp.id,
+    `current result selection must follow the newer completed Mission instead of stale ${staleStatus} history`,
+  );
+}
+
+const newestApprovalMission: UiMission = {
+  ...ongoing,
+  id: "mission-newest-approval",
+  status: "waiting_for_approval",
+  createdAt: 500,
+  updatedAt: 550,
+};
+assert.equal(
+  selectLivingWorkspaceMission([newerCompleted, newestApprovalMission])?.id,
+  newestApprovalMission.id,
+  "when no Mission is actively progressing, the newest approval wait must remain the foreground attention state",
+);
+
 const recoveryMission: UiMission = {
   id: "mission-recovery",
   goal: "Create a todo app",
