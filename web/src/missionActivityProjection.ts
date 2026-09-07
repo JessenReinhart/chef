@@ -192,8 +192,12 @@ function projectedMissionStatus(
   if (missionTasks.some((task) => task === undefined)) return mission.status;
   if (missionTasks.some((task) => task?.status === "failed")) return "failed";
   if (missionTasks.some((task) => task?.status === "blocked")) return "blocked";
-  if (missionTasks.some((task) => task?.status === "cancelled")) return "cancelled";
-  return missionTasks.every((task) => task?.status === "completed") ? "verifying" : mission.status;
+  if (missionTasks.every((task) => task?.status === "completed")) return "verifying";
+
+  const allTerminal = missionTasks.every((task) => task?.status === "completed" || task?.status === "cancelled");
+  if (allTerminal && missionTasks.some((task) => task?.status === "cancelled")) return "cancelled";
+
+  return mission.status;
 }
 
 export function projectMissionActivity(
