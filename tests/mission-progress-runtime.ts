@@ -342,6 +342,101 @@ function proveTaskScopedHeartbeatRecovery(): void {
   );
 }
 
+function proveTaskLinkedNodeFailureRecovery(): void {
+  const missionId = "mission-node-failure-heartbeat";
+  const taskA = "task-node-failed";
+  const taskB = "task-parallel-running";
+  const events: UiRuntimeEvent[] = [
+    {
+      id: "node-failure-mission-active",
+      seq: 1,
+      timestamp: 1_000,
+      source: { type: "mission", id: missionId },
+      type: "mission.status",
+      payload: { status: "active" },
+      correlationId: missionId,
+    },
+    {
+      id: "task-linked-node-failed",
+      seq: 2,
+      timestamp: 2_000,
+      source: { type: "node", id: "worker-node-a" },
+      type: "node.failed",
+      payload: { error: "worker node exited", taskId: taskA },
+      taskId: taskA,
+      correlationId: missionId,
+    },
+    {
+      id: "mission-still-active",
+      seq: 3,
+      timestamp: 3_000,
+      source: { type: "mission", id: missionId },
+      type: "mission.status",
+      payload: { status: "active" },
+      correlationId: missionId,
+    },
+    {
+      id: "parallel-task-running",
+      seq: 4,
+      timestamp: 4_000,
+      source: { type: "task", id: taskB },
+      type: "task.running",
+      payload: {},
+      taskId: taskB,
+      correlationId: missionId,
+    },
+  ];
+
+  assert.equal(
+    deriveMissionHeartbeat(events, missionId, [taskA, taskB], 14_000),
+    null,
+    "task-linked node failure must not be cleared by Mission-wide or unrelated parallel activity",
+  );
+
+  events.push({
+    id: "failed-task-retry",
+    seq: 5,
+    timestamp: 5_000,
+    source: { type: "task", id: taskA },
+    type: "task.running",
+    payload: { retryCount: 1 },
+    taskId: taskA,
+    correlationId: missionId,
+  });
+  assert.equal(
+    deriveMissionHeartbeat(events, missionId, [taskA, taskB], 15_000)?.text,
+    "Chef is still working. Last runtime activity was 10 seconds ago.",
+    "task-linked node failure may clear once the same Task genuinely resumes",
+  );
+
+  const tasklessNodeFailure: UiRuntimeEvent[] = [
+    events[0]!,
+    {
+      id: "taskless-node-failed",
+      seq: 2,
+      timestamp: 2_000,
+      source: { type: "node", id: "workspace-node" },
+      type: "node.failed",
+      payload: { error: "workspace node failed" },
+      correlationId: missionId,
+    },
+    {
+      id: "taskless-mission-recovered",
+      seq: 3,
+      timestamp: 3_000,
+      source: { type: "mission", id: missionId },
+      type: "mission.status",
+      payload: { status: "active" },
+      correlationId: missionId,
+    },
+  ];
+  assert.equal(
+    deriveMissionHeartbeat(tasklessNodeFailure, missionId, [], 13_000)?.text,
+    "Chef is still working. Last runtime activity was 10 seconds ago.",
+    "taskless node failures must preserve the existing mission-level recovery fallback",
+  );
+}
+
 async function proveSharedRefreshBudget(): Promise<void> {
   let refreshCount = 0;
   let releaseFirstRefresh!: () => void;
@@ -381,6 +476,7 @@ async function proveSharedRefreshBudget(): Promise<void> {
 async function main(): Promise<void> {
   proveApprovalHeartbeatRecovery();
   proveTaskScopedHeartbeatRecovery();
+  proveTaskLinkedNodeFailureRecovery();
   await proveSharedRefreshBudget();
 
   const projectDir = await mkdtemp(join(tmpdir(), "chef-heartbeat-runtime-"));
