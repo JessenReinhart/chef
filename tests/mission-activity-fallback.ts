@@ -47,6 +47,28 @@ assert.equal(
   "failed work without runtime detail must stay truthful about the missing recovery evidence",
 );
 
+const completedWithoutArtifact = projectEmptyActivity("completed");
+assert.equal(
+  completedWithoutArtifact.fallback,
+  "Work is complete.",
+  "Mission status alone must not claim that a durable result exists",
+);
+const completedWithoutArtifactHandoff = missionResultHandoffProjection(
+  [],
+  {
+    missionId: completedWithoutArtifact.mission.id,
+    taskIds: completedWithoutArtifact.taskIds,
+    threadId: "thread-no-result",
+  },
+  "thread-no-result",
+  completedWithoutArtifact.mission.status,
+);
+assert.equal(
+  completedWithoutArtifactHandoff.notice,
+  "Work is marked complete, but Chef did not publish a durable result for this Mission.",
+  "the result handoff must remain authoritative when completion has no durable output",
+);
+
 const blockedBeforeRecovery: UiMission = {
   id: "mission-blocked-before-recovery",
   goal: "Create a simple todo app",
@@ -91,8 +113,8 @@ assert.equal(
 );
 assert.equal(
   recoveredProjection.fallback,
-  "Work is complete. Results are available in this workspace.",
-  "the recovery handoff must direct the user to the completed Mission's results",
+  "Work is complete.",
+  "completed Mission activity should stay truthful while the result handoff separately proves whether output exists",
 );
 const recoveredTodoArtifact: LivingArtifact = {
   id: "artifact-completed-recovery",
@@ -448,4 +470,4 @@ assert.equal(
   "the promoted heartbeat must agree with the authoritative current Mission stage even when older events only imply working",
 );
 
-console.log("mission-activity-fallback: ok — planning, attention, recovery result continuity, current-attempt continuity, bounded active-worker visibility, authoritative verification evidence, and stale-silence heartbeat states remain explicit and stage-consistent in Simple Mode");
+console.log("mission-activity-fallback: ok — planning, attention, truthful completion handoff, recovery result continuity, current-attempt continuity, bounded active-worker visibility, authoritative verification evidence, and stale-silence heartbeat states remain explicit and stage-consistent in Simple Mode");
