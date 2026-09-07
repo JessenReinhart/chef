@@ -16,7 +16,8 @@ import {
   createSingleFlightRunCommandCopier,
 } from "./resultActions";
 import { selectLivingWorkspaceMission } from "./missionActivityProjection";
-import { createMissionProgressRefreshQueue, subscribeMissionProgressRefresh } from "./missionProgressStream";
+import { createInvalidationOwnedRefreshQueue } from "./invalidationOwnedRefresh";
+import { subscribeMissionProgressRefresh } from "./missionProgressStream";
 import { missionTaskIdsFromEvents } from "./threadScope";
 import type { UiMission, UiRuntimeEvent } from "./types";
 
@@ -59,15 +60,13 @@ export function HomeMissionArtifacts() {
   const [revealState, setRevealState] = useState<Record<string, RevealState>>({});
   const [downloadState, setDownloadState] = useState<Record<string, DownloadState>>({});
   const [downloadCapability, setDownloadCapability] = useState<Record<string, boolean>>({});
-  const refreshSequence = useRef(0);
   const loadedThreadId = useRef<string | null>(null);
   const loadedMissionId = useRef<string | null>(null);
   const copyRunCommandOnce = useRef(createSingleFlightRunCommandCopier()).current;
   const revealArtifactOnce = useRef(createSingleFlightArtifactRevealer()).current;
   const downloadArtifactOnce = useRef(createSingleFlightArtifactDownloader()).current;
 
-  const refresh = useCallback(async () => {
-    const sequence = ++refreshSequence.current;
+  const refresh = useCallback(async (isCurrent: () => boolean) => {
     setTarget(document.querySelector("main"));
     const selectedThreadId = loadSelectedThreadId();
     if (!selectedThreadId) {
@@ -83,7 +82,7 @@ export function HomeMissionArtifacts() {
       loadStateSnapshot(),
       loadArtifactSnapshot(),
     ]);
-    if (sequence !== refreshSequence.current || loadSelectedThreadId() !== selectedThreadId) return;
+    if (!isCurrent() || loadSelectedThreadId() !== selectedThreadId) return;
 
     if (stateResult.status === "rejected") {
       if (!shouldRetainMissionResultOnRefreshFailure(loadedThreadId.current, selectedThreadId)) {
@@ -136,7 +135,7 @@ export function HomeMissionArtifacts() {
   }, []);
 
   useEffect(() => {
-    const refreshQueue = createMissionProgressRefreshQueue(refresh);
+    const refreshQueue = createInvalidationOwnedRefreshQueue(refresh);
     refreshQueue.trigger();
     const timer = window.setInterval(refreshQueue.trigger, 1800);
     const unsubscribe = subscribeMissionProgressRefresh(refreshQueue.trigger);
