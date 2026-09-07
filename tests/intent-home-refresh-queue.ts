@@ -1,8 +1,12 @@
 import { strict as assert } from "node:assert";
 
 import { loadIntentHomeRefresh } from "../web/src/intentHomeRefresh.ts";
-import { createMissionProgressRefreshQueue } from "../web/src/missionProgressStream.ts";
-import type { UiThread } from "../web/src/threadApi.ts";
+import {
+  createMissionProgressRefreshQueue,
+  subscribeMissionProgressProjection,
+  type MissionProgressEventStream,
+} from "../web/src/missionProgressStream.ts";
+import { SELECTED_THREAD_EVENT, type UiThread } from "../web/src/threadApi.ts";
 
 function nextTurn(): Promise<void> {
   return new Promise((resolve) => setImmediate(resolve));
@@ -125,5 +129,73 @@ const noThreadRefresh = await loadIntentHomeRefresh({
 });
 assert.equal(noThreadRefresh.selection.selectedThread, null, "a workspace with no Threads must resolve without inventing a conversation owner");
 assert.equal(noThreadRefresh.snapshot.marker, "ready", "runtime state remains available even when no conversation history exists");
+
+const selectionEvents = new EventTarget();
+const pendingProjections = new Map<number, ReturnType<typeof deferred<string>>>();
+const visibleProjections: string[] = [];
+let projectionLoads = 0;
+let liveStream: MissionProgressEventStream | null = null;
+let heartbeatTick: (() => void) | null = null;
+const unsubscribeProjection = subscribeMissionProgressProjection(
+  () => {
+    const loadNumber = ++projectionLoads;
+    const pending = deferred<string>();
+    pendingProjections.set(loadNumber, pending);
+    return pending.promise;
+  },
+  (projection) => visibleProjections.push(projection),
+  () => {
+    liveStream = { onmessage: null, close: () => undefined };
+    return liveStream;
+  },
+  selectionEvents,
+  (onTick) => {
+    heartbeatTick = onTick;
+    return () => { heartbeatTick = null; };
+  },
+);
+
+await Promise.resolve();
+assert.equal(projectionLoads, 1, "projection subscription must start with one authoritative read");
+selectionEvents.dispatchEvent(new Event(SELECTED_THREAD_EVENT));
+pendingProjections.get(1)?.resolve("stale-thread-a");
+await nextTurn();
+assert.deepEqual(visibleProjections, [], "a Thread change must prevent the superseded in-flight projection from rendering");
+assert.equal(projectionLoads, 2, "the Thread invalidation must retain one trailing authoritative read");
+pendingProjections.get(2)?.resolve("thread-b-current");
+await nextTurn();
+assert.deepEqual(visibleProjections, ["thread-b-current"], "the trailing Thread projection must become visible once authoritative");
+
+heartbeatTick?.();
+await Promise.resolve();
+assert.equal(projectionLoads, 3, "heartbeat invalidation must start a fresh projection read");
+liveStream?.onmessage?.(new MessageEvent("message"));
+pendingProjections.get(3)?.resolve("stale-before-live-event");
+await nextTurn();
+assert.deepEqual(
+  visibleProjections,
+  ["thread-b-current"],
+  "a live runtime event must invalidate and suppress an older heartbeat projection that is still in flight",
+);
+assert.equal(projectionLoads, 4, "live invalidation during a heartbeat read must converge through one trailing refresh");
+pendingProjections.get(4)?.resolve("latest-runtime-state");
+await nextTurn();
+assert.deepEqual(
+  visibleProjections,
+  ["thread-b-current", "latest-runtime-state"],
+  "the newest runtime projection must publish after stale in-flight work is discarded",
+);
+
+heartbeatTick?.();
+await Promise.resolve();
+assert.equal(projectionLoads, 5, "another heartbeat must remain able to refresh the mounted projection");
+unsubscribeProjection();
+pendingProjections.get(5)?.resolve("late-after-unmount");
+await nextTurn();
+assert.deepEqual(
+  visibleProjections,
+  ["thread-b-current", "latest-runtime-state"],
+  "unmount must keep late projection reads from updating Simple Mode",
+);
 
 console.log("intent-home-refresh-queue: ok");

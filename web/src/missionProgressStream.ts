@@ -129,16 +129,23 @@ export function subscribeMissionProgressProjection<T>(
   scheduleRefresh: MissionProgressRefreshTimer = scheduleMissionProgressHeartbeatRefresh,
 ): () => void {
   let closed = false;
+  let invalidationVersion = 0;
   const projectionRefresh = createMissionProgressRefreshQueue(async () => {
+    const refreshVersion = invalidationVersion;
     const projection = await loadProjection();
-    if (!closed) applyProjection(projection);
+    if (!closed && refreshVersion === invalidationVersion) applyProjection(projection);
   });
-  const unsubscribe = subscribeMissionProgressRefresh(projectionRefresh.trigger, createStream);
-  const cancelHeartbeatRefresh = scheduleRefresh(projectionRefresh.trigger);
-  const handleThreadSelection = () => projectionRefresh.trigger();
+  const requestProjectionRefresh = () => {
+    if (closed) return;
+    invalidationVersion += 1;
+    projectionRefresh.trigger();
+  };
+  const unsubscribe = subscribeMissionProgressRefresh(requestProjectionRefresh, createStream);
+  const cancelHeartbeatRefresh = scheduleRefresh(requestProjectionRefresh);
+  const handleThreadSelection = () => requestProjectionRefresh();
   selectionEvents?.addEventListener(SELECTED_THREAD_EVENT, handleThreadSelection);
 
-  projectionRefresh.trigger();
+  requestProjectionRefresh();
 
   return () => {
     closed = true;
