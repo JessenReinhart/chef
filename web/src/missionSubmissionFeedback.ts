@@ -80,15 +80,24 @@ export function clearAcceptedMissionSubmission(threadId: string | null): void {
   pendingAcceptedMissionSubmissions.delete(submissionOwnerKey(threadId));
 }
 
+/**
+ * Keep the visible Simple Mode handoff aligned with the durable Thread-owned
+ * submission guard. Component-local accepted state can disappear after a
+ * surface remount or be intentionally withheld while another Thread owns the
+ * foreground; the remembered guard remains authoritative until the exact
+ * accepted Mission appears in state.
+ */
 export function acceptedMissionSubmissionIsPending(
   accepted: AcceptedMissionSubmission | null,
   selectedThreadId: string | null,
   missions: Array<{ id: string }>,
 ): boolean {
+  const visibleAccepted = accepted?.threadId === selectedThreadId
+    ? accepted
+    : acceptedMissionSubmissionForThread(selectedThreadId);
   return Boolean(
-    accepted
-      && accepted.threadId === selectedThreadId
-      && !missions.some((mission) => mission.id === accepted.missionId),
+    visibleAccepted
+      && !missions.some((mission) => mission.id === visibleAccepted.missionId),
   );
 }
 
