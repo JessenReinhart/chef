@@ -573,6 +573,7 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
     const canRetry = canRetryMissionTask({
       missionStatus: missionByTaskId.get(task.id)?.status,
       taskStatus: task.status,
+      retryCount: task.retryCount,
       blockedByApproval: approvalTaskIds.has(task.id),
       readOnly: archivedThreadSelected,
     });
