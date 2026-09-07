@@ -94,6 +94,7 @@ export interface UiTask {
   startedAt?: number;
   completedAt?: number;
   durationMs?: number;
+  retryCount?: number;
   error?: string;
   contextRefs?: ContextReference[];
 }
