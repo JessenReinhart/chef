@@ -33,6 +33,12 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.end(JSON.stringify(body));
 }
 
+function outcomeAttentionRank(status: string): number {
+  if (status === "failed") return 0;
+  if (status === "blocked") return 1;
+  return 2;
+}
+
 /** Adds a Mission-scoped plan-history projection for UI visualization. */
 export function createMissionPlanServer(runtime: ChefRuntime, baseServer: Server): Server {
   const baseHandler = baseServer.listeners("request")[0] as RequestHandler | undefined;
@@ -72,7 +78,8 @@ export function createMissionPlanServer(runtime: ChefRuntime, baseServer: Server
                 assignedTo: task.assignedTo,
                 resultSummary: task.resultSummary,
                 error: task.error,
-              })),
+              }))
+              .sort((left, right) => outcomeAttentionRank(left.status) - outcomeAttentionRank(right.status)),
           }));
 
         const data: MissionPlanProjection = {

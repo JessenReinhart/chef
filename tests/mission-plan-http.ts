@@ -14,15 +14,27 @@ const plans = [
     taskIds: ["task-1"], createdAt: 10, updatedAt: 20,
   },
   {
-    id: "plan-2", workspaceId, missionId: "mission-a", goal: "Replanned approach", status: "executing",
-    tasks: [{ id: "task-2", title: "Implement", description: "", dependencies: [], priority: 1, assignedTo: "engineer" }],
-    taskIds: ["task-2"], createdAt: 30, updatedAt: 40,
+    id: "plan-2", workspaceId, missionId: "mission-a", goal: "Replanned approach", status: "failed",
+    tasks: [
+      { id: "task-2", title: "Implement A", description: "", dependencies: [], priority: 1, assignedTo: "engineer" },
+      { id: "task-3", title: "Implement B", description: "", dependencies: [], priority: 1, assignedTo: "engineer" },
+      { id: "task-4", title: "Implement C", description: "", dependencies: [], priority: 1, assignedTo: "engineer" },
+      { id: "task-5", title: "Implement D", description: "", dependencies: [], priority: 1, assignedTo: "engineer" },
+      { id: "task-6", title: "Verify", description: "", dependencies: [], priority: 1, assignedTo: "critic" },
+      { id: "task-7", title: "Recover", description: "", dependencies: [], priority: 1, assignedTo: "engineer" },
+    ],
+    taskIds: ["task-2", "task-3", "task-4", "task-5", "task-6", "task-7"], createdAt: 30, updatedAt: 40,
   },
   { id: "plan-unrelated", workspaceId, missionId: "different-mission", goal: "Unrelated", status: "draft", tasks: [], taskIds: [], createdAt: 50 },
 ];
 const tasks = new Map([
   ["task-1", { id: "task-1", workspaceId, status: "failed", error: "tests failed" }],
-  ["task-2", { id: "task-2", workspaceId, status: "running", assignedTo: "engineer", resultSummary: undefined }],
+  ["task-2", { id: "task-2", workspaceId, status: "completed", assignedTo: "engineer", resultSummary: "A done" }],
+  ["task-3", { id: "task-3", workspaceId, status: "completed", assignedTo: "engineer", resultSummary: "B done" }],
+  ["task-4", { id: "task-4", workspaceId, status: "completed", assignedTo: "engineer", resultSummary: "C done" }],
+  ["task-5", { id: "task-5", workspaceId, status: "completed", assignedTo: "engineer", resultSummary: "D done" }],
+  ["task-6", { id: "task-6", workspaceId, status: "failed", assignedTo: "critic", error: "verification failed" }],
+  ["task-7", { id: "task-7", workspaceId, status: "blocked", assignedTo: "engineer", error: "waiting on recovery" }],
 ]);
 
 const runtime = {
@@ -55,7 +67,22 @@ try {
   assert.deepEqual(body.data.plans.map((plan) => plan.id), ["plan-1", "plan-2"]);
   assert.equal(body.data.plans[0]?.isCurrent, false);
   assert.equal(body.data.plans[1]?.isCurrent, true);
-  assert.deepEqual(body.data.plans[1]?.taskStates, [{ id: "task-2", status: "running", assignedTo: "engineer" }]);
+
+  const currentTaskStates = body.data.plans[1]?.taskStates as Array<{ id: string; status: string; assignedTo?: string; resultSummary?: string; error?: string }>;
+  assert.deepEqual(
+    currentTaskStates.map((task) => task.id),
+    ["task-6", "task-7", "task-2", "task-3", "task-4", "task-5"],
+    "unresolved failed/blocked work should consume bounded outcome-summary attention before completed result history",
+  );
+  assert.deepEqual(currentTaskStates.slice(0, 2), [
+    { id: "task-6", status: "failed", assignedTo: "critic", error: "verification failed" },
+    { id: "task-7", status: "blocked", assignedTo: "engineer", error: "waiting on recovery" },
+  ]);
+  assert.deepEqual(
+    currentTaskStates.slice(2).map((task) => task.id),
+    ["task-2", "task-3", "task-4", "task-5"],
+    "equal-priority completed history should preserve durable plan order",
+  );
 
   assert.equal((await fetch(`${origin}/api/missions/nope/plans`)).status, 404);
   assert.equal((await fetch(`${origin}/api/missions/mission-other/plans`)).status, 404);
@@ -63,7 +90,7 @@ try {
   const fallback = await fetch(`${origin}/api/state`);
   assert.equal(fallback.status, 200);
   assert.deepEqual(await fallback.json(), { fallback: "/api/state" });
-  console.log("mission-plan-http: ok");
+  console.log("mission-plan-http: ok — unresolved outcome details are projected before completed history");
 } finally {
   await new Promise<void>((resolve) => server.close(() => resolve()));
 }
