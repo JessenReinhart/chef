@@ -26,8 +26,17 @@ type DownloadRequester = (
   init?: RequestInit,
 ) => Promise<Pick<Response, "ok" | "json" | "blob" | "headers">>;
 
+type RunCommandCopier = (
+  command: string,
+  clipboard: ClipboardWriter | null | undefined,
+) => Promise<CopyRunCommandResult>;
 type ArtifactRevealer = (artifactId: string) => Promise<ArtifactRevealResult>;
 type ArtifactDownloader = (artifactId: string) => Promise<ArtifactDownloadResult>;
+type VersionOwnedRunCommandCopier = (
+  command: string,
+  actionKey: string,
+  clipboard: ClipboardWriter | null | undefined,
+) => Promise<CopyRunCommandResult>;
 type VersionOwnedArtifactRevealer = (artifactId: string, actionKey?: string) => Promise<ArtifactRevealResult>;
 type VersionOwnedArtifactDownloader = (artifactId: string, actionKey?: string) => Promise<ArtifactDownloadResult>;
 
@@ -55,6 +64,30 @@ export async function copyRunCommand(
         : "Could not copy the run command",
     };
   }
+}
+
+/**
+ * Keep one clipboard write in flight per exact result version.
+ * Repeated presses share the same truthful outcome, while a newer artifact
+ * version owns an independent action and settled operations can be retried.
+ */
+export function createSingleFlightRunCommandCopier(
+  copier: RunCommandCopier = copyRunCommand,
+): VersionOwnedRunCommandCopier {
+  const inFlight = new Map<string, Promise<CopyRunCommandResult>>();
+
+  return (command, actionKey, clipboard) => {
+    const existing = inFlight.get(actionKey);
+    if (existing) return existing;
+
+    const request = Promise.resolve()
+      .then(() => copier(command, clipboard))
+      .finally(() => {
+        if (inFlight.get(actionKey) === request) inFlight.delete(actionKey);
+      });
+    inFlight.set(actionKey, request);
+    return request;
+  };
 }
 
 export function artifactRevealLabel(state: ArtifactRevealDisplayState): string {
