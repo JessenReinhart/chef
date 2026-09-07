@@ -90,8 +90,17 @@ const NON_SUCCESS_VERIFICATION_VALUES = new Set([
   "unverified",
 ]);
 
+const NON_SUCCESS_DETAIL_SEPARATORS = [":", " - ", " — ", " – ", ";", " ("];
+
 function positiveVerificationText(value: string): string | null {
-  return NON_SUCCESS_VERIFICATION_VALUES.has(value.toLowerCase()) ? null : value;
+  const normalized = value.toLowerCase();
+  if (NON_SUCCESS_VERIFICATION_VALUES.has(normalized)) return null;
+  for (const status of NON_SUCCESS_VERIFICATION_VALUES) {
+    if (NON_SUCCESS_DETAIL_SEPARATORS.some((separator) => normalized.startsWith(`${status}${separator}`))) {
+      return null;
+    }
+  }
+  return value;
 }
 
 function verificationText(metadata: Record<string, unknown>): string | null {
