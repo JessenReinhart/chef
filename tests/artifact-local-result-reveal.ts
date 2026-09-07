@@ -8,7 +8,12 @@ import { createHttpServer } from "../src/server/http-server.ts";
 import { createArtifactServer } from "../src/server/artifact-http.ts";
 import { canRevealArtifact, isFileUriArtifact } from "../web/src/artifactHandoff.ts";
 import { probeArtifactDownloadability, watchArtifactDownloadability } from "../web/src/artifactDownloadCapability.ts";
-import { artifactRevealLabel, revealArtifact } from "../web/src/resultActions.ts";
+import {
+  artifactRevealLabel,
+  createSingleFlightRunCommandCopier,
+  revealArtifact,
+  type CopyRunCommandResult,
+} from "../web/src/resultActions.ts";
 
 const projectDir = await mkdtemp(join(tmpdir(), "chef-local-result-reveal-"));
 const outsideDir = await mkdtemp(join(tmpdir(), "chef-local-result-reveal-outside-"));
@@ -25,6 +30,38 @@ assert.equal(artifactRevealLabel("idle"), "Show result", "result reveal must des
 assert.equal(artifactRevealLabel("opening"), "Opening…", "an in-flight reveal must remain visibly acknowledged");
 assert.equal(artifactRevealLabel("opened"), "Result shown", "successful reveal must not falsely claim only a folder was opened");
 assert.equal(artifactRevealLabel("error"), "Show result", "failed reveal should return to a truthful retry action");
+
+let copyAttempts = 0;
+const copyResolvers: Array<(result: CopyRunCommandResult) => void> = [];
+const copyRunCommandOnce = createSingleFlightRunCommandCopier(async () => {
+  copyAttempts += 1;
+  return new Promise<CopyRunCommandResult>((resolve) => copyResolvers.push(resolve));
+});
+const firstCopy = copyRunCommandOnce("npm start", "todo-result:1", undefined);
+const repeatedCopy = copyRunCommandOnce("npm start", "todo-result:1", undefined);
+await Promise.resolve();
+assert.equal(copyAttempts, 1, "repeated copy presses for one result version must share one clipboard operation");
+assert.equal(copyResolvers.length, 1, "the shared copy operation must expose exactly one pending clipboard outcome");
+assert.strictEqual(repeatedCopy, firstCopy, "same-version copy presses must observe the same in-flight outcome");
+copyResolvers.shift()!({ ok: true });
+assert.deepEqual(await firstCopy, { ok: true }, "the shared copy operation must report its real success");
+
+const retryCopy = copyRunCommandOnce("npm start", "todo-result:1", undefined);
+await Promise.resolve();
+assert.equal(copyAttempts, 2, "a settled copy operation must allow a later retry for the same result version");
+assert.equal(copyResolvers.length, 1, "retry must create one fresh clipboard operation after settlement");
+copyResolvers.shift()!({ ok: false, error: "Clipboard denied" });
+assert.deepEqual(await retryCopy, { ok: false, error: "Clipboard denied" }, "a later retry must preserve truthful clipboard failure feedback");
+
+const oldVersionCopy = copyRunCommandOnce("npm start", "todo-result:1", undefined);
+const newVersionCopy = copyRunCommandOnce("npm start", "todo-result:2", undefined);
+await Promise.resolve();
+assert.equal(copyAttempts, 4, "a newly published result version must own an independent copy action");
+assert.equal(copyResolvers.length, 2, "two result versions must own two independent clipboard operations");
+assert.notStrictEqual(newVersionCopy, oldVersionCopy, "new result versions must not inherit an older version's in-flight clipboard operation");
+copyResolvers.shift()!({ ok: true });
+copyResolvers.shift()!({ ok: true });
+await Promise.all([oldVersionCopy, newVersionCopy]);
 
 const fallbackReveal = await revealArtifact("result-with-error", async () => ({
   ok: false,
@@ -268,7 +305,7 @@ try {
   assert.match(outsideReveal.body.error ?? "", /outside the project root/);
   assert.equal(revealed.length, 6, "rejected result locations must never invoke the OS opener");
 
-  console.log("artifact-local-result-reveal: ok — Simple Mode opens and saves the same explicit durable result location it displays while keeping project-scoped safety intact");
+  console.log("artifact-local-result-reveal: ok — Simple Mode keeps result reveal/save/copy actions version-owned and project-scoped");
 } finally {
   if (server.listening) await new Promise<void>((resolve) => server.close(() => resolve()));
   await runtime.close();

@@ -11,9 +11,9 @@ import { watchArtifactDownloadability } from "./artifactDownloadCapability";
 import {
   artifactActionStateKey,
   artifactRevealLabel,
-  copyRunCommand,
   createSingleFlightArtifactDownloader,
   createSingleFlightArtifactRevealer,
+  createSingleFlightRunCommandCopier,
 } from "./resultActions";
 import { selectLivingWorkspaceMission } from "./missionActivityProjection";
 import { createMissionProgressRefreshQueue, subscribeMissionProgressRefresh } from "./missionProgressStream";
@@ -62,6 +62,7 @@ export function HomeMissionArtifacts() {
   const refreshSequence = useRef(0);
   const loadedThreadId = useRef<string | null>(null);
   const loadedMissionId = useRef<string | null>(null);
+  const copyRunCommandOnce = useRef(createSingleFlightRunCommandCopier()).current;
   const revealArtifactOnce = useRef(createSingleFlightArtifactRevealer()).current;
   const downloadArtifactOnce = useRef(createSingleFlightArtifactDownloader()).current;
 
@@ -182,9 +183,9 @@ export function HomeMissionArtifacts() {
   }, [missionArtifacts]);
 
   const handleCopyRunCommand = useCallback(async (actionKey: string, runCommand: string) => {
-    const result = await copyRunCommand(runCommand, navigator.clipboard);
+    const result = await copyRunCommandOnce(runCommand, actionKey, navigator.clipboard);
     setRunCopyState((current) => ({ ...current, [actionKey]: result.ok ? "copied" : "error" }));
-  }, []);
+  }, [copyRunCommandOnce]);
 
   const handleRevealArtifact = useCallback(async (artifactId: string, actionKey: string) => {
     setRevealState((current) => ({ ...current, [actionKey]: { status: "opening" } }));
