@@ -144,16 +144,27 @@ function proveApprovalHeartbeatRecovery(): void {
     "an unresolved approval must keep the Mission heartbeat suppressed",
   );
 
-  const accepted = deriveMissionHeartbeat(
-    approvalHeartbeatEvents("accepted"),
-    missionId,
-    [taskId],
-    13_000,
-  );
+  const accepted = approvalHeartbeatEvents("accepted");
   assert.equal(
-    accepted?.text,
+    deriveMissionHeartbeat(accepted, missionId, [taskId], 13_000),
+    null,
+    "an accepted approval is acknowledgement, not evidence that runtime work resumed",
+  );
+
+  accepted.push({
+    id: "retry-after-acceptance",
+    seq: 4,
+    timestamp: 4_000,
+    source: { type: "task", id: taskId },
+    type: "task.running",
+    payload: { retryCount: 0 },
+    taskId,
+    correlationId: missionId,
+  });
+  assert.equal(
+    deriveMissionHeartbeat(accepted, missionId, [taskId], 14_000)?.text,
     "Chef is still working. Last runtime activity was 10 seconds ago.",
-    "an accepted approval must resume the truthful working heartbeat even before another worker event arrives",
+    "accepted approval may restore heartbeat only after real task runtime resumes",
   );
 
   assert.equal(
