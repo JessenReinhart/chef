@@ -321,6 +321,43 @@ const attributedBooleanVerification = artifactHandoff({
 });
 assert.equal(attributedBooleanVerification.verification, "Verified by golden-path", "specific verifier evidence should remain more informative than a boolean success flag");
 
+const multilineNegativeVerificationValues = [
+  "failed\nnpm test exited 1",
+  "pending\r\nWindows acceptance",
+  "error\tplaywright could not start",
+];
+for (const verification of multilineNegativeVerificationValues) {
+  const explicitHandoff = artifactHandoff({
+    uri: "file:///tmp/chef-project/todo-app.mjs",
+    metadata: { verification },
+  });
+  assert.equal(
+    explicitHandoff.verification,
+    null,
+    `multiline explicit verification=${JSON.stringify(verification)} must not appear beneath the positive Verified heading`,
+  );
+
+  const legacyHandoff = artifactHandoff({
+    uri: "file:///tmp/chef-project/todo-app.mjs",
+    metadata: { verified: verification },
+  });
+  assert.equal(
+    legacyHandoff.verification,
+    null,
+    `multiline legacy verified=${JSON.stringify(verification)} must not appear beneath the positive Verified heading`,
+  );
+}
+
+const statusWordPositiveVerification = artifactHandoff({
+  uri: "file:///tmp/chef-project/todo-app.mjs",
+  metadata: { verification: "Error handling tests passed" },
+});
+assert.equal(
+  statusWordPositiveVerification.verification,
+  "Error handling tests passed",
+  "positive prose beginning with a status-like word must not be mistaken for a failed verification state",
+);
+
 const noisy = artifactHandoff({
   name: "todo-app",
   uri: "sideband://result",
