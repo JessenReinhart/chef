@@ -8,9 +8,33 @@ import { canRetryMissionTask } from "../web/src/missionRecovery.ts";
 assert.equal(canRetryMissionTask({
   missionStatus: "failed",
   taskStatus: "failed",
+  retryCount: 1,
   blockedByApproval: false,
   readOnly: false,
-}), true, "failed Mission work must remain retryable");
+}), true, "failed Mission work below the retry budget must remain retryable");
+
+assert.equal(canRetryMissionTask({
+  missionStatus: "failed",
+  taskStatus: "failed",
+  retryCount: 2,
+  blockedByApproval: false,
+  readOnly: false,
+}), false, "failed Mission work at the retry budget must not advertise a dead Retry action");
+
+assert.equal(canRetryMissionTask({
+  missionStatus: "blocked",
+  taskStatus: "blocked",
+  retryCount: 2,
+  blockedByApproval: false,
+  readOnly: false,
+}), false, "blocked Mission work at the retry budget must not advertise a dead Retry action");
+
+assert.equal(canRetryMissionTask({
+  missionStatus: "failed",
+  taskStatus: "failed",
+  blockedByApproval: false,
+  readOnly: false,
+}), true, "missing retry metadata should remain backward-compatible with retryable projected work");
 
 assert.equal(canRetryMissionTask({
   missionStatus: "blocked",
@@ -170,4 +194,4 @@ assert.ok(
 );
 repo.close();
 
-console.log("simple-mode-recovery-actions: ok — Retry follows Mission lifecycle, approvals, read-only state, and clears stale Task failure state durably");
+console.log("simple-mode-recovery-actions: ok — Retry follows Mission lifecycle, retry budget, approvals, read-only state, and clears stale Task failure state durably");
