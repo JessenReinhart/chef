@@ -41,23 +41,26 @@ const firstCopy = copyRunCommandOnce("npm start", "todo-result:1", undefined);
 const repeatedCopy = copyRunCommandOnce("npm start", "todo-result:1", undefined);
 await Promise.resolve();
 assert.equal(copyAttempts, 1, "repeated copy presses for one result version must share one clipboard operation");
+assert.equal(copyResolvers.length, 1, "the shared copy operation must expose exactly one pending clipboard outcome");
 assert.strictEqual(repeatedCopy, firstCopy, "same-version copy presses must observe the same in-flight outcome");
-copyResolvers.shift()?.({ ok: true });
+copyResolvers.shift()!({ ok: true });
 assert.deepEqual(await firstCopy, { ok: true }, "the shared copy operation must report its real success");
 
 const retryCopy = copyRunCommandOnce("npm start", "todo-result:1", undefined);
 await Promise.resolve();
 assert.equal(copyAttempts, 2, "a settled copy operation must allow a later retry for the same result version");
-copyResolvers.shift()?.({ ok: false, error: "Clipboard denied" });
+assert.equal(copyResolvers.length, 1, "retry must create one fresh clipboard operation after settlement");
+copyResolvers.shift()!({ ok: false, error: "Clipboard denied" });
 assert.deepEqual(await retryCopy, { ok: false, error: "Clipboard denied" }, "a later retry must preserve truthful clipboard failure feedback");
 
 const oldVersionCopy = copyRunCommandOnce("npm start", "todo-result:1", undefined);
 const newVersionCopy = copyRunCommandOnce("npm start", "todo-result:2", undefined);
 await Promise.resolve();
 assert.equal(copyAttempts, 4, "a newly published result version must own an independent copy action");
+assert.equal(copyResolvers.length, 2, "two result versions must own two independent clipboard operations");
 assert.notStrictEqual(newVersionCopy, oldVersionCopy, "new result versions must not inherit an older version's in-flight clipboard operation");
-copyResolvers.shift()?.({ ok: true });
-copyResolvers.shift()?.({ ok: true });
+copyResolvers.shift()!({ ok: true });
+copyResolvers.shift()!({ ok: true });
 await Promise.all([oldVersionCopy, newVersionCopy]);
 
 const fallbackReveal = await revealArtifact("result-with-error", async () => ({
