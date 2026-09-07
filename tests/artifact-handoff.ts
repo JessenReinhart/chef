@@ -282,6 +282,29 @@ assert.equal(
   "useful legacy string verification evidence should remain backward compatible",
 );
 
+const negativeExplicitVerificationValues = ["false", "failed", "failure", "no", "not verified", "unverified"];
+for (const verification of negativeExplicitVerificationValues) {
+  const handoff = artifactHandoff({
+    uri: "file:///tmp/chef-project/todo-app.mjs",
+    metadata: { verification },
+  });
+  assert.equal(
+    handoff.verification,
+    null,
+    `explicit verification=${JSON.stringify(verification)} must not appear beneath the positive Verified heading`,
+  );
+}
+
+const explicitNegativeWithVerifier = artifactHandoff({
+  uri: "file:///tmp/chef-project/todo-app.mjs",
+  metadata: { verification: "failed", verifiedBy: "golden-path" },
+});
+assert.equal(
+  explicitNegativeWithVerifier.verification,
+  null,
+  "explicit failed verification must remain authoritative instead of falling through to positive verifier attribution",
+);
+
 const explicitVerificationOverridesLegacyNegative = artifactHandoff({
   uri: "file:///tmp/chef-project/todo-app.mjs",
   metadata: { verification: "Smoke test passed", verified: false },

@@ -72,7 +72,7 @@ export function canRevealArtifact(artifact: ArtifactHandoffInput): boolean {
   return fileUriLocation(artifact.uri) !== null;
 }
 
-const NEGATIVE_LEGACY_VERIFICATION = new Set([
+const NEGATIVE_VERIFICATION_VALUES = new Set([
   "false",
   "failed",
   "failure",
@@ -81,15 +81,19 @@ const NEGATIVE_LEGACY_VERIFICATION = new Set([
   "unverified",
 ]);
 
+function positiveVerificationText(value: string): string | null {
+  return NEGATIVE_VERIFICATION_VALUES.has(value.toLowerCase()) ? null : value;
+}
+
 function verificationText(metadata: Record<string, unknown>): string | null {
   const explicitVerification = firstText(metadata, ["verification"]);
-  if (explicitVerification) return explicitVerification;
+  if (explicitVerification) return positiveVerificationText(explicitVerification);
 
   const legacyVerified = metadata.verified;
   if (legacyVerified === false) return null;
   if (typeof legacyVerified === "string") {
     const value = legacyVerified.trim();
-    if (!value || NEGATIVE_LEGACY_VERIFICATION.has(value.toLowerCase())) return null;
+    if (!value || NEGATIVE_VERIFICATION_VALUES.has(value.toLowerCase())) return null;
     return value;
   }
 
