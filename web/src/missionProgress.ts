@@ -119,10 +119,8 @@ function allOwnedTasksCompleted(scoped: UiRuntimeEvent[], taskIds: Set<string>):
 }
 
 function blocksHeartbeat(event: UiRuntimeEvent): boolean {
-  if (event.type === "approval.resolved") {
-    return stringValue(objectPayload(event), "decision") === "rejected";
-  }
-  return event.type === "task.failed"
+  return event.type === "approval.resolved"
+    || event.type === "task.failed"
     || event.type === "task.blocked"
     || event.type === "task.cancelled"
     || event.type === "session.crashed"
@@ -135,9 +133,6 @@ function blocksHeartbeat(event: UiRuntimeEvent): boolean {
 
 function resumesHeartbeat(event: UiRuntimeEvent): boolean {
   if (event.type === "task.assigned" || event.type === "task.running") return true;
-  if (event.type === "approval.resolved") {
-    return stringValue(objectPayload(event), "decision") === "accepted";
-  }
   if (event.type !== "mission.status") return false;
   const status = stringValue(objectPayload(event), "status");
   return status === "planning" || status === "active" || status === "verifying";
@@ -151,6 +146,13 @@ function recoveryClearsBlocker(recovery: UiRuntimeEvent, blocker: UiRuntimeEvent
   if (blocker.type === "approval.requested") {
     return recovery.type === "approval.resolved" && recovery.source.id === blocker.source.id;
   }
+  if (blocker.type === "approval.resolved") {
+    const blockedTaskId = taskIdForEvent(blocker);
+    if (recovery.type === "mission.status") return resumesHeartbeat(recovery);
+    return blockedTaskId !== undefined
+      && taskIdForEvent(recovery) === blockedTaskId
+      && (recovery.type === "task.assigned" || recovery.type === "task.running");
+  }
   if (
     blocker.type === "task.failed"
     || blocker.type === "task.blocked"
@@ -162,7 +164,7 @@ function recoveryClearsBlocker(recovery: UiRuntimeEvent, blocker: UiRuntimeEvent
       && taskIdForEvent(recovery) === blockedTaskId
       && (recovery.type === "task.assigned" || recovery.type === "task.running");
   }
-  return resumesHeartbeat(recovery) && recovery.type !== "approval.resolved";
+  return resumesHeartbeat(recovery);
 }
 
 export function deriveMissionHomeState(input: {
