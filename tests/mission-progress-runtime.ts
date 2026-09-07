@@ -144,22 +144,50 @@ function proveApprovalHeartbeatRecovery(): void {
     "an unresolved approval must keep the Mission heartbeat suppressed",
   );
 
-  const accepted = deriveMissionHeartbeat(
-    approvalHeartbeatEvents("accepted"),
-    missionId,
-    [taskId],
-    13_000,
-  );
+  const accepted = approvalHeartbeatEvents("accepted");
   assert.equal(
-    accepted?.text,
+    deriveMissionHeartbeat(accepted, missionId, [taskId], 13_000),
+    null,
+    "an accepted approval is acknowledgement, not evidence that runtime work resumed",
+  );
+
+  accepted.push({
+    id: "retry-after-acceptance",
+    seq: 4,
+    timestamp: 4_000,
+    source: { type: "task", id: taskId },
+    type: "task.running",
+    payload: { retryCount: 0 },
+    taskId,
+    correlationId: missionId,
+  });
+  assert.equal(
+    deriveMissionHeartbeat(accepted, missionId, [taskId], 14_000)?.text,
     "Chef is still working. Last runtime activity was 10 seconds ago.",
-    "an accepted approval must resume the truthful working heartbeat even before another worker event arrives",
+    "accepted approval may restore heartbeat only after real task runtime resumes",
   );
 
   assert.equal(
     deriveMissionHeartbeat(approvalHeartbeatEvents("rejected"), missionId, [taskId], 13_000),
     null,
     "a rejected approval must remain a terminal heartbeat blocker",
+  );
+
+  const rejectedThenRetried = approvalHeartbeatEvents("rejected");
+  rejectedThenRetried.push({
+    id: "retry-after-rejection",
+    seq: 4,
+    timestamp: 4_000,
+    source: { type: "task", id: taskId },
+    type: "task.running",
+    payload: { retryCount: 1 },
+    taskId,
+    correlationId: missionId,
+  });
+  assert.equal(
+    deriveMissionHeartbeat(rejectedThenRetried, missionId, [taskId], 14_000)?.text,
+    "Chef is still working. Last runtime activity was 10 seconds ago.",
+    "a rejected approval must close its request while a later real task retry restores heartbeat feedback",
   );
 
   const overlappingApprovals = approvalHeartbeatEvents("accepted");
@@ -178,6 +206,139 @@ function proveApprovalHeartbeatRecovery(): void {
     deriveMissionHeartbeat(overlappingApprovals, missionId, [taskId], 14_000),
     null,
     "accepting one approval must not clear another approval that is still pending",
+  );
+}
+
+function proveTaskScopedHeartbeatRecovery(): void {
+  const missionId = "mission-parallel-heartbeat";
+  const taskA = "task-a";
+  const taskB = "task-b";
+  const active: UiRuntimeEvent = {
+    id: "parallel-active",
+    seq: 1,
+    timestamp: 1_000,
+    source: { type: "mission", id: missionId },
+    type: "mission.status",
+    payload: { status: "active" },
+    correlationId: missionId,
+  };
+
+  for (const blockerType of ["task.failed", "task.blocked", "task.cancelled", "session.crashed"] as const) {
+    const blocked: UiRuntimeEvent[] = [
+      active,
+      {
+        id: `${blockerType}-a`,
+        seq: 2,
+        timestamp: 2_000,
+        source: { type: "task", id: taskA },
+        type: blockerType,
+        payload: blockerType === "task.failed" ? { error: "worker exited" } : { reason: "needs recovery" },
+        taskId: taskA,
+        correlationId: missionId,
+      },
+      {
+        id: "task-b-running",
+        seq: 3,
+        timestamp: 3_000,
+        source: { type: "task", id: taskB },
+        type: "task.running",
+        payload: {},
+        taskId: taskB,
+        correlationId: missionId,
+      },
+    ];
+
+    assert.equal(
+      deriveMissionHeartbeat(blocked, missionId, [taskA, taskB], 13_000),
+      null,
+      `${blockerType} must remain authoritative when only a different parallel task resumes`,
+    );
+
+    const recovered: UiRuntimeEvent[] = [
+      ...blocked,
+      {
+        id: "task-a-retry",
+        seq: 4,
+        timestamp: 4_000,
+        source: { type: "task", id: taskA },
+        type: "task.running",
+        payload: { retryCount: 1 },
+        taskId: taskA,
+        correlationId: missionId,
+      },
+      {
+        id: "task-b-newer-running",
+        seq: 5,
+        timestamp: 5_000,
+        source: { type: "task", id: taskB },
+        type: "task.running",
+        payload: {},
+        taskId: taskB,
+        correlationId: missionId,
+      },
+    ];
+
+    assert.equal(
+      deriveMissionHeartbeat(recovered, missionId, [taskA, taskB], 15_000)?.text,
+      "Chef is still working. Last runtime activity was 10 seconds ago.",
+      `${blockerType} must clear after the same task really retries even when newer unrelated activity exists`,
+    );
+  }
+
+  const twoFailures: UiRuntimeEvent[] = [
+    active,
+    {
+      id: "task-a-failed",
+      seq: 2,
+      timestamp: 2_000,
+      source: { type: "task", id: taskA },
+      type: "task.failed",
+      payload: { error: "task A failed" },
+      taskId: taskA,
+      correlationId: missionId,
+    },
+    {
+      id: "task-b-failed",
+      seq: 3,
+      timestamp: 3_000,
+      source: { type: "task", id: taskB },
+      type: "task.failed",
+      payload: { error: "task B failed" },
+      taskId: taskB,
+      correlationId: missionId,
+    },
+    {
+      id: "task-b-retry",
+      seq: 4,
+      timestamp: 4_000,
+      source: { type: "task", id: taskB },
+      type: "task.running",
+      payload: { retryCount: 1 },
+      taskId: taskB,
+      correlationId: missionId,
+    },
+  ];
+
+  assert.equal(
+    deriveMissionHeartbeat(twoFailures, missionId, [taskA, taskB], 14_000),
+    null,
+    "recovering the newest failed task must not hide an older parallel task that is still unresolved",
+  );
+
+  twoFailures.push({
+    id: "task-a-retry-after-b",
+    seq: 5,
+    timestamp: 5_000,
+    source: { type: "task", id: taskA },
+    type: "task.running",
+    payload: { retryCount: 1 },
+    taskId: taskA,
+    correlationId: missionId,
+  });
+  assert.equal(
+    deriveMissionHeartbeat(twoFailures, missionId, [taskA, taskB], 15_000)?.text,
+    "Chef is still working. Last runtime activity was 10 seconds ago.",
+    "heartbeat may resume only after every parallel task blocker has a compatible recovery",
   );
 }
 
@@ -219,6 +380,7 @@ async function proveSharedRefreshBudget(): Promise<void> {
 
 async function main(): Promise<void> {
   proveApprovalHeartbeatRecovery();
+  proveTaskScopedHeartbeatRecovery();
   await proveSharedRefreshBudget();
 
   const projectDir = await mkdtemp(join(tmpdir(), "chef-heartbeat-runtime-"));
