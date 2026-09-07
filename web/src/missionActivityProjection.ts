@@ -172,7 +172,7 @@ function heartbeatTextForMissionState(text: string, status: UiMission["status"])
 
 function missionActivityFallback(mission: UiMission): string {
   if (mission.status === "planning") return "Chef is deciding who and what this work needs.";
-  if (mission.status === "completed") return "Work is complete. Results are available in this workspace.";
+  if (mission.status === "completed") return "Work is complete.";
   if (mission.status === "waiting_for_approval") return "Chef needs your approval before work can continue.";
   if (mission.status === "blocked") return "Work is blocked. Chef is waiting for a dependency or recovery action before it can continue.";
   if (mission.status === "failed") return "Work failed before a useful recovery update was available.";
