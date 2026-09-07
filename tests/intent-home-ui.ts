@@ -5,6 +5,13 @@ import {
   workspaceSurfacePlan,
 } from "../web/src/canonicalWorkspaceModel.ts";
 import { projectMissionActivity } from "../web/src/missionActivityProjection.ts";
+import {
+  acceptedMissionSubmissionIsPending,
+  clearAcceptedMissionSubmission,
+  missionSubmissionAccepted,
+  observeAcceptedMissionSubmission,
+  rememberAcceptedMissionSubmission,
+} from "../web/src/missionSubmissionFeedback.ts";
 import type { HarnessInfo, UiMission, UiRuntimeEvent, UiTask } from "../web/src/types.ts";
 
 assert.equal(readWorkspaceDepth(null), "simple", "a fresh session should open the canonical Living Workspace");
@@ -34,6 +41,26 @@ assert.equal(power.livingWorkspace, false, "runtime detail must replace rather t
 assert.equal(power.runtimeApp, true, "runtime detail should remain reachable");
 assert.equal(power.rooms, true, "Rooms remain available at advanced depth");
 assert.equal(power.agentContext, true, "agent context remains available at advanced depth");
+
+const acceptedTodo = missionSubmissionAccepted("thread-a", "mission-accepted", "Create a simple todo app");
+rememberAcceptedMissionSubmission(acceptedTodo);
+assert.equal(
+  acceptedMissionSubmissionIsPending(null, "thread-a", []),
+  true,
+  "a remounted Simple Mode surface must keep showing the accepted Mission as starting while authoritative state catches up",
+);
+assert.equal(
+  acceptedMissionSubmissionIsPending(null, "thread-b", []),
+  false,
+  "remembered accepted work must never leak its starting state into another Thread",
+);
+observeAcceptedMissionSubmission("thread-a", [{ id: "mission-accepted" }]);
+assert.equal(
+  acceptedMissionSubmissionIsPending(null, "thread-a", [{ id: "mission-accepted" }]),
+  false,
+  "the remounted starting state must retire once the exact accepted Mission becomes authoritative",
+);
+clearAcceptedMissionSubmission("thread-a");
 
 const mission: UiMission = {
   id: "mission-1",
