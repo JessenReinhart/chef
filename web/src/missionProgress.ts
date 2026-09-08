@@ -148,9 +148,10 @@ function recoveryClearsBlocker(recovery: UiRuntimeEvent, blocker: UiRuntimeEvent
   }
   if (blocker.type === "approval.resolved") {
     const blockedTaskId = taskIdForEvent(blocker);
-    if (recovery.type === "mission.status") return resumesHeartbeat(recovery);
-    return blockedTaskId !== undefined
-      && taskIdForEvent(recovery) === blockedTaskId
+    if (blockedTaskId === undefined) {
+      return recovery.type === "mission.status" && resumesHeartbeat(recovery);
+    }
+    return taskIdForEvent(recovery) === blockedTaskId
       && (recovery.type === "task.assigned" || recovery.type === "task.running" || recovery.type === "session.data");
   }
   if (
