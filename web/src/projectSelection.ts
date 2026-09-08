@@ -25,8 +25,15 @@ export type SingleFlightProjectSelectionResult<T> =
   | { accepted: true; value: T }
   | { accepted: false };
 
-function collapseCurrentDirectorySegments(path: string): string {
+function collapseRepeatedSeparators(path: string): string {
   const slashNormalized = path.replace(/\\/g, "/");
+  const uncRoot = /^\/\/[^/]/.test(slashNormalized);
+  const body = slashNormalized.slice(uncRoot ? 2 : 0).replace(/\/{2,}/g, "/");
+  return uncRoot ? `//${body}` : body;
+}
+
+function collapseCurrentDirectorySegments(path: string): string {
+  const slashNormalized = collapseRepeatedSeparators(path);
   const collapsed = slashNormalized.replace(/\/\.(?=\/|$)/g, "");
   if (!collapsed && slashNormalized.startsWith("/")) return "/";
   if (/^[A-Za-z]:$/.test(collapsed)) return `${collapsed}/`;
