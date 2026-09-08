@@ -68,10 +68,40 @@ assert.equal(windowsTransition.label, "Opening Todo-App");
 assert.equal(windowsTransition.status, "Switching");
 assert.equal(windowsTransition.ariaLabel, "Opening project: C:\\Dev\\Todo-App\\");
 
+const dotSegmentTransition = projectSelectionSummary(
+  { name: "old-project", path: "C:\\dev\\old-project" },
+  { busy: true, pendingPath: "C:\\Dev\\.\\Todo-App\\." },
+);
+assert.equal(
+  dotSegmentTransition.label,
+  "Opening Todo-App",
+  "a harmless current-directory segment must not degrade the visible project handoff into an 'Opening .' label",
+);
+
 assert.equal(sameSelectedProjectPath("/home/alice/todo-app/", "/home/alice/todo-app"), true);
 assert.equal(sameSelectedProjectPath("C:\\Dev\\Todo-App\\", "c:/dev/todo-app"), true);
 assert.equal(sameSelectedProjectPath("\\\\SERVER\\Share\\Todo-App", "//server/share/todo-app/"), true);
 assert.equal(sameSelectedProjectPath("/home/alice/old-project", "/home/alice/todo-app"), false);
+assert.equal(
+  sameSelectedProjectPath("/home/alice/./todo-app/.", "/home/alice/todo-app"),
+  true,
+  "Linux project identity must ignore current-directory path segments",
+);
+assert.equal(
+  sameSelectedProjectPath("C:\\Dev\\.\\Todo-App\\.", "c:/dev/todo-app"),
+  true,
+  "Windows project identity must ignore current-directory path segments while retaining case-insensitive matching",
+);
+assert.equal(
+  sameSelectedProjectPath("\\\\SERVER\\Share\\.\\Todo-App\\.", "//server/share/todo-app"),
+  true,
+  "UNC project identity must ignore current-directory path segments",
+);
+assert.equal(
+  sameSelectedProjectPath("/home/alice/work/../todo-app", "/home/alice/todo-app"),
+  false,
+  "project identity must not invent parent-directory normalization without filesystem context",
+);
 
 const windowsRecent = recentProjectsExcludingSelected("C:\\Dev\\Chef", [
   { name: "Chef duplicate", path: "c:/dev/chef/" },
@@ -119,6 +149,18 @@ const activated = await waitForSelectedProject(
 );
 assert.equal(activated.path, "/home/alice/todo-app");
 assert.deepEqual(observed, ["/home/alice/old-project", "/home/alice/todo-app"]);
+
+const dotSegmentActivated = await waitForSelectedProject(
+  "C:\\Dev\\.\\Todo-App\\.",
+  async () => ({ name: "Todo-App", path: "c:/dev/todo-app" }),
+  async () => {},
+  1,
+);
+assert.equal(
+  dotSegmentActivated.path,
+  "c:/dev/todo-app",
+  "project confirmation must settle immediately when the runtime canonicalizes harmless dot segments from the requested Windows path",
+);
 
 let cancelledLoadCalls = 0;
 const cancelled = await confirmPickedProject(
@@ -209,4 +251,4 @@ const afterCancellationRetry = await singleFlight(async () => {
 });
 assert.deepEqual(afterCancellationRetry, { accepted: true, value: "after-cancel" });
 
-console.log("simple-mode-project-access: ok — project selection stays truthful through Linux/Windows handoffs, deduplicates Recent project aliases, and serializes reopen ownership");
+console.log("simple-mode-project-access: ok — project selection stays truthful through Linux/Windows handoffs, canonical dot-segment paths, Recent aliases, and serialized reopen ownership");

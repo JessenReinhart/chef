@@ -25,8 +25,16 @@ export type SingleFlightProjectSelectionResult<T> =
   | { accepted: true; value: T }
   | { accepted: false };
 
+function collapseCurrentDirectorySegments(path: string): string {
+  const slashNormalized = path.replace(/\\/g, "/");
+  const collapsed = slashNormalized.replace(/\/\.(?=\/|$)/g, "");
+  if (!collapsed && slashNormalized.startsWith("/")) return "/";
+  if (/^[A-Za-z]:$/.test(collapsed)) return `${collapsed}/`;
+  return collapsed;
+}
+
 function normalizedProjectPath(path: string): string {
-  let normalized = path.replace(/\\/g, "/");
+  let normalized = collapseCurrentDirectorySegments(path);
   while (normalized.length > 1 && normalized.endsWith("/") && !/^[A-Za-z]:\/$/.test(normalized)) {
     normalized = normalized.slice(0, -1);
   }
@@ -35,7 +43,7 @@ function normalizedProjectPath(path: string): string {
 }
 
 function projectNameFromPath(path: string): string | null {
-  const normalized = path.replace(/\\/g, "/").replace(/\/+$/, "");
+  const normalized = collapseCurrentDirectorySegments(path).replace(/\/+$/, "");
   const name = normalized.split("/").filter(Boolean).at(-1)?.trim();
   return name || null;
 }
