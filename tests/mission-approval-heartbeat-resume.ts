@@ -43,10 +43,25 @@ assert.equal(
   "resolving an approval must not claim that work resumed before durable execution evidence appears",
 );
 
-const resumedOutput = runtimeEvent({
-  id: "resumed-output",
+const projectedActive = runtimeEvent({
+  id: "active-after-approval",
   seq: 5,
   timestamp: 5_000,
+  type: "mission.status",
+  sourceType: "mission",
+  sourceId: missionId,
+  payload: { status: "active" },
+});
+assert.equal(
+  deriveMissionHeartbeat([...beforeResume, projectedActive], missionId, [taskId], 20_000, 10_000),
+  null,
+  "a Mission status projection after task approval must not claim that the approved worker resumed",
+);
+
+const resumedOutput = runtimeEvent({
+  id: "resumed-output",
+  seq: 6,
+  timestamp: 6_000,
   type: "session.data",
   sourceType: "session",
   sourceId: "session-approved",
@@ -56,10 +71,10 @@ const resumedOutput = runtimeEvent({
   payload: { data: "continuing after approval" },
 });
 const resumedHeartbeat = deriveMissionHeartbeat(
-  [...beforeResume, resumedOutput],
+  [...beforeResume, projectedActive, resumedOutput],
   missionId,
   [taskId],
-  15_000,
+  16_000,
   10_000,
 );
 assert.equal(
@@ -70,8 +85,8 @@ assert.equal(
 
 const unrelatedOutput = runtimeEvent({
   id: "other-output",
-  seq: 5,
-  timestamp: 5_000,
+  seq: 6,
+  timestamp: 6_000,
   type: "session.data",
   sourceType: "session",
   sourceId: "session-other",
@@ -81,9 +96,23 @@ const unrelatedOutput = runtimeEvent({
   payload: { data: "other task output" },
 });
 assert.equal(
-  deriveMissionHeartbeat([...beforeResume, unrelatedOutput], missionId, [taskId, "task-other"], 20_000, 10_000),
+  deriveMissionHeartbeat([...beforeResume, projectedActive, unrelatedOutput], missionId, [taskId, "task-other"], 20_000, 10_000),
   null,
   "output from another Mission Task must not clear the approval recovery boundary",
 );
 
-console.log("mission-approval-heartbeat-resume: ok — approval recovery requires real same-Task execution and accepts resumed session output");
+const missionApprovalId = "approval-mission";
+const missionLevelApproval: UiRuntimeEvent[] = [
+  runtimeEvent({ id: "mission-active-before", seq: 1, timestamp: 1_000, type: "mission.status", sourceType: "mission", sourceId: missionId, payload: { status: "active" } }),
+  runtimeEvent({ id: "mission-approval-requested", seq: 2, timestamp: 2_000, type: "approval.requested", sourceType: "approval", sourceId: missionApprovalId, missionId }),
+  runtimeEvent({ id: "mission-approval-resolved", seq: 3, timestamp: 3_000, type: "approval.resolved", sourceType: "approval", sourceId: missionApprovalId, missionId, payload: { decision: "accepted" } }),
+  runtimeEvent({ id: "mission-active-after", seq: 4, timestamp: 4_000, type: "mission.status", sourceType: "mission", sourceId: missionId, payload: { status: "active" } }),
+];
+const missionLevelHeartbeat = deriveMissionHeartbeat(missionLevelApproval, missionId, [], 14_000, 10_000);
+assert.equal(
+  missionLevelHeartbeat?.text,
+  "Chef is still working. Last runtime activity was 10 seconds ago.",
+  "Mission-level approvals without a Task id may use a later active Mission status as their recovery signal",
+);
+
+console.log("mission-approval-heartbeat-resume: ok — task approval recovery requires real same-Task execution while Mission-level approvals can resume from Mission status");
