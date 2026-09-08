@@ -223,16 +223,26 @@ assert.equal(
 
 const originalFetch = globalThis.fetch;
 const originalLocalStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+const originalSessionStorage = Object.getOwnPropertyDescriptor(globalThis, "sessionStorage");
 const storage = new Map<string, string>([
   ["chef:view-mode", "simple"],
   ["chef:selected-thread", "thread-a"],
 ]);
+const sessionStorageState = new Map<string, string>();
 Object.defineProperty(globalThis, "localStorage", {
   configurable: true,
   value: {
     getItem(key: string) { return storage.get(key) ?? null; },
     setItem(key: string, value: string) { storage.set(key, value); },
     removeItem(key: string) { storage.delete(key); },
+  },
+});
+Object.defineProperty(globalThis, "sessionStorage", {
+  configurable: true,
+  value: {
+    getItem(key: string) { return sessionStorageState.get(key) ?? null; },
+    setItem(key: string, value: string) { sessionStorageState.set(key, value); },
+    removeItem(key: string) { sessionStorageState.delete(key); },
   },
 });
 
@@ -315,6 +325,64 @@ try {
     true,
     "the canonical Thread-chat path must remember accepted Mission ownership after the POST settles",
   );
+
+  const threadAStorageKey = `chef:accepted-mission-submission:${encodeURIComponent("thread-a")}`;
+  const persistedThreadA = sessionStorageState.get(threadAStorageKey);
+  assert.ok(persistedThreadA, "the accepted Thread-chat handoff must persist reload-safe ownership before Mission projection");
+  const persistedThreadAValue = JSON.parse(persistedThreadA) as { acceptedAt: number };
+  const reloadThreadStorageKey = `chef:accepted-mission-submission:${encodeURIComponent("thread-reload")}`;
+  sessionStorageState.set(reloadThreadStorageKey, JSON.stringify({
+    threadId: "thread-reload",
+    missionId: "mission-reload",
+    goal: submittedText,
+    acceptedAt: persistedThreadAValue.acceptedAt,
+  }));
+  const reloadedSubmission = await import(`../web/src/missionSubmissionFeedback.ts?reload=${Date.now()}`);
+  assert.equal(
+    reloadedSubmission.acceptedMissionSubmissionIsPending(
+      null,
+      "thread-reload",
+      [],
+      persistedThreadAValue.acceptedAt + 1,
+    ),
+    true,
+    "a fresh page/module instance must rehydrate the accepted same-Thread Mission guard during projection lag",
+  );
+  assert.equal(
+    reloadedSubmission.acceptedMissionSubmissionForThread("thread-b", persistedThreadAValue.acceptedAt + 1),
+    null,
+    "a reloaded accepted-Mission guard must remain scoped to its owning Thread",
+  );
+  reloadedSubmission.observeAcceptedMissionSubmission("thread-reload", [{ id: "mission-reload" }]);
+  assert.equal(
+    sessionStorageState.has(reloadThreadStorageKey),
+    false,
+    "authoritative projection of the exact accepted Mission must retire reload-safe ownership",
+  );
+
+  const staleThreadStorageKey = `chef:accepted-mission-submission:${encodeURIComponent("thread-stale")}`;
+  sessionStorageState.set(staleThreadStorageKey, JSON.stringify({
+    threadId: "thread-stale",
+    missionId: "mission-stale",
+    goal: submittedText,
+    acceptedAt: 1,
+  }));
+  assert.equal(
+    reloadedSubmission.acceptedMissionSubmissionForThread("thread-stale", 31_000, 30_000),
+    null,
+    "expired reload ownership must fail open after the existing bounded projection grace window",
+  );
+  assert.equal(sessionStorageState.has(staleThreadStorageKey), false, "expired persisted ownership must be cleaned up");
+
+  const malformedThreadStorageKey = `chef:accepted-mission-submission:${encodeURIComponent("thread-malformed")}`;
+  sessionStorageState.set(malformedThreadStorageKey, "{not-json");
+  assert.equal(
+    reloadedSubmission.acceptedMissionSubmissionForThread("thread-malformed", Date.now()),
+    null,
+    "malformed persisted ownership must never lock Simple Mode after reload",
+  );
+  assert.equal(sessionStorageState.has(malformedThreadStorageKey), false, "malformed persisted ownership must be cleaned up");
+
   const requestsBeforeDuplicate = chatRequests.get("thread-a") ?? 0;
   await assert.rejects(
     sendThreadMessage("thread-a", "Create another todo app"),
@@ -367,6 +435,8 @@ try {
   globalThis.fetch = originalFetch;
   if (originalLocalStorage) Object.defineProperty(globalThis, "localStorage", originalLocalStorage);
   else delete (globalThis as { localStorage?: unknown }).localStorage;
+  if (originalSessionStorage) Object.defineProperty(globalThis, "sessionStorage", originalSessionStorage);
+  else delete (globalThis as { sessionStorage?: unknown }).sessionStorage;
 }
 
 console.log("Simple Mode submission feedback behavior passed.");
