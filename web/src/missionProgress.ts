@@ -151,7 +151,7 @@ function recoveryClearsBlocker(recovery: UiRuntimeEvent, blocker: UiRuntimeEvent
     if (recovery.type === "mission.status") return resumesHeartbeat(recovery);
     return blockedTaskId !== undefined
       && taskIdForEvent(recovery) === blockedTaskId
-      && (recovery.type === "task.assigned" || recovery.type === "task.running");
+      && (recovery.type === "task.assigned" || recovery.type === "task.running" || recovery.type === "session.data");
   }
   if (
     blocker.type === "task.failed"
