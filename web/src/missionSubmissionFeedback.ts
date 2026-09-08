@@ -37,17 +37,36 @@ function currentSubmissionOwnerKey(): string | null {
   return submissionOwnerKey(localStorage.getItem(SELECTED_THREAD_KEY));
 }
 
-function acceptedMissionSubmissionIsFresh(
+function acceptedMissionSubmissionTime(
   accepted: AcceptedMissionSubmission,
   now: number,
-  graceMs: number,
-): boolean {
+): number {
   let acceptedAt = acceptedMissionSubmissionTimes.get(accepted);
   if (acceptedAt === undefined) {
     acceptedAt = now;
     acceptedMissionSubmissionTimes.set(accepted, acceptedAt);
   }
-  return now - acceptedAt < graceMs;
+  return acceptedAt;
+}
+
+function acceptedMissionSubmissionIsFresh(
+  accepted: AcceptedMissionSubmission,
+  now: number,
+  graceMs: number,
+): boolean {
+  return now - acceptedMissionSubmissionTime(accepted, now) < graceMs;
+}
+
+function mostRecentAcceptedMissionSubmission(
+  localAccepted: AcceptedMissionSubmission | null,
+  rememberedAccepted: AcceptedMissionSubmission | null,
+  now: number,
+): AcceptedMissionSubmission | null {
+  if (!localAccepted) return rememberedAccepted;
+  if (!rememberedAccepted) return localAccepted;
+  return acceptedMissionSubmissionTime(rememberedAccepted, now) >= acceptedMissionSubmissionTime(localAccepted, now)
+    ? rememberedAccepted
+    : localAccepted;
 }
 
 export function missionSubmissionAcknowledgement(): string {
@@ -113,10 +132,10 @@ export function clearAcceptedMissionSubmission(threadId: string | null): void {
 /**
  * Keep the visible Simple Mode handoff aligned with the durable Thread-owned
  * submission guard. Component-local accepted state can disappear after a
- * surface remount or be intentionally withheld while another Thread owns the
- * foreground; the remembered guard remains authoritative until the exact
- * accepted Mission appears in state. A bounded grace window prevents an
- * acknowledged-but-never-projected Mission from locking Simple Mode forever.
+ * surface remount or lag behind a newer same-Thread acknowledgement; the
+ * newest accepted handoff remains authoritative until its exact Mission appears
+ * in state. A bounded grace window prevents an acknowledged-but-never-projected
+ * Mission from locking Simple Mode forever.
  */
 export function acceptedMissionSubmissionIsPending(
   accepted: AcceptedMissionSubmission | null,
@@ -125,9 +144,9 @@ export function acceptedMissionSubmissionIsPending(
   now = Date.now(),
   graceMs = ACCEPTED_MISSION_PROJECTION_GRACE_MS,
 ): boolean {
-  const visibleAccepted = accepted?.threadId === selectedThreadId
-    ? accepted
-    : acceptedMissionSubmissionForThread(selectedThreadId, now, graceMs);
+  const localAccepted = accepted?.threadId === selectedThreadId ? accepted : null;
+  const rememberedAccepted = acceptedMissionSubmissionForThread(selectedThreadId, now, graceMs);
+  const visibleAccepted = mostRecentAcceptedMissionSubmission(localAccepted, rememberedAccepted, now);
   if (!visibleAccepted) return false;
   if (!acceptedMissionSubmissionIsFresh(visibleAccepted, now, graceMs)) {
     const ownerKey = submissionOwnerKey(selectedThreadId);
