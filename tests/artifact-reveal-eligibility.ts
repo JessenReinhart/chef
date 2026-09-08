@@ -59,4 +59,22 @@ assert.equal(
   "non-file explicit locations must remain unchanged instead of being reinterpreted as local paths",
 );
 
-console.log("artifact reveal eligibility behavior passed");
+for (const verification of ["Failed. npm test exited 1", "Pending, Windows acceptance"] as const) {
+  assert.equal(
+    artifactHandoff({ uri: "file:///tmp/chef-project/todo-app.mjs", metadata: { verification } }).verification,
+    null,
+    `punctuation-delimited explicit verification=${JSON.stringify(verification)} must not appear beneath the positive Verified heading`,
+  );
+  assert.equal(
+    artifactHandoff({ uri: "file:///tmp/chef-project/todo-app.mjs", metadata: { verified: verification } }).verification,
+    null,
+    `punctuation-delimited legacy verified=${JSON.stringify(verification)} must not appear beneath the positive Verified heading`,
+  );
+}
+assert.equal(
+  artifactHandoff({ uri: "file:///tmp/chef-project/todo-app.mjs", metadata: { verification: "Error handling tests passed" } }).verification,
+  "Error handling tests passed",
+  "positive verification prose beginning with a status-like word must remain visible",
+);
+
+console.log("artifact reveal eligibility and handoff truthfulness behavior passed");
