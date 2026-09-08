@@ -8,8 +8,8 @@ export interface MissionTaskVisibility {
 function visibilityPriority(status: UiTask["status"]): number {
   if (status === "failed" || status === "blocked") return 0;
   if (status === "running" || status === "assigned" || status === "spawning") return 1;
-  if (status === "pending") return 2;
-  if (status === "cancelled") return 3;
+  if (status === "cancelled") return 2;
+  if (status === "pending") return 3;
   return 4;
 }
 

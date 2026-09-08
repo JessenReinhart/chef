@@ -136,9 +136,9 @@ export function workerActivityState(task: UiTask): string {
 function workerVisibilityPriority(task: UiTask): number {
   if (task.status === "failed" || task.status === "blocked") return 0;
   if (task.status === "running" || task.status === "spawning" || task.status === "assigned") return 1;
+  if (task.status === "cancelled") return 2;
   if (task.status === "completed") return 4;
-  if (task.status === "cancelled") return 3;
-  return 2;
+  return 3;
 }
 
 export function missionActivityState(mission: UiMission | null): string {
