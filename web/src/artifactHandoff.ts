@@ -77,6 +77,10 @@ export function canRevealArtifact(artifact: ArtifactHandoffInput): boolean {
 }
 
 const NON_SUCCESS_VERIFICATION_VALUES = new Set([
+  "aborted",
+  "blocked",
+  "canceled",
+  "cancelled",
   "false",
   "fail",
   "failed",
@@ -89,6 +93,9 @@ const NON_SUCCESS_VERIFICATION_VALUES = new Set([
   "not verified",
   "pending",
   "skipped",
+  "timed out",
+  "timed-out",
+  "timeout",
   "unchecked",
   "unknown",
   "unverified",
