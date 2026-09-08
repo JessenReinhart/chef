@@ -373,6 +373,7 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
   }, [latestMission, messages, showingStartingState]);
   const reportPresentation = chefReportPresentation({
     missionStatus: latestMission?.status ?? null,
+    directReport: Boolean(lastReport) && acceptedSubmission === null,
     starting: showingStartingState,
   });
 
