@@ -67,6 +67,52 @@ assert.equal(
   "the provisional starting state must retire as soon as authoritative Mission state contains the accepted Mission",
 );
 
+const olderAcceptedAt = 50_000;
+const olderAccepted = missionSubmissionAccepted(
+  "thread-continuity",
+  "mission-older",
+  "Create the todo app shell",
+  olderAcceptedAt,
+);
+const newerAccepted = missionSubmissionAccepted(
+  "thread-continuity",
+  "mission-newer",
+  "Add persistence to the todo app",
+  olderAcceptedAt + 1,
+);
+rememberAcceptedMissionSubmission(newerAccepted);
+assert.equal(
+  acceptedMissionSubmissionIsPending(
+    olderAccepted,
+    "thread-continuity",
+    [{ id: "mission-older" }],
+    olderAcceptedAt + 2,
+  ),
+  true,
+  "a projected older local acknowledgement must not unlock Simple Mode while a newer same-Thread accepted Mission is still projecting",
+);
+assert.deepEqual(
+  missionSubmissionComposerState({ submitting: false, acceptedPending: true }),
+  { locked: true, label: "Starting…" },
+  "the newer accepted Mission must keep the composer visibly guarded during projection lag",
+);
+assert.equal(
+  acceptedMissionSubmissionIsPending(
+    olderAccepted,
+    "thread-continuity",
+    [{ id: "mission-older" }, { id: "mission-newer" }],
+    olderAcceptedAt + 3,
+  ),
+  false,
+  "the composer must unlock immediately once the exact newer accepted Mission becomes authoritative",
+);
+assert.equal(
+  acceptedMissionSubmissionForThread("thread-continuity", olderAcceptedAt + 3),
+  null,
+  "projecting the newer Mission must also retire its durable Thread guard",
+);
+clearAcceptedMissionSubmission("thread-continuity");
+
 assert.deepEqual(
   missionSubmissionComposerState({ submitting: true, acceptedPending: false }),
   { locked: true, label: "Starting…" },
