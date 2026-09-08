@@ -3,6 +3,7 @@ import {
   confirmPickedProject,
   createSingleFlightProjectSelection,
   projectSelectionSummary,
+  recentProjectsExcludingSelected,
   sameSelectedProjectPath,
   waitForSelectedProject,
 } from "../web/src/projectSelection.ts";
@@ -71,6 +72,28 @@ assert.equal(sameSelectedProjectPath("/home/alice/todo-app/", "/home/alice/todo-
 assert.equal(sameSelectedProjectPath("C:\\Dev\\Todo-App\\", "c:/dev/todo-app"), true);
 assert.equal(sameSelectedProjectPath("\\\\SERVER\\Share\\Todo-App", "//server/share/todo-app/"), true);
 assert.equal(sameSelectedProjectPath("/home/alice/old-project", "/home/alice/todo-app"), false);
+
+const windowsRecent = recentProjectsExcludingSelected("C:\\Dev\\Chef", [
+  { name: "Chef duplicate", path: "c:/dev/chef/" },
+  { name: "Todo", path: "C:\\Dev\\Todo" },
+  { name: "Notes", path: "D:\\Work\\Notes" },
+]);
+assert.deepEqual(
+  windowsRecent.map((project) => project.name),
+  ["Todo", "Notes"],
+  "Recent must exclude Windows-equivalent spellings of the selected project while preserving distinct projects",
+);
+
+const linuxRecent = recentProjectsExcludingSelected("/home/alice/Chef", [
+  { name: "Chef trailing slash", path: "/home/alice/Chef/" },
+  { name: "chef lowercase", path: "/home/alice/chef" },
+  { name: "Todo", path: "/home/alice/todo" },
+]);
+assert.deepEqual(
+  linuxRecent.map((project) => project.name),
+  ["chef lowercase", "Todo"],
+  "Linux Recent filtering must remove only equivalent paths and remain case-sensitive",
+);
 
 const observed: string[] = [];
 const responses: Array<{ name: string; path: string } | Error> = [
@@ -182,4 +205,4 @@ const afterCancellationRetry = await singleFlight(async () => {
 });
 assert.deepEqual(afterCancellationRetry, { accepted: true, value: "after-cancel" });
 
-console.log("simple-mode-project-access: ok — project selection stays truthful through Linux/Windows handoffs and serializes reopen ownership");
+console.log("simple-mode-project-access: ok — project selection stays truthful through Linux/Windows handoffs, excludes the selected project from Recent, and serializes reopen ownership");

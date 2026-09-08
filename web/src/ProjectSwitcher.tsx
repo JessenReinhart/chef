@@ -1,6 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { api, type ProjectInfo } from "./api";
-import { createSingleFlightProjectSelection, projectSelectionSummary, waitForSelectedProject } from "./projectSelection";
+import {
+  createSingleFlightProjectSelection,
+  projectSelectionSummary,
+  recentProjectsExcludingSelected,
+  waitForSelectedProject,
+} from "./projectSelection";
 
 export function ProjectSwitcher() {
   const [project, setProject] = useState<ProjectInfo | null>(null);
@@ -52,6 +57,9 @@ export function ProjectSwitcher() {
   };
 
   const selection = projectSelectionSummary(project, { busy, pendingPath });
+  const recentProjects = project
+    ? recentProjectsExcludingSelected(project.path, project.recent).slice(0, 6)
+    : [];
 
   return (
     <div className="relative">
@@ -92,10 +100,10 @@ export function ProjectSwitcher() {
             <input className="min-w-0 rounded border border-[#30363d] bg-[#010409] px-2 py-1.5 text-[10px]" value={path} onChange={(event) => setPath(event.target.value)} placeholder="/home/you/project or C:\\dev\\my-project" aria-label="Project directory" disabled={busy} />
             <button className="rounded border border-[#30363d] bg-[#161b22] px-2 py-1.5 text-[10px] disabled:opacity-50" type="submit" disabled={busy || !path.trim()}>Open path</button>
           </form>
-          {project?.recent.length ? (
+          {recentProjects.length ? (
             <div className="mt-3 grid gap-1 border-t border-[#21262d] pt-2">
               <span className="text-[9px] uppercase tracking-wider text-[#6e7681]">Recent</span>
-              {project.recent.filter((item) => item.path !== project.path).slice(0, 6).map((item) => (
+              {recentProjects.map((item) => (
                 <button className="grid gap-0.5 rounded px-2 py-1.5 text-left hover:bg-[#161b22] disabled:opacity-50" key={item.path} disabled={busy} onClick={() => void reopen(() => api.openProject(item.path), item.path)} title={item.path}>
                   <strong className="truncate text-[11px]">{item.name}</strong><small className="truncate text-[9px] text-[#6e7681]">{item.path}</small>
                 </button>

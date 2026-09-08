@@ -57,6 +57,13 @@ export function sameSelectedProjectPath(left: string, right: string): boolean {
   return normalizedProjectPath(left) === normalizedProjectPath(right);
 }
 
+export function recentProjectsExcludingSelected<T extends ProjectSelectionInfo>(
+  selectedPath: string,
+  recent: T[],
+): T[] {
+  return recent.filter((project) => !sameSelectedProjectPath(project.path, selectedPath));
+}
+
 export async function waitForSelectedProject<T extends ProjectSelectionInfo>(
   expectedPath: string,
   loadProject: () => Promise<T>,
