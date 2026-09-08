@@ -37,9 +37,11 @@ function fileUriLocation(uri: string): string | null {
   try {
     const url = new URL(uri);
     let pathname = decodeURIComponent(url.pathname);
-    if (/^\/[A-Za-z]:\//.test(pathname)) pathname = pathname.slice(1);
-    if (url.host && url.hostname.toLowerCase() !== "localhost") {
-      return pathname && pathname !== "/" ? `//${url.host}${pathname}` : null;
+    const hasRemoteAuthority = Boolean(url.host && url.hostname.toLowerCase() !== "localhost");
+    if (!hasRemoteAuthority && /^\/[A-Za-z]:\//.test(pathname)) pathname = pathname.slice(1);
+    if (hasRemoteAuthority) {
+      if (!pathname || pathname === "/") return null;
+      return `//${url.host}${pathname.startsWith("/") ? pathname : `/${pathname}`}`;
     }
     return pathname || null;
   } catch {
