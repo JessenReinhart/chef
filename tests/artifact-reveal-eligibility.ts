@@ -5,6 +5,8 @@ const revealable = (uri: string, metadata: Record<string, unknown> = {}) => canR
 
 assert.equal(revealable("file:///tmp/chef-project/todo-app.mjs"), true, "valid Linux file results remain revealable");
 assert.equal(revealable("file:///C:/Work/chef/todo-app.mjs"), true, "valid Windows file results remain revealable");
+assert.equal(revealable("file://localhost/tmp/chef-project/todo-app.mjs"), true, "localhost Linux file results remain revealable as local results");
+assert.equal(revealable("file://localhost/C:/Work/chef/todo-app.mjs"), true, "localhost Windows file results remain revealable as local results");
 assert.equal(revealable("file://server/share/todo-app.mjs"), true, "valid file-host/UNC results remain revealable");
 assert.equal(revealable("sideband://result", { resultLocation: "dist/todo-app" }), true, "relative project-local result locations remain revealable");
 assert.equal(revealable("sideband://result", { path: "C:\\Work\\chef\\todo-app" }), true, "explicit Windows result paths remain revealable");
@@ -24,6 +26,21 @@ assert.equal(
   artifactHandoff({ uri: "sideband://result", metadata: { resultLocation: "file:///C:/Work/chef/todo-app.mjs" } }).location,
   "C:/Work/chef/todo-app.mjs",
   "explicit Windows file URI locations should use the same readable drive path as artifact URI fallbacks",
+);
+assert.equal(
+  artifactHandoff({ uri: "sideband://result", metadata: { resultLocation: "file://localhost/tmp/chef-project/todo-app.mjs" } }).location,
+  "/tmp/chef-project/todo-app.mjs",
+  "localhost Linux file URI locations should be projected as local filesystem paths rather than UNC-style paths",
+);
+assert.equal(
+  artifactHandoff({ uri: "sideband://result", metadata: { resultLocation: "file://localhost/C:/Work/chef/todo-app.mjs" } }).location,
+  "C:/Work/chef/todo-app.mjs",
+  "localhost Windows file URI locations should be projected as local drive paths rather than //localhost paths",
+);
+assert.equal(
+  artifactHandoff({ uri: "sideband://result", metadata: { resultLocation: "file://fileserver/share/todo-app.mjs" } }).location,
+  "//fileserver/share/todo-app.mjs",
+  "a genuine remote file authority must remain a UNC/network result location",
 );
 assert.equal(
   artifactHandoff({ uri: "sideband://result", metadata: { resultLocation: "dist/todo-app" } }).location,
