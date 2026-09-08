@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 
+import { projectMissionActivity } from "../web/src/missionActivityProjection.ts";
 import { partitionMissionTasksForSimpleMode } from "../web/src/missionTaskVisibility.ts";
-import type { UiTask } from "../web/src/types.ts";
+import type { UiMission, UiTask } from "../web/src/types.ts";
 
 function task(id: string, status: UiTask["status"]): UiTask {
   return { id, title: id, description: id, status };
@@ -46,6 +47,38 @@ assert.deepEqual(
   "queued work should absorb overflow before a stopped step that needs user attention",
 );
 
+const workerOverflowTasks = [
+  task("cancelled-worker", "cancelled"),
+  task("queued-worker-1", "pending"),
+  task("queued-worker-2", "pending"),
+  task("queued-worker-3", "pending"),
+  task("queued-worker-4", "pending"),
+];
+const workerOverflowMission: UiMission = {
+  id: "mission-worker-overflow",
+  goal: "Create a simple todo app",
+  status: "active",
+  taskIds: workerOverflowTasks.map(({ id }) => id),
+  createdAt: 1_000,
+  updatedAt: 1_000,
+};
+const workerOverflow = projectMissionActivity(
+  { missions: [workerOverflowMission], tasks: workerOverflowTasks, events: [] },
+  [],
+  2_000,
+);
+assert.ok(workerOverflow, "the current Mission worker projection must remain available during overflow");
+assert.deepEqual(
+  workerOverflow.workers.map(({ id }) => id),
+  ["cancelled-worker", "queued-worker-1", "queued-worker-2", "queued-worker-3"],
+  "a stopped worker must survive the four-worker Simple Mode budget ahead of queued work",
+);
+assert.equal(
+  workerOverflow.workers[0]?.state,
+  "Stopped",
+  "the retained cancelled worker must truthfully explain that work stopped rather than looking queued",
+);
+
 const mixedLive = partitionMissionTasksForSimpleMode([
   task("running-early", "running"),
   task("blocked-early", "blocked"),
@@ -81,4 +114,4 @@ assert.deepEqual(
   "older completed steps must remain available through progressive disclosure",
 );
 
-console.log("intent-home-task-overflow-ui: ok — bounded Simple Mode task visibility prioritizes actionable work over completed history");
+console.log("intent-home-task-overflow-ui: ok — bounded Simple Mode task and worker visibility prioritizes actionable work over queued/history overflow");
