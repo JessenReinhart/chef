@@ -78,6 +78,16 @@ assert.equal(
   "a harmless current-directory segment must not degrade the visible project handoff into an 'Opening .' label",
 );
 
+const repeatedSeparatorTransition = projectSelectionSummary(
+  { name: "old-project", path: "/home/alice/old-project" },
+  { busy: true, pendingPath: "/home/alice///todo-app//" },
+);
+assert.equal(
+  repeatedSeparatorTransition.label,
+  "Opening todo-app",
+  "repeated separators must not degrade the visible project handoff label",
+);
+
 assert.equal(sameSelectedProjectPath("/home/alice/todo-app/", "/home/alice/todo-app"), true);
 assert.equal(sameSelectedProjectPath("C:\\Dev\\Todo-App\\", "c:/dev/todo-app"), true);
 assert.equal(sameSelectedProjectPath("\\\\SERVER\\Share\\Todo-App", "//server/share/todo-app/"), true);
@@ -96,6 +106,21 @@ assert.equal(
   sameSelectedProjectPath("\\\\SERVER\\Share\\.\\Todo-App\\.", "//server/share/todo-app"),
   true,
   "UNC project identity must ignore current-directory path segments",
+);
+assert.equal(
+  sameSelectedProjectPath("/home/alice///todo-app//", "/home/alice/todo-app"),
+  true,
+  "Linux project identity must ignore repeated separators",
+);
+assert.equal(
+  sameSelectedProjectPath("C:\\Dev\\\\Todo-App\\", "c:/dev/todo-app"),
+  true,
+  "Windows project identity must ignore repeated separators while retaining case-insensitive matching",
+);
+assert.equal(
+  sameSelectedProjectPath("\\\\SERVER\\Share\\\\Todo-App", "//server/share/todo-app"),
+  true,
+  "UNC project identity must preserve the UNC root while collapsing redundant separators inside the share path",
 );
 assert.equal(
   sameSelectedProjectPath("/home/alice/work/../todo-app", "/home/alice/todo-app"),
@@ -160,6 +185,30 @@ assert.equal(
   dotSegmentActivated.path,
   "c:/dev/todo-app",
   "project confirmation must settle immediately when the runtime canonicalizes harmless dot segments from the requested Windows path",
+);
+
+const repeatedSeparatorActivated = await waitForSelectedProject(
+  "/home/alice///todo-app//",
+  async () => ({ name: "todo-app", path: "/home/alice/todo-app" }),
+  async () => {},
+  1,
+);
+assert.equal(
+  repeatedSeparatorActivated.path,
+  "/home/alice/todo-app",
+  "project confirmation must settle immediately when the runtime canonicalizes repeated separators from the requested Linux path",
+);
+
+const repeatedWindowsActivated = await waitForSelectedProject(
+  "C:\\Dev\\\\Todo-App\\",
+  async () => ({ name: "Todo-App", path: "c:/dev/todo-app" }),
+  async () => {},
+  1,
+);
+assert.equal(
+  repeatedWindowsActivated.path,
+  "c:/dev/todo-app",
+  "project confirmation must settle immediately when the runtime canonicalizes repeated separators from the requested Windows path",
 );
 
 let cancelledLoadCalls = 0;
@@ -251,4 +300,4 @@ const afterCancellationRetry = await singleFlight(async () => {
 });
 assert.deepEqual(afterCancellationRetry, { accepted: true, value: "after-cancel" });
 
-console.log("simple-mode-project-access: ok — project selection stays truthful through Linux/Windows handoffs, canonical dot-segment paths, Recent aliases, and serialized reopen ownership");
+console.log("simple-mode-project-access: ok — project selection stays truthful through Linux/Windows handoffs, dot/repeated-separator canonical paths, Recent aliases, and serialized reopen ownership");
