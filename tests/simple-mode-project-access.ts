@@ -76,23 +76,27 @@ assert.equal(sameSelectedProjectPath("/home/alice/old-project", "/home/alice/tod
 const windowsRecent = recentProjectsExcludingSelected("C:\\Dev\\Chef", [
   { name: "Chef duplicate", path: "c:/dev/chef/" },
   { name: "Todo", path: "C:\\Dev\\Todo" },
+  { name: "Todo duplicate", path: "c:/dev/todo/" },
+  { name: "Share", path: "\\\\SERVER\\Share\\Project" },
+  { name: "Share duplicate", path: "//server/share/project/" },
   { name: "Notes", path: "D:\\Work\\Notes" },
 ]);
 assert.deepEqual(
   windowsRecent.map((project) => project.name),
-  ["Todo", "Notes"],
-  "Recent must exclude Windows-equivalent spellings of the selected project while preserving distinct projects",
+  ["Todo", "Share", "Notes"],
+  "Recent must exclude the selected Windows project and keep only the first entry for each equivalent local or UNC path",
 );
 
 const linuxRecent = recentProjectsExcludingSelected("/home/alice/Chef", [
   { name: "Chef trailing slash", path: "/home/alice/Chef/" },
   { name: "chef lowercase", path: "/home/alice/chef" },
+  { name: "chef lowercase duplicate", path: "/home/alice/chef/" },
   { name: "Todo", path: "/home/alice/todo" },
 ]);
 assert.deepEqual(
   linuxRecent.map((project) => project.name),
   ["chef lowercase", "Todo"],
-  "Linux Recent filtering must remove only equivalent paths and remain case-sensitive",
+  "Linux Recent filtering must dedupe trailing-slash aliases while preserving case-distinct paths",
 );
 
 const observed: string[] = [];
@@ -205,4 +209,4 @@ const afterCancellationRetry = await singleFlight(async () => {
 });
 assert.deepEqual(afterCancellationRetry, { accepted: true, value: "after-cancel" });
 
-console.log("simple-mode-project-access: ok — project selection stays truthful through Linux/Windows handoffs, excludes the selected project from Recent, and serializes reopen ownership");
+console.log("simple-mode-project-access: ok — project selection stays truthful through Linux/Windows handoffs, deduplicates Recent project aliases, and serializes reopen ownership");

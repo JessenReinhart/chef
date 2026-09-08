@@ -61,7 +61,14 @@ export function recentProjectsExcludingSelected<T extends ProjectSelectionInfo>(
   selectedPath: string,
   recent: T[],
 ): T[] {
-  return recent.filter((project) => !sameSelectedProjectPath(project.path, selectedPath));
+  const seenPaths = new Set<string>();
+  return recent.filter((project) => {
+    if (sameSelectedProjectPath(project.path, selectedPath)) return false;
+    const normalizedPath = normalizedProjectPath(project.path);
+    if (seenPaths.has(normalizedPath)) return false;
+    seenPaths.add(normalizedPath);
+    return true;
+  });
 }
 
 export async function waitForSelectedProject<T extends ProjectSelectionInfo>(
