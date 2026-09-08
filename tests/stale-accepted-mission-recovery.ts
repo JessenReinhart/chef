@@ -64,8 +64,46 @@ assert.equal(
   "the Thread-level duplicate guard must stay active throughout normal projection lag",
 );
 assert.equal(
-  acceptedMissionSubmissionForThread(
+  acceptedMissionSubmissionIsPending(
+    accepted,
     "thread-a",
+    [{ id: "mission-some-other-work" }],
+    acceptedAt + 1,
+  ),
+  true,
+  "an unrelated Mission projection must not retire the accepted submission guard",
+);
+assert.equal(
+  acceptedMissionSubmissionForThread("thread-a", acceptedAt + 1)?.missionId,
+  "mission-never-projected",
+  "mismatched Mission evidence must leave the durable duplicate guard intact",
+);
+assert.equal(
+  acceptedMissionSubmissionIsPending(
+    accepted,
+    "thread-a",
+    [{ id: "mission-never-projected" }],
+    acceptedAt + 2,
+  ),
+  false,
+  "the exact authoritative Mission must unlock the visible starting state",
+);
+assert.equal(
+  acceptedMissionSubmissionForThread("thread-a", acceptedAt + 2),
+  null,
+  "the exact authoritative Mission must also retire the durable Thread submission guard immediately",
+);
+
+const staleAccepted = missionSubmissionAccepted(
+  "thread-stale",
+  "mission-still-never-projected",
+  "Create a notes app",
+  acceptedAt,
+);
+rememberAcceptedMissionSubmission(staleAccepted);
+assert.equal(
+  acceptedMissionSubmissionForThread(
+    "thread-stale",
     acceptedAt + ACCEPTED_MISSION_PROJECTION_GRACE_MS,
   ),
   null,
@@ -95,6 +133,7 @@ assert.equal(
 );
 
 clearAcceptedMissionSubmission("thread-a");
+clearAcceptedMissionSubmission("thread-stale");
 clearAcceptedMissionSubmission("thread-local");
 
 console.log("Stale accepted Mission recovery behavior passed.");
