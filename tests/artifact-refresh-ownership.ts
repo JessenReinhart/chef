@@ -1,4 +1,5 @@
 import { strict as assert } from "node:assert";
+import { shouldClearMissionResultForThreadChange } from "../web/src/artifactProjection.ts";
 import { createInvalidationOwnedRefreshQueue } from "../web/src/invalidationOwnedRefresh.ts";
 
 function deferred<T>() {
@@ -10,6 +11,42 @@ function deferred<T>() {
 function nextTurn(): Promise<void> {
   return new Promise((resolve) => setImmediate(resolve));
 }
+
+assert.equal(
+  shouldClearMissionResultForThreadChange("thread-a", "thread-a"),
+  false,
+  "same-Thread refreshes must keep the last known result available while the replacement snapshot loads",
+);
+assert.equal(
+  shouldClearMissionResultForThreadChange("thread-a", "thread-b"),
+  true,
+  "switching Threads must synchronously retire the previous Thread result before replacement reads settle",
+);
+assert.equal(
+  shouldClearMissionResultForThreadChange("thread-a", null),
+  true,
+  "clearing Thread selection must also retire the previously actionable result",
+);
+assert.equal(
+  shouldClearMissionResultForThreadChange(null, "thread-b"),
+  false,
+  "an initial Thread selection has no stale result ownership to retire",
+);
+
+let renderedResult: string | null = "thread-a-result";
+let loadedThreadId: string | null = "thread-a";
+const selectThread = (selectedThreadId: string | null) => {
+  if (shouldClearMissionResultForThreadChange(loadedThreadId, selectedThreadId)) {
+    loadedThreadId = null;
+    renderedResult = null;
+  }
+};
+selectThread("thread-b");
+assert.equal(
+  renderedResult,
+  null,
+  "the old result action surface must be gone in the same turn that ownership moves to another Thread",
+);
 
 const pending = new Map<number, ReturnType<typeof deferred<string>>>();
 const visible: string[] = [];
@@ -49,4 +86,4 @@ queue.trigger();
 await nextTurn();
 assert.equal(loads, 3, "closed result refresh ownership must ignore later invalidations");
 
-console.log("artifact-refresh-ownership: ok");
+console.log("artifact-refresh-ownership: ok — cross-Thread result ownership retires synchronously while same-Thread refreshes remain resilient");
