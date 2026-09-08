@@ -122,6 +122,18 @@ async function resolveArtifactLocation(runtime: ChefRuntime, artifactId: string)
   return { artifact, filePath, isDirectory: info.isDirectory() };
 }
 
+function assertExpectedArtifactVersion(req: IncomingMessage, artifact: { version: number }): void {
+  const raw = req.headers["x-chef-expected-artifact-version"];
+  if (raw === undefined) return;
+  const expected = Array.isArray(raw) ? raw[0] : raw;
+  if (!/^\d+$/.test(expected ?? "")) {
+    throw new ArtifactLocationError(400, "expected artifact version must be a non-negative integer");
+  }
+  if (Number(expected) !== artifact.version) {
+    throw new ArtifactLocationError(409, "This result changed before the action completed. Use the newest result instead.");
+  }
+}
+
 export function artifactRevealCommand(
   filePath: string,
   isDirectory: boolean,
@@ -167,10 +179,11 @@ async function sendArtifactDownloadCapability(runtime: ChefRuntime, artifactId: 
   });
 }
 
-async function sendArtifactDownload(runtime: ChefRuntime, artifactId: string, res: ServerResponse): Promise<void> {
+async function sendArtifactDownload(runtime: ChefRuntime, artifactId: string, req: IncomingMessage, res: ServerResponse): Promise<void> {
   let location: Awaited<ReturnType<typeof resolveArtifactLocation>>;
   try {
     location = await resolveArtifactLocation(runtime, artifactId);
+    assertExpectedArtifactVersion(req, location.artifact);
   } catch (error) {
     if (error instanceof ArtifactLocationError) {
       const message = error.message === "artifact is not backed by a local file"
@@ -262,6 +275,7 @@ export function createArtifactServer(runtime: ChefRuntime, baseServer: Server, o
         const artifactId = decodeURIComponent(revealMatch[1]);
         try {
           const location = await resolveArtifactLocation(runtime, artifactId);
+          assertExpectedArtifactVersion(req, location.artifact);
           await revealPath(location.filePath, location.isDirectory);
           sendJson(res, 200, { ok: true, data: { artifactId, location: location.filePath } });
         } catch (error) {
@@ -280,7 +294,7 @@ export function createArtifactServer(runtime: ChefRuntime, baseServer: Server, o
         return;
       }
       if (req.method === "GET" && downloadMatch) {
-        await sendArtifactDownload(runtime, decodeURIComponent(downloadMatch[1]), res);
+        await sendArtifactDownload(runtime, decodeURIComponent(downloadMatch[1]), req, res);
         return;
       }
 

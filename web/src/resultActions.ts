@@ -30,8 +30,8 @@ type RunCommandCopier = (
   command: string,
   clipboard: ClipboardWriter | null | undefined,
 ) => Promise<CopyRunCommandResult>;
-type ArtifactRevealer = (artifactId: string) => Promise<ArtifactRevealResult>;
-type ArtifactDownloader = (artifactId: string) => Promise<ArtifactDownloadResult>;
+type ArtifactRevealer = (artifactId: string, expectedVersion?: number) => Promise<ArtifactRevealResult>;
+type ArtifactDownloader = (artifactId: string, expectedVersion?: number) => Promise<ArtifactDownloadResult>;
 type VersionOwnedRunCommandCopier = (
   command: string,
   actionKey: string,
@@ -43,6 +43,19 @@ type VersionOwnedArtifactDownloader = (artifactId: string, actionKey?: string) =
 /** Scope transient UI feedback to the exact durable result version it describes. */
 export function artifactActionStateKey(artifactId: string, version: number): string {
   return `${artifactId}:${version}`;
+}
+
+function artifactVersionFromActionKey(artifactId: string, actionKey: string): number | undefined {
+  const prefix = `${artifactId}:`;
+  if (!actionKey.startsWith(prefix)) return undefined;
+  const version = Number(actionKey.slice(prefix.length));
+  return Number.isFinite(version) ? version : undefined;
+}
+
+function expectedVersionHeaders(expectedVersion?: number): Record<string, string> {
+  return expectedVersion === undefined
+    ? {}
+    : { "x-chef-expected-artifact-version": String(expectedVersion) };
 }
 
 /** Copy the exact durable run instruction and report failure truthfully. */
@@ -96,17 +109,20 @@ export function artifactRevealLabel(state: ArtifactRevealDisplayState): string {
   return "Show result";
 }
 
-/** Ask Chef to reveal a durable artifact location without accepting a client path or command. */
-export async function revealArtifact(
+async function revealArtifactVersion(
   artifactId: string,
-  requester: RevealRequester = fetch,
+  expectedVersion: number | undefined,
+  requester: RevealRequester,
 ): Promise<ArtifactRevealResult> {
   if (!artifactId.trim()) return { ok: false, error: "No result is available to reveal" };
 
   try {
     const response = await requester(`/api/artifacts/${encodeURIComponent(artifactId)}/reveal`, {
       method: "POST",
-      headers: { "x-chef-action": "reveal-artifact" },
+      headers: {
+        "x-chef-action": "reveal-artifact",
+        ...expectedVersionHeaders(expectedVersion),
+      },
     });
     if (response.ok) return { ok: true };
 
@@ -128,6 +144,14 @@ export async function revealArtifact(
   }
 }
 
+/** Ask Chef to reveal a durable artifact location without accepting a client path or command. */
+export async function revealArtifact(
+  artifactId: string,
+  requester: RevealRequester = fetch,
+): Promise<ArtifactRevealResult> {
+  return revealArtifactVersion(artifactId, undefined, requester);
+}
+
 function downloadFileName(headers: Pick<Headers, "get">): string {
   const disposition = headers.get("content-disposition") ?? "";
   const encoded = /filename\*=UTF-8''([^;]+)/i.exec(disposition)?.[1];
@@ -145,16 +169,19 @@ function downloadFileName(headers: Pick<Headers, "get">): string {
   return candidate.split(/[\\/]/).filter(Boolean).at(-1) || "chef-result";
 }
 
-/** Download a durable file result without navigating Simple Mode away on failure. */
-export async function downloadArtifact(
+async function downloadArtifactVersion(
   artifactId: string,
-  requester: DownloadRequester = fetch,
+  expectedVersion: number | undefined,
+  requester: DownloadRequester,
 ): Promise<ArtifactDownloadResult> {
   if (!artifactId.trim()) return { ok: false, error: "No result is available to save" };
 
   try {
     const response = await requester(`/api/artifacts/${encodeURIComponent(artifactId)}/download`, {
-      headers: { "x-chef-action": "download-artifact" },
+      headers: {
+        "x-chef-action": "download-artifact",
+        ...expectedVersionHeaders(expectedVersion),
+      },
     });
     if (!response.ok) {
       let message = "Could not save this result";
@@ -186,16 +213,21 @@ export async function downloadArtifact(
   }
 }
 
+/** Download a durable file result without navigating Simple Mode away on failure. */
+export async function downloadArtifact(
+  artifactId: string,
+  requester: DownloadRequester = fetch,
+): Promise<ArtifactDownloadResult> {
+  return downloadArtifactVersion(artifactId, undefined, requester);
+}
+
 /**
  * Keep one reveal action in flight per exact result action owner.
- *
- * Opening a desktop file manager is an external side effect. Repeated clicks
- * for the same artifact version share that request, while a newly published
- * version gets its own action instead of inheriting an older version's pending
- * side effect. The backend call still receives only the stable artifact ID.
+ * Opening a desktop file manager is an external side effect, so the exact
+ * displayed artifact version is carried to the server before that side effect.
  */
 export function createSingleFlightArtifactRevealer(
-  revealer: ArtifactRevealer = revealArtifact,
+  revealer: ArtifactRevealer = (artifactId, expectedVersion) => revealArtifactVersion(artifactId, expectedVersion, fetch),
 ): VersionOwnedArtifactRevealer {
   const inFlight = new Map<string, Promise<ArtifactRevealResult>>();
 
@@ -203,8 +235,9 @@ export function createSingleFlightArtifactRevealer(
     const existing = inFlight.get(actionKey);
     if (existing) return existing;
 
+    const expectedVersion = artifactVersionFromActionKey(artifactId, actionKey);
     const request = Promise.resolve()
-      .then(() => revealer(artifactId))
+      .then(() => revealer(artifactId, expectedVersion))
       .finally(() => {
         if (inFlight.get(actionKey) === request) inFlight.delete(actionKey);
       });
@@ -213,9 +246,9 @@ export function createSingleFlightArtifactRevealer(
   };
 }
 
-/** Keep one Save copy request in flight per exact result action owner while allowing later retries. */
+/** Keep one Save copy request in flight per exact result owner while rejecting stale-version downloads. */
 export function createSingleFlightArtifactDownloader(
-  downloader: ArtifactDownloader = downloadArtifact,
+  downloader: ArtifactDownloader = (artifactId, expectedVersion) => downloadArtifactVersion(artifactId, expectedVersion, fetch),
 ): VersionOwnedArtifactDownloader {
   const inFlight = new Map<string, Promise<ArtifactDownloadResult>>();
 
@@ -223,8 +256,9 @@ export function createSingleFlightArtifactDownloader(
     const existing = inFlight.get(actionKey);
     if (existing) return existing;
 
+    const expectedVersion = artifactVersionFromActionKey(artifactId, actionKey);
     const request = Promise.resolve()
-      .then(() => downloader(artifactId))
+      .then(() => downloader(artifactId, expectedVersion))
       .finally(() => {
         if (inFlight.get(actionKey) === request) inFlight.delete(actionKey);
       });
