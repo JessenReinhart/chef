@@ -121,8 +121,13 @@ function hydrateAcceptedMissionSubmission(
 }
 
 function currentSubmissionOwnerKey(): string | null {
-  if (typeof localStorage === "undefined") return null;
-  return submissionOwnerKey(localStorage.getItem(SELECTED_THREAD_KEY));
+  try {
+    const storage = globalThis.localStorage;
+    if (!storage) return null;
+    return submissionOwnerKey(storage.getItem(SELECTED_THREAD_KEY));
+  } catch {
+    return null;
+  }
 }
 
 function acceptedMissionSubmissionTime(
