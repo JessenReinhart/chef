@@ -47,6 +47,30 @@ assert.deepEqual(
   "queued work should absorb overflow before a stopped step that needs user attention",
 );
 
+const liveWithStoppedOverflow = partitionMissionTasksForSimpleMode([
+  task("running-now", "running"),
+  task("cancelled-1", "cancelled"),
+  task("cancelled-2", "cancelled"),
+  task("cancelled-3", "cancelled"),
+  task("cancelled-4", "cancelled"),
+  task("cancelled-5", "cancelled"),
+  task("cancelled-6", "cancelled"),
+  task("queued-after-stop", "pending"),
+]);
+assert.ok(
+  liveWithStoppedOverflow.visible.some(({ id }) => id === "running-now"),
+  "stopped history must not crowd genuinely active work out of the bounded step list",
+);
+assert.equal(
+  liveWithStoppedOverflow.visible.filter(({ status }) => status === "cancelled").length,
+  5,
+  "the step budget should retain as much stopped work as possible after preserving live work",
+);
+assert.ok(
+  liveWithStoppedOverflow.earlier.some(({ id }) => id === "queued-after-stop"),
+  "queued work should yield before stopped recovery context when the step budget is full",
+);
+
 const workerOverflowTasks = [
   task("cancelled-worker", "cancelled"),
   task("queued-worker-1", "pending"),
@@ -77,6 +101,40 @@ assert.equal(
   workerOverflow.workers[0]?.state,
   "Stopped",
   "the retained cancelled worker must truthfully explain that work stopped rather than looking queued",
+);
+
+const liveWorkerOverflowTasks = [
+  task("running-worker", "running"),
+  task("cancelled-worker-1", "cancelled"),
+  task("cancelled-worker-2", "cancelled"),
+  task("cancelled-worker-3", "cancelled"),
+  task("cancelled-worker-4", "cancelled"),
+  task("queued-worker-after-stop", "pending"),
+];
+const liveWorkerOverflowMission: UiMission = {
+  ...workerOverflowMission,
+  id: "mission-live-worker-overflow",
+  taskIds: liveWorkerOverflowTasks.map(({ id }) => id),
+};
+const liveWorkerOverflow = projectMissionActivity(
+  { missions: [liveWorkerOverflowMission], tasks: liveWorkerOverflowTasks, events: [] },
+  [],
+  2_000,
+);
+assert.ok(liveWorkerOverflow, "live work must stay observable alongside stopped overflow");
+assert.ok(
+  liveWorkerOverflow.workers.some(({ id }) => id === "running-worker"),
+  "cancelled workers must not crowd the genuinely running worker out of the four-worker strip",
+);
+assert.equal(
+  liveWorkerOverflow.workers.filter(({ status }) => status === "cancelled").length,
+  3,
+  "the worker strip should retain stopped recovery context after reserving space for live work",
+);
+assert.equal(
+  liveWorkerOverflow.workers.some(({ id }) => id === "queued-worker-after-stop"),
+  false,
+  "queued worker state should yield before stopped recovery context when the strip is full",
 );
 
 const mixedLive = partitionMissionTasksForSimpleMode([
@@ -114,4 +172,4 @@ assert.deepEqual(
   "older completed steps must remain available through progressive disclosure",
 );
 
-console.log("intent-home-task-overflow-ui: ok — bounded Simple Mode task and worker visibility prioritizes actionable work over queued/history overflow");
+console.log("intent-home-task-overflow-ui: ok — bounded Simple Mode task and worker visibility prioritizes live/recovery work over queued/history overflow");
