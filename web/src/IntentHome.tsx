@@ -39,6 +39,7 @@ import {
   type AcceptedMissionSubmission,
   type MissionSubmissionFeedback,
 } from "./missionSubmissionFeedback";
+import { approvalsForMissionTasks } from "./missionApprovalOwnership";
 import {
   deriveMissionHomeState,
   summarizeMissionProgressForMission,
@@ -302,6 +303,11 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
     [approvals, missionByTaskId, threadTaskIds],
   );
 
+  const currentMissionApprovals = useMemo(
+    () => approvalsForMissionTasks(missionApprovals, currentMissionTaskIds),
+    [currentMissionTaskIds, missionApprovals],
+  );
+
   const approvalTaskIds = useMemo(
     () => new Set(missionApprovals.map((approval) => approval.taskId)),
     [missionApprovals],
@@ -348,7 +354,7 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
 
   const homeState = useMemo<MissionHomeState>(() => deriveMissionHomeState({
     submitting: showingStartingState,
-    needsAttention: missionApprovals.length > 0
+    needsAttention: currentMissionApprovals.length > 0
       || latestMission?.status === "failed"
       || latestMission?.status === "blocked"
       || latestMission?.status === "cancelled"
@@ -361,7 +367,7 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
       || missionTasks.some((task) => task.status === "running" || task.status === "assigned" || task.status === "spawning"),
     done: latestMission?.status === "completed"
       || (missionTasks.length > 0 && missionTasks.every((task) => task.status === "completed")),
-  }), [latestMission?.status, missionApprovals.length, missionTasks, showingStartingState]);
+  }), [currentMissionApprovals.length, latestMission?.status, missionTasks, showingStartingState]);
 
   const status = missionPresentation(homeState);
   const displayedError = visibleAppError(actionError, stateRefreshError);
