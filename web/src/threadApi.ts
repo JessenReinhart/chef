@@ -120,7 +120,8 @@ export async function threadMessages(threadId: string): Promise<ChatMessage[]> {
 }
 
 export async function sendThreadMessage(threadId: string, message: string): Promise<ThreadChatResult> {
-  if (simpleModeSubmissionGuardEnabled() && acceptedMissionSubmissionForThread(threadId)) {
+  const guardAcceptedSubmission = simpleModeSubmissionGuardEnabled();
+  if (guardAcceptedSubmission && acceptedMissionSubmissionForThread(threadId)) {
     throw new Error("Chef is already starting accepted work in this Thread. Wait for it to appear before starting another request.");
   }
 
@@ -130,7 +131,7 @@ export async function sendThreadMessage(threadId: string, message: string): Prom
       method: "POST",
       body: JSON.stringify({ message }),
     });
-    if (simpleModeSubmissionGuardEnabled() && response.data.ok && response.data.accepted && response.data.missionId) {
+    if (guardAcceptedSubmission && response.data.ok && response.data.accepted && response.data.missionId) {
       rememberAcceptedMissionSubmission(missionSubmissionAccepted(threadId, response.data.missionId, message));
     }
     return response.data;
