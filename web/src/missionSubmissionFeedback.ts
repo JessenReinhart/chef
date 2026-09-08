@@ -136,7 +136,16 @@ export function acceptedMissionSubmissionIsPending(
     }
     return false;
   }
-  return !missions.some((mission) => mission.id === visibleAccepted.missionId);
+  const projected = missions.some((mission) => mission.id === visibleAccepted.missionId);
+  if (projected) {
+    const ownerKey = submissionOwnerKey(selectedThreadId);
+    const remembered = pendingAcceptedMissionSubmissions.get(ownerKey);
+    if (remembered?.missionId === visibleAccepted.missionId) {
+      pendingAcceptedMissionSubmissions.delete(ownerKey);
+    }
+    return false;
+  }
+  return true;
 }
 
 export function missionSubmissionComposerState(input: {
