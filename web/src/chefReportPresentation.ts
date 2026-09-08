@@ -4,7 +4,7 @@ export type ChefReportPresentation = "compact" | "expanded";
 
 type ChefReportPresentationInput = {
   missionStatus?: UiMission["status"] | null;
-  directReport: boolean;
+  directReport?: boolean;
   starting: boolean;
 };
 
@@ -17,7 +17,7 @@ const TERMINAL_MISSION_STATUSES = new Set<UiMission["status"]>([
 
 export function chefReportPresentation({
   missionStatus,
-  directReport,
+  directReport = false,
   starting,
 }: ChefReportPresentationInput): ChefReportPresentation {
   if (starting) return "compact";
