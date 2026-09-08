@@ -104,6 +104,18 @@ export function visibleArtifactsForSelectedThreadMission<T extends MissionLinked
   return visibleArtifactsForCurrentMission(artifacts, scope, limit);
 }
 
+/**
+ * Thread selection is synchronous product state. A result owned by a previously
+ * loaded Thread must disappear before asynchronous replacement snapshots settle,
+ * otherwise its ordinary actions can be invoked under the wrong conversation.
+ */
+export function shouldClearMissionResultForThreadChange(
+  loadedThreadId: string | null | undefined,
+  selectedThreadId: string | null | undefined,
+): boolean {
+  return Boolean(loadedThreadId && loadedThreadId !== selectedThreadId);
+}
+
 export function shouldRetainMissionResultOnRefreshFailure(
   loadedThreadId: string | null | undefined,
   selectedThreadId: string | null | undefined,
