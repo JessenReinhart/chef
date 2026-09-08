@@ -45,14 +45,14 @@ assert.equal(
   "a real worker resume after approval must restore long-running feedback",
 );
 
-const resumedByMission = [
+const missionProjectionOnly = [
   ...acceptedButNotResumed,
   event("mission-resumed", 5, "mission.status", { status: "active" }),
 ];
 assert.equal(
-  deriveMissionHeartbeat(resumedByMission, missionId, [taskId], 16_000, 10_000)?.text,
-  "Chef is still working. Last runtime activity was 11 seconds ago.",
-  "a fresh active Mission status after approval is authoritative evidence that work resumed",
+  deriveMissionHeartbeat(missionProjectionOnly, missionId, [taskId], 16_000, 10_000),
+  null,
+  "a Mission status projection must not substitute for same-Task execution after a task-scoped approval",
 );
 
 const rejectedThenIdle = [
@@ -65,4 +65,4 @@ assert.equal(
   "a rejected approval must keep suppressing stale working feedback",
 );
 
-console.log("mission-approval-resume: ok — approval resolution is acknowledgement, while durable runtime resumption owns heartbeat recovery");
+console.log("mission-approval-resume: ok — task approval resolution is acknowledgement, while same-Task runtime resumption owns heartbeat recovery");
