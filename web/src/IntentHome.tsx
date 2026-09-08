@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "./api";
 import { dismissVisibleAppError, stateRefreshErrorMessage, visibleAppError } from "./appErrorProjection";
+import { chefReportPresentation } from "./chefReportPresentation";
 import { loadIntentHomeRefresh } from "./intentHomeRefresh";
 import {
   archiveThread,
@@ -370,6 +371,10 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
       (message) => message.role === "assistant" && message.metadata?.missionId === latestMission.id,
     )?.content ?? null;
   }, [latestMission, messages, showingStartingState]);
+  const reportPresentation = chefReportPresentation({
+    missionStatus: latestMission?.status ?? null,
+    starting: showingStartingState,
+  });
 
   function dismissError() {
     const next = dismissVisibleAppError(actionError, stateRefreshError);
@@ -988,7 +993,7 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
               {(lastReport || currentMissionAssistantMessage) && (
                 <div className="rounded-2xl border border-white/[0.08] bg-white/[0.025] p-5">
                   <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-600">Latest from Chef</div>
-                  <p className="mt-3 line-clamp-6 whitespace-pre-wrap text-xs leading-5 text-zinc-400">
+                  <p className={`mt-3 whitespace-pre-wrap text-xs leading-5 text-zinc-400 ${reportPresentation === "compact" ? "line-clamp-6" : ""}`}>
                     {lastReport ?? currentMissionAssistantMessage}
                   </p>
                 </div>
