@@ -4,6 +4,7 @@ import {
   readWorkspaceDepth,
   workspaceSurfacePlan,
 } from "../web/src/canonicalWorkspaceModel.ts";
+import { chefReportPresentation } from "../web/src/chefReportPresentation.ts";
 import { projectMissionActivity } from "../web/src/missionActivityProjection.ts";
 import {
   acceptedMissionSubmissionIsPending,
@@ -41,6 +42,49 @@ assert.equal(power.livingWorkspace, false, "runtime detail must replace rather t
 assert.equal(power.runtimeApp, true, "runtime detail should remain reachable");
 assert.equal(power.rooms, true, "Rooms remain available at advanced depth");
 assert.equal(power.agentContext, true, "agent context remains available at advanced depth");
+
+assert.equal(
+  chefReportPresentation({ missionStatus: "completed", starting: false }),
+  "expanded",
+  "a completed Mission must expose the whole final Chef handoff",
+);
+assert.equal(
+  chefReportPresentation({ missionStatus: "failed", starting: false }),
+  "expanded",
+  "a failed Mission must keep the whole recovery handoff readable",
+);
+assert.equal(
+  chefReportPresentation({ missionStatus: "blocked", starting: false }),
+  "expanded",
+  "a blocked Mission must keep the whole recovery handoff readable",
+);
+assert.equal(
+  chefReportPresentation({ missionStatus: "cancelled", starting: false }),
+  "expanded",
+  "a cancelled Mission must keep the whole terminal handoff readable",
+);
+assert.equal(
+  chefReportPresentation({ missionStatus: null, starting: false }),
+  "expanded",
+  "a finished direct Chef report with no Mission projection must remain fully readable",
+);
+assert.equal(
+  chefReportPresentation({ missionStatus: "active", directReport: true, starting: false }),
+  "expanded",
+  "a direct final Chef report must outrank stale active Mission history in the same Thread",
+);
+for (const missionStatus of ["planning", "active", "verifying", "waiting_for_approval", "paused"] as const) {
+  assert.equal(
+    chefReportPresentation({ missionStatus, starting: false }),
+    "compact",
+    `${missionStatus} Mission updates may remain compact while work is non-terminal`,
+  );
+}
+assert.equal(
+  chefReportPresentation({ missionStatus: null, directReport: true, starting: true }),
+  "compact",
+  "an accepted request still waiting for Mission projection is progress feedback, not a completed direct handoff",
+);
 
 const acceptedTodo = missionSubmissionAccepted("thread-a", "mission-accepted", "Create a simple todo app");
 rememberAcceptedMissionSubmission(acceptedTodo);
@@ -256,4 +300,4 @@ assert.deepEqual(startupActivity.feed, [
   "Chef chose one worker because this Mission fits one straightforward step.",
 ]);
 
-console.log("intent-home-ui: ok — canonical workspace and Mission activity are verified by executable behavior, not source shape");
+console.log("intent-home-ui: ok — canonical workspace, Mission activity, and terminal Chef handoff projection are verified by executable behavior");
