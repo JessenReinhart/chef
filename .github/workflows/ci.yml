@@ -32,6 +32,8 @@ jobs:
         run: npm test
       - name: Run Simple Mode submission feedback test
         run: node --experimental-strip-types tests/simple-mode-submission-feedback.ts
+      - name: Run stale accepted Mission recovery test
+        run: node --experimental-strip-types tests/stale-accepted-mission-recovery.ts
       - name: Run artifact HTTP acceptance test
         run: node --experimental-strip-types tests/artifact-http.ts
       - name: Run Mission plan HTTP acceptance test

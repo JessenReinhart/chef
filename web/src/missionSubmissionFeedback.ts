@@ -20,11 +20,13 @@ export type MissionSubmissionComposerState = {
 };
 
 export const MISSION_SUBMISSION_FAILURE_EVENT = "chef:mission-submission-failure";
+export const ACCEPTED_MISSION_PROJECTION_GRACE_MS = 30_000;
 
 const SELECTED_THREAD_KEY = "chef:selected-thread";
 const NEW_THREAD_SUBMISSION_KEY = "__chef-new-thread-submission__";
 const pendingMissionSubmissionFailures = new Map<string, MissionSubmissionFailureRecovery>();
 const pendingAcceptedMissionSubmissions = new Map<string, AcceptedMissionSubmission>();
+const acceptedMissionSubmissionTimes = new WeakMap<AcceptedMissionSubmission, number>();
 
 function submissionOwnerKey(threadId: string | null): string {
   return threadId ?? NEW_THREAD_SUBMISSION_KEY;
@@ -33,6 +35,19 @@ function submissionOwnerKey(threadId: string | null): string {
 function currentSubmissionOwnerKey(): string | null {
   if (typeof localStorage === "undefined") return null;
   return submissionOwnerKey(localStorage.getItem(SELECTED_THREAD_KEY));
+}
+
+function acceptedMissionSubmissionIsFresh(
+  accepted: AcceptedMissionSubmission,
+  now: number,
+  graceMs: number,
+): boolean {
+  let acceptedAt = acceptedMissionSubmissionTimes.get(accepted);
+  if (acceptedAt === undefined) {
+    acceptedAt = now;
+    acceptedMissionSubmissionTimes.set(accepted, acceptedAt);
+  }
+  return now - acceptedAt < graceMs;
 }
 
 export function missionSubmissionAcknowledgement(): string {
@@ -53,16 +68,31 @@ export function missionSubmissionAccepted(
   threadId: string | null,
   missionId: string,
   submittedText: string,
+  acceptedAt = Date.now(),
 ): AcceptedMissionSubmission {
-  return { threadId, missionId, goal: submittedText };
+  const accepted = { threadId, missionId, goal: submittedText };
+  acceptedMissionSubmissionTimes.set(accepted, acceptedAt);
+  return accepted;
 }
 
 export function rememberAcceptedMissionSubmission(accepted: AcceptedMissionSubmission): void {
+  if (!acceptedMissionSubmissionTimes.has(accepted)) {
+    acceptedMissionSubmissionTimes.set(accepted, Date.now());
+  }
   pendingAcceptedMissionSubmissions.set(submissionOwnerKey(accepted.threadId), accepted);
 }
 
-export function acceptedMissionSubmissionForThread(threadId: string | null): AcceptedMissionSubmission | null {
-  return pendingAcceptedMissionSubmissions.get(submissionOwnerKey(threadId)) ?? null;
+export function acceptedMissionSubmissionForThread(
+  threadId: string | null,
+  now = Date.now(),
+  graceMs = ACCEPTED_MISSION_PROJECTION_GRACE_MS,
+): AcceptedMissionSubmission | null {
+  const ownerKey = submissionOwnerKey(threadId);
+  const accepted = pendingAcceptedMissionSubmissions.get(ownerKey) ?? null;
+  if (!accepted) return null;
+  if (acceptedMissionSubmissionIsFresh(accepted, now, graceMs)) return accepted;
+  pendingAcceptedMissionSubmissions.delete(ownerKey);
+  return null;
 }
 
 export function observeAcceptedMissionSubmission(
@@ -85,20 +115,28 @@ export function clearAcceptedMissionSubmission(threadId: string | null): void {
  * submission guard. Component-local accepted state can disappear after a
  * surface remount or be intentionally withheld while another Thread owns the
  * foreground; the remembered guard remains authoritative until the exact
- * accepted Mission appears in state.
+ * accepted Mission appears in state. A bounded grace window prevents an
+ * acknowledged-but-never-projected Mission from locking Simple Mode forever.
  */
 export function acceptedMissionSubmissionIsPending(
   accepted: AcceptedMissionSubmission | null,
   selectedThreadId: string | null,
   missions: Array<{ id: string }>,
+  now = Date.now(),
+  graceMs = ACCEPTED_MISSION_PROJECTION_GRACE_MS,
 ): boolean {
   const visibleAccepted = accepted?.threadId === selectedThreadId
     ? accepted
-    : acceptedMissionSubmissionForThread(selectedThreadId);
-  return Boolean(
-    visibleAccepted
-      && !missions.some((mission) => mission.id === visibleAccepted.missionId),
-  );
+    : acceptedMissionSubmissionForThread(selectedThreadId, now, graceMs);
+  if (!visibleAccepted) return false;
+  if (!acceptedMissionSubmissionIsFresh(visibleAccepted, now, graceMs)) {
+    const ownerKey = submissionOwnerKey(selectedThreadId);
+    if (pendingAcceptedMissionSubmissions.get(ownerKey) === visibleAccepted) {
+      pendingAcceptedMissionSubmissions.delete(ownerKey);
+    }
+    return false;
+  }
+  return !missions.some((mission) => mission.id === visibleAccepted.missionId);
 }
 
 export function missionSubmissionComposerState(input: {
