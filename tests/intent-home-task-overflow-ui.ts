@@ -27,6 +27,25 @@ assert.deepEqual(
   "completed history should absorb overflow before actionable work",
 );
 
+const cancelledEarly = partitionMissionTasksForSimpleMode([
+  task("cancelled-early", "cancelled"),
+  task("queued-1", "pending"),
+  task("queued-2", "pending"),
+  task("queued-3", "pending"),
+  task("queued-4", "pending"),
+  task("queued-5", "pending"),
+  task("queued-6", "pending"),
+]);
+assert.ok(
+  cancelledEarly.visible.some(({ id }) => id === "cancelled-early"),
+  "a cancelled current-Mission step must remain visible instead of being displaced by queued work",
+);
+assert.deepEqual(
+  cancelledEarly.earlier.map(({ id }) => id),
+  ["queued-1"],
+  "queued work should absorb overflow before a stopped step that needs user attention",
+);
+
 const mixedLive = partitionMissionTasksForSimpleMode([
   task("running-early", "running"),
   task("blocked-early", "blocked"),
