@@ -39,7 +39,7 @@ import {
   type AcceptedMissionSubmission,
   type MissionSubmissionFeedback,
 } from "./missionSubmissionFeedback";
-import { approvalsForMissionTasks } from "./missionApprovalOwnership";
+import { approvalMissionContextLabel, approvalsForMissionTasks } from "./missionApprovalOwnership";
 import {
   deriveMissionHomeState,
   summarizeMissionProgressForMission,
@@ -617,7 +617,7 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
   function renderApproval(approval: (typeof missionApprovals)[number]) {
     return (
       <div key={approval.id} className="mt-3 border-t border-amber-200/10 pt-3 first:border-0 first:pt-0">
-        <div className="text-[10px] font-medium text-zinc-500">For this Mission</div>
+        <div className="text-[10px] font-medium text-zinc-500">{approvalMissionContextLabel(approval, currentMissionTaskIds)}</div>
         <p className="mt-1 line-clamp-2 text-[11px] leading-4 text-amber-100/80">{approval.missionGoal}</p>
         <p className="mt-2 text-xs leading-5 text-zinc-300">{approval.reason}</p>
         <div className="mt-3 flex gap-2">
