@@ -68,6 +68,11 @@ assert.equal(
   "expanded",
   "a finished direct Chef report with no Mission projection must remain fully readable",
 );
+assert.equal(
+  chefReportPresentation({ missionStatus: "active", directReport: true, starting: false }),
+  "expanded",
+  "a direct final Chef report must outrank stale active Mission history in the same Thread",
+);
 for (const missionStatus of ["planning", "active", "verifying", "waiting_for_approval", "paused"] as const) {
   assert.equal(
     chefReportPresentation({ missionStatus, starting: false }),
@@ -76,7 +81,7 @@ for (const missionStatus of ["planning", "active", "verifying", "waiting_for_app
   );
 }
 assert.equal(
-  chefReportPresentation({ missionStatus: null, starting: true }),
+  chefReportPresentation({ missionStatus: null, directReport: true, starting: true }),
   "compact",
   "an accepted request still waiting for Mission projection is progress feedback, not a completed direct handoff",
 );
