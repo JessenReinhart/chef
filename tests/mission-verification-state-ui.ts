@@ -1,5 +1,6 @@
 import { strict as assert } from "node:assert";
 import { readFile } from "node:fs/promises";
+import { artifactHandoff } from "../web/src/artifactHandoff.ts";
 
 const panel = await readFile(new URL("../web/src/MissionPanel.tsx", import.meta.url), "utf8");
 
@@ -13,4 +14,42 @@ assert.match(panel, /label: "Blocked before verification"/, "blocked work should
 assert.match(panel, /successCriteria\.length > 0/, "verification state should explain explicit success criteria when available");
 assert.doesNotMatch(panel, /dangerouslySetInnerHTML/, "verification copy must render as plain text");
 
-console.log("mission-verification-state-ui: ok — Mission verification is explicit and lifecycle-derived");
+const failureDetailPhrases = [
+  "failed verification: npm test exited 1",
+  "failed tests after build",
+  "error during browser acceptance",
+  "not verified because Windows acceptance was unavailable",
+];
+for (const verification of failureDetailPhrases) {
+  const explicit = artifactHandoff({
+    uri: "file:///tmp/chef-project/todo-app.mjs",
+    metadata: { verification },
+  });
+  assert.equal(
+    explicit.verification,
+    null,
+    `explicit failure detail ${JSON.stringify(verification)} must not be presented as successful verification`,
+  );
+
+  const legacy = artifactHandoff({
+    uri: "file:///tmp/chef-project/todo-app.mjs",
+    metadata: { verified: verification },
+  });
+  assert.equal(
+    legacy.verification,
+    null,
+    `legacy failure detail ${JSON.stringify(verification)} must not be presented as successful verification`,
+  );
+}
+
+const positiveStatusLikeProse = artifactHandoff({
+  uri: "file:///tmp/chef-project/todo-app.mjs",
+  metadata: { verification: "Error handling tests passed" },
+});
+assert.equal(
+  positiveStatusLikeProse.verification,
+  "Error handling tests passed",
+  "status-like words in genuine positive evidence must remain visible",
+);
+
+console.log("mission-verification-state-ui: ok — Mission verification is lifecycle-derived and failed handoff prose cannot become positive evidence");
