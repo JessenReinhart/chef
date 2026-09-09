@@ -22,6 +22,7 @@ import type {
   UiRuntimeEvent,
 } from "./types";
 import { loadSelectedThreadId } from "./threadApi.ts";
+import { readPersistedWorkspaceDepth } from "./canonicalWorkspaceModel.ts";
 import {
   missionSubmissionAccepted,
   observeAcceptedMissionSubmission,
@@ -71,14 +72,24 @@ export interface CreateNodeResult {
   workflowNodeId: string;
 }
 
-function selectedSimpleModeThreadId(): string | null {
-  if (typeof localStorage === "undefined") return null;
-  if (localStorage.getItem("chef:view-mode") === "power") return null;
-  return loadSelectedThreadId();
+function hasBrowserStorageSurface(): boolean {
+  if (typeof globalThis.window !== "undefined") return true;
+  // Behavioral/browser harnesses can model the browser storage boundary without
+  // installing a complete Window object. Inspecting the descriptor does not invoke
+  // a storage getter that may itself throw SecurityError.
+  return Object.getOwnPropertyDescriptor(globalThis, "localStorage") !== undefined;
 }
 
 function simpleModeEnabled(): boolean {
-  return typeof localStorage !== "undefined" && localStorage.getItem("chef:view-mode") !== "power";
+  // Runtime-only callers with neither Window nor a browser storage surface retain
+  // the historical unscoped API behavior. Real browsers fail safe to Simple Mode
+  // when persistence is denied/unavailable through the canonical depth reader.
+  if (!hasBrowserStorageSurface()) return false;
+  return readPersistedWorkspaceDepth() !== "power";
+}
+
+function selectedSimpleModeThreadId(): string | null {
+  return simpleModeEnabled() ? loadSelectedThreadId() : null;
 }
 
 export class Api {
