@@ -116,6 +116,28 @@ assert.doesNotThrow(
   "blocked preference writes must not make the mode toggle crash",
 );
 
+const originalPreferenceStorageProperty = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+try {
+  Object.defineProperty(globalThis, "localStorage", {
+    configurable: true,
+    get() {
+      throw new DOMException("Access denied", "SecurityError");
+    },
+  });
+  assert.equal(
+    readViewModePreference(),
+    "simple",
+    "a throwing browser localStorage property lookup must still let Chef boot into Simple Mode",
+  );
+  assert.doesNotThrow(
+    () => persistViewModePreference("power"),
+    "a throwing browser localStorage property lookup must not break mode switching",
+  );
+} finally {
+  if (originalPreferenceStorageProperty) Object.defineProperty(globalThis, "localStorage", originalPreferenceStorageProperty);
+  else delete (globalThis as { localStorage?: Storage }).localStorage;
+}
+
 const originalFetch = globalThis.fetch;
 const originalLocalStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
 const storage = new Map<string, string>();
