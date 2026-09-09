@@ -15,8 +15,28 @@ export interface WorkspaceSurfacePlan {
   agentContext: boolean;
 }
 
+const WORKSPACE_DEPTH_STORAGE_KEY = "chef:view-mode";
+
 export function readWorkspaceDepth(value: string | null): WorkspaceDepth {
   return value === "power" ? "power" : "simple";
+}
+
+/** Browser persistence is optional; denied storage must keep the canonical Simple Mode journey bootable. */
+export function readPersistedWorkspaceDepth(): WorkspaceDepth {
+  try {
+    return readWorkspaceDepth(globalThis.localStorage?.getItem(WORKSPACE_DEPTH_STORAGE_KEY) ?? null);
+  } catch {
+    return "simple";
+  }
+}
+
+/** Changing workspace depth must remain usable for the current session even when persistence is denied. */
+export function persistWorkspaceDepth(depth: WorkspaceDepth): void {
+  try {
+    globalThis.localStorage?.setItem(WORKSPACE_DEPTH_STORAGE_KEY, depth);
+  } catch {
+    // Keep the in-memory UI state authoritative for this session.
+  }
 }
 
 export function nextWorkspaceDepth(depth: WorkspaceDepth): WorkspaceDepth {
