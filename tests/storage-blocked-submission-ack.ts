@@ -49,6 +49,11 @@ try {
     "denied browser storage must fail safe to the canonical Simple Mode workspace instead of aborting app boot",
   );
   assert.equal(
+    readPersistedWorkspaceDepth() !== "power",
+    true,
+    "the living workspace must remain enabled when storage access is denied",
+  );
+  assert.equal(
     persistWorkspaceDepth("power"),
     false,
     "workspace-depth persistence must report denial without throwing into the current session",
@@ -134,6 +139,26 @@ try {
   );
   assert.equal(chatRequests, 1, "blocked storage must not prevent the canonical Thread chat request from being sent");
 
+  Object.defineProperty(globalThis, "localStorage", {
+    configurable: true,
+    value: undefined,
+  });
+  assert.equal(
+    readPersistedWorkspaceDepth(),
+    "simple",
+    "completely unavailable browser storage must also fail safe to Simple Mode",
+  );
+  assert.equal(
+    persistWorkspaceDepth("power"),
+    false,
+    "workspace-depth persistence must not report success when no storage exists",
+  );
+  assert.equal(
+    requestedWorkspaceDepth("simple"),
+    "simple",
+    "unavailable storage must not authorize Runtime details when no workspace-depth value can be persisted",
+  );
+
   const healthyStorage = new Map<string, string>([["chef:selected-thread", "thread-a"]]);
   Object.defineProperty(globalThis, "localStorage", {
     configurable: true,
@@ -148,6 +173,11 @@ try {
   });
 
   assert.equal(
+    readPersistedWorkspaceDepth() !== "power",
+    true,
+    "the living workspace must remain enabled when healthy storage has no Power Mode selection",
+  );
+  assert.equal(
     requestedWorkspaceDepth("simple"),
     "power",
     "healthy storage must still allow the user to enter Runtime details",
@@ -156,6 +186,11 @@ try {
     healthyStorage.get("chef:view-mode"),
     "power",
     "entering Runtime details must preserve the existing persisted workspace-depth contract",
+  );
+  assert.equal(
+    readPersistedWorkspaceDepth() !== "power",
+    false,
+    "the living workspace must disable once healthy storage authoritatively selects Power Mode",
   );
   assert.equal(
     missionSubmissionAcknowledgement(),
@@ -188,4 +223,4 @@ try {
   }
 }
 
-console.log("storage-blocked-submission-ack: ok — workspace boot/depth, selection, history ownership, acknowledgement, and canonical Thread chat survive denied browser storage");
+console.log("storage-blocked-submission-ack: ok — workspace boot/depth, living workspace mode, selection, history ownership, acknowledgement, and canonical Thread chat survive denied or unavailable browser storage");

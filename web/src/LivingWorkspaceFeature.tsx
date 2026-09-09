@@ -12,6 +12,7 @@ import {
 import "@xyflow/react/dist/style.css";
 import { api } from "./api";
 import { dismissVisibleAppError, visibleAppError } from "./appErrorProjection";
+import { readPersistedWorkspaceDepth, requestedWorkspaceDepth } from "./canonicalWorkspaceModel";
 import { loadSelectedThreadId, SELECTED_THREAD_EVENT, threadMessages } from "./threadApi";
 import {
   createThreadHistoryLoader,
@@ -277,7 +278,7 @@ function routeHandles(source: Node | undefined, target: Node | undefined): Route
 }
 
 export function LivingWorkspaceFeature() {
-  const [enabled, setEnabled] = useState(() => localStorage.getItem("chef:view-mode") !== "power");
+  const [enabled, setEnabled] = useState(() => readPersistedWorkspaceDepth() !== "power");
   const [snapshot, setSnapshot] = useState<WorkspaceSnapshot>(EMPTY_SNAPSHOT);
   const [harnesses, setHarnesses] = useState<HarnessInfo[]>([]);
   const [projectName, setProjectName] = useState("Workspace");
@@ -299,7 +300,7 @@ export function LivingWorkspaceFeature() {
 
   useEffect(() => {
     const timer = window.setInterval(() => {
-      setEnabled(localStorage.getItem("chef:view-mode") !== "power");
+      setEnabled(readPersistedWorkspaceDepth() !== "power");
     }, 250);
     return () => window.clearInterval(timer);
   }, []);
@@ -682,8 +683,7 @@ export function LivingWorkspaceFeature() {
   }, [selectedNode, directMessage, directSending, refresh]);
 
   const openAdvanced = useCallback(() => {
-    localStorage.setItem("chef:view-mode", "power");
-    setEnabled(false);
+    if (requestedWorkspaceDepth("simple") === "power") setEnabled(false);
   }, []);
 
   const switchProject = useCallback(async () => {
