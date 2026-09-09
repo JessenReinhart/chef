@@ -30,17 +30,30 @@ export function readPersistedWorkspaceDepth(): WorkspaceDepth {
   }
 }
 
-/** Changing workspace depth must remain usable for the current session even when persistence is denied. */
-export function persistWorkspaceDepth(depth: WorkspaceDepth): void {
+/** Report whether the requested depth was durably persisted without throwing into the UI session. */
+export function persistWorkspaceDepth(depth: WorkspaceDepth): boolean {
   try {
     globalThis.localStorage?.setItem(WORKSPACE_DEPTH_STORAGE_KEY, depth);
+    return true;
   } catch {
-    // Keep the in-memory UI state authoritative for this session.
+    return false;
   }
 }
 
 export function nextWorkspaceDepth(depth: WorkspaceDepth): WorkspaceDepth {
   return depth === "power" ? "simple" : "power";
+}
+
+/**
+ * Runtime details mount code that still expects browser storage to exist.
+ * If persistence is denied, keep the canonical workspace in Simple Mode rather
+ * than navigating into a surface that cannot safely initialize in that browser.
+ */
+export function requestedWorkspaceDepth(depth: WorkspaceDepth): WorkspaceDepth {
+  const next = nextWorkspaceDepth(depth);
+  const persisted = persistWorkspaceDepth(next);
+  if (next === "simple") return "simple";
+  return persisted ? "power" : "simple";
 }
 
 export function workspaceSurfacePlan(depth: WorkspaceDepth): WorkspaceSurfacePlan {
