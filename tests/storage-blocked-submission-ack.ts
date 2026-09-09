@@ -1,5 +1,6 @@
 import { strict as assert } from "node:assert";
 
+import { Api } from "../web/src/api.ts";
 import {
   clearMissionSubmissionFailure,
   missionSubmissionAcknowledgement,
@@ -112,6 +113,7 @@ try {
   );
 
   let chatRequests = 0;
+  let messageRequests = 0;
   globalThis.fetch = async (input) => {
     const url = String(input);
     if (url.endsWith("/api/threads/thread-a/chat")) {
@@ -128,6 +130,13 @@ try {
         },
       }), { status: 202, headers: { "content-type": "application/json" } });
     }
+    if (url.endsWith("/api/threads/thread-a/messages")) {
+      messageRequests += 1;
+      return new Response(JSON.stringify({ ok: true, data: [] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
     throw new Error(`unexpected request ${url}`);
   };
 
@@ -138,6 +147,18 @@ try {
     "canonical Thread-chat submission must reach its HTTP acknowledgement even when localStorage is denied",
   );
   assert.equal(chatRequests, 1, "blocked storage must not prevent the canonical Thread chat request from being sent");
+
+  const blockedStorageMessages = await new Api().chatMessages();
+  assert.deepEqual(
+    blockedStorageMessages,
+    [],
+    "the shared Simple Mode API client must keep Thread-scoped reads usable when localStorage access throws",
+  );
+  assert.equal(
+    messageRequests,
+    1,
+    "storage denial must not prevent the shared API client from resolving the selected Thread and issuing its request",
+  );
 
   Object.defineProperty(globalThis, "localStorage", {
     configurable: true,
@@ -223,4 +244,4 @@ try {
   }
 }
 
-console.log("storage-blocked-submission-ack: ok — workspace boot/depth, living workspace mode, selection, history ownership, acknowledgement, and canonical Thread chat survive denied or unavailable browser storage");
+console.log("storage-blocked-submission-ack: ok — workspace boot/depth, living workspace mode, shared API ownership, selection, history, acknowledgement, and canonical Thread chat survive denied or unavailable browser storage");
