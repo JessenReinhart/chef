@@ -39,11 +39,18 @@ function browserStorage(): Storage | null {
 }
 
 function simpleModeEnabled(): boolean {
+  const browserContext = typeof globalThis.window !== "undefined";
+  const storage = browserStorage();
+  if (!storage) {
+    // In a real browser, denied storage must fail safe to Simple Mode. Outside a
+    // browser (for example runtime-only callers), preserve the previous unguarded
+    // behavior instead of inventing foreground UI ownership that does not exist.
+    return browserContext;
+  }
   try {
-    return browserStorage()?.getItem("chef:view-mode") !== "power";
+    return storage.getItem("chef:view-mode") !== "power";
   } catch {
-    // Storage policy must not silently disable Simple Mode's ownership guards.
-    return true;
+    return browserContext;
   }
 }
 
