@@ -139,6 +139,26 @@ try {
   );
   assert.equal(chatRequests, 1, "blocked storage must not prevent the canonical Thread chat request from being sent");
 
+  Object.defineProperty(globalThis, "localStorage", {
+    configurable: true,
+    value: undefined,
+  });
+  assert.equal(
+    readPersistedWorkspaceDepth(),
+    "simple",
+    "completely unavailable browser storage must also fail safe to Simple Mode",
+  );
+  assert.equal(
+    persistWorkspaceDepth("power"),
+    false,
+    "workspace-depth persistence must not report success when no storage exists",
+  );
+  assert.equal(
+    requestedWorkspaceDepth("simple"),
+    "simple",
+    "unavailable storage must not authorize Runtime details when no workspace-depth value can be persisted",
+  );
+
   const healthyStorage = new Map<string, string>([["chef:selected-thread", "thread-a"]]);
   Object.defineProperty(globalThis, "localStorage", {
     configurable: true,
@@ -203,4 +223,4 @@ try {
   }
 }
 
-console.log("storage-blocked-submission-ack: ok — workspace boot/depth, living workspace mode, selection, history ownership, acknowledgement, and canonical Thread chat survive denied browser storage");
+console.log("storage-blocked-submission-ack: ok — workspace boot/depth, living workspace mode, selection, history ownership, acknowledgement, and canonical Thread chat survive denied or unavailable browser storage");
