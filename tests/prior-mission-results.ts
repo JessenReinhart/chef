@@ -2,6 +2,7 @@ import { strict as assert } from "node:assert";
 import { terminalMissionSummaryIsCurrent } from "../web/src/missionOutcomeSummary.ts";
 import {
   priorMissionRefreshFallback,
+  priorMissionRefreshStart,
   priorMissionResults,
   type PriorMissionRefreshSnapshot,
 } from "../web/src/priorMissionResults.ts";
@@ -36,6 +37,21 @@ const retainedSnapshot: PriorMissionRefreshSnapshot = {
   missions,
   messages,
 };
+assert.equal(
+  priorMissionRefreshStart(retainedSnapshot, "thread-a"),
+  retainedSnapshot,
+  "ordinary same-Thread refreshes must keep the last trustworthy prior-results snapshot while replacement reads settle",
+);
+assert.deepEqual(
+  priorMissionRefreshStart(retainedSnapshot, "thread-b"),
+  { threadId: "thread-b", missions: [], messages: [] },
+  "switching Threads must synchronously retire prior results owned by the previous Thread before replacement reads settle",
+);
+assert.deepEqual(
+  priorMissionRefreshStart(retainedSnapshot, null),
+  { threadId: null, missions: [], messages: [] },
+  "deselecting the Thread must synchronously retire prior Mission results",
+);
 assert.equal(
   priorMissionRefreshFallback(retainedSnapshot, "thread-a"),
   retainedSnapshot,

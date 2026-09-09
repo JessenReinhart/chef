@@ -14,6 +14,14 @@ export type PriorMissionRefreshSnapshot = {
   messages: ChatMessage[];
 };
 
+export function priorMissionRefreshStart(
+  previous: PriorMissionRefreshSnapshot,
+  selectedThreadId: string | null,
+): PriorMissionRefreshSnapshot {
+  if (previous.threadId === selectedThreadId) return previous;
+  return { threadId: selectedThreadId, missions: [], messages: [] };
+}
+
 export function priorMissionRefreshFallback(
   previous: PriorMissionRefreshSnapshot,
   selectedThreadId: string,

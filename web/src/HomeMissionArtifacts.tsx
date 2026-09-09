@@ -4,6 +4,7 @@ import { loadSelectedThreadId, SELECTED_THREAD_EVENT } from "./threadApi";
 import { artifactHandoff, canRevealArtifact } from "./artifactHandoff";
 import {
   missionResultHandoffProjection,
+  shouldClearMissionResultForThreadChange,
   shouldRetainMissionArtifactsOnRefreshFailure,
   shouldRetainMissionResultOnRefreshFailure,
 } from "./artifactProjection";
@@ -139,7 +140,17 @@ export function HomeMissionArtifacts() {
     refreshQueue.trigger();
     const timer = window.setInterval(refreshQueue.trigger, 1800);
     const unsubscribe = subscribeMissionProgressRefresh(refreshQueue.trigger);
-    const onThreadChanged = () => refreshQueue.trigger();
+    const onThreadChanged = () => {
+      const selectedThreadId = loadSelectedThreadId();
+      if (shouldClearMissionResultForThreadChange(loadedThreadId.current, selectedThreadId)) {
+        loadedThreadId.current = null;
+        loadedMissionId.current = null;
+        setMission(null);
+        setArtifacts([]);
+        setError(null);
+      }
+      refreshQueue.trigger();
+    };
     window.addEventListener(SELECTED_THREAD_EVENT, onThreadChanged);
     return () => {
       window.clearInterval(timer);
