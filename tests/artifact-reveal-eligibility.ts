@@ -10,6 +10,7 @@ assert.equal(revealable("file://localhost/C:/Work/chef/todo-app.mjs"), true, "lo
 assert.equal(revealable("file://server/share/todo-app.mjs"), true, "valid file-host/UNC results remain revealable");
 assert.equal(revealable("file://server/C:/Work/chef/todo-app.mjs"), true, "hosted Windows drive-like file results remain revealable");
 assert.equal(revealable("sideband://result", { resultLocation: "dist/todo-app" }), true, "relative project-local result locations remain revealable");
+assert.equal(revealable("sideband://result", { resultLocation: "dist/../todo-app" }), true, "relative paths that normalize within the project remain revealable");
 assert.equal(revealable("sideband://result", { path: "C:\\Work\\chef\\todo-app" }), true, "explicit Windows result paths remain revealable");
 
 assert.equal(revealable("file:///tmp/bad%ZZ/result"), false, "malformed artifact file URIs must not advertise a dead-end Show result action");
@@ -19,6 +20,9 @@ assert.equal(revealable("https://example.com/result"), false, "remote artifacts 
 assert.equal(revealable("sideband://result", { resultLocation: "https://example.com/result" }), false, "explicit remote locations remain non-revealable");
 assert.equal(revealable("sideband://result", { resultLocation: "//example.com/results/todo-app" }), false, "protocol-relative remote locations must not masquerade as project-local reveal paths");
 assert.equal(revealable("sideband://result", { resultLocation: "\\\\fileserver\\share\\todo-app" }), false, "UNC/network-style metadata must not advertise a project-local Show result action");
+assert.equal(revealable("sideband://result", { resultLocation: "../outside/todo-app" }), false, "leading relative traversal must not advertise a project-local Show result action");
+assert.equal(revealable("sideband://result", { resultLocation: "dist/../../outside/todo-app" }), false, "normalized relative traversal escaping the project must not advertise Show result");
+assert.equal(revealable("sideband://result", { resultLocation: "dist\\..\\..\\outside\\todo-app" }), false, "Windows-style relative traversal escaping the project must not advertise Show result");
 
 assert.equal(
   artifactHandoff({ uri: "sideband://result", metadata: { resultLocation: "file:///tmp/chef-project/todo-app.mjs" } }).location,
