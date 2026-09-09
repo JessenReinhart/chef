@@ -15,9 +15,8 @@ import { WorkspaceContextBar } from "./WorkspaceContextBar";
 import { MissionActivityRail } from "./MissionActivityRail";
 import { SELECTED_THREAD_EVENT } from "./threadApi";
 import {
-  nextWorkspaceDepth,
-  persistWorkspaceDepth,
   readPersistedWorkspaceDepth,
+  requestedWorkspaceDepth,
   workspaceSurfacePlan,
   type WorkspaceDepth,
 } from "./canonicalWorkspaceModel";
@@ -53,9 +52,7 @@ function ChefRoot() {
   }, []);
 
   const toggleRuntimeDetails = () => {
-    const next = nextWorkspaceDepth(viewMode);
-    persistWorkspaceDepth(next);
-    setViewMode(next);
+    setViewMode((current) => requestedWorkspaceDepth(current));
   };
 
   const plan = workspaceSurfacePlan(viewMode);
