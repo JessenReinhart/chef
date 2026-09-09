@@ -22,6 +22,7 @@ import type {
   UiRuntimeEvent,
 } from "./types";
 import { loadSelectedThreadId } from "./threadApi.ts";
+import { readPersistedWorkspaceDepth } from "./canonicalWorkspaceModel.ts";
 import {
   missionSubmissionAccepted,
   observeAcceptedMissionSubmission,
@@ -71,14 +72,15 @@ export interface CreateNodeResult {
   workflowNodeId: string;
 }
 
-function selectedSimpleModeThreadId(): string | null {
-  if (typeof localStorage === "undefined") return null;
-  if (localStorage.getItem("chef:view-mode") === "power") return null;
-  return loadSelectedThreadId();
+function simpleModeEnabled(): boolean {
+  // Thread ownership is a browser UI concern. Runtime-only callers without a
+  // browser must retain the unscoped behavior they had before Simple Mode.
+  if (typeof globalThis.window === "undefined") return false;
+  return readPersistedWorkspaceDepth() !== "power";
 }
 
-function simpleModeEnabled(): boolean {
-  return typeof localStorage !== "undefined" && localStorage.getItem("chef:view-mode") !== "power";
+function selectedSimpleModeThreadId(): string | null {
+  return simpleModeEnabled() ? loadSelectedThreadId() : null;
 }
 
 export class Api {
@@ -201,7 +203,6 @@ export class Api {
     });
     const body = (await res.json()) as CanvasPatchResult;
     if (res.status === 422 && body.ok === false) {
-      // Rejected patch — return the result so callers can surface the error.
       return body;
     }
     if (!res.ok) {
@@ -210,7 +211,6 @@ export class Api {
     return body;
   }
 
-  // ── Nodes ────────────────────────────────────────────────────────
   async createNode(input: CreateNodeInput): Promise<CreateNodeResult> {
     const data = await this.request<{ ok: boolean; data: CreateNodeResult }>("/api/nodes", {
       method: "POST",
@@ -219,55 +219,31 @@ export class Api {
     return data.data;
   }
 
-  async patchNode(
-    taskId: string,
-    patch: { title?: string; config?: Record<string, unknown>; position?: { x: number; y: number }; dependencies?: string[] },
-  ): Promise<void> {
-    await this.request(`/api/nodes/${taskId}`, {
-      method: "PATCH",
-      body: JSON.stringify(patch),
-    });
+  async patchNode(taskId: string, patch: { title?: string; config?: Record<string, unknown>; position?: { x: number; y: number }; dependencies?: string[] }): Promise<void> {
+    await this.request(`/api/nodes/${taskId}`, { method: "PATCH", body: JSON.stringify(patch) });
   }
 
-  async deleteNode(taskId: string): Promise<void> {
-    await this.request(`/api/nodes/${taskId}`, { method: "DELETE" });
-  }
+  async deleteNode(taskId: string): Promise<void> { await this.request(`/api/nodes/${taskId}`, { method: "DELETE" }); }
 
   async runNode(input: { nodeId: string; title?: string; workflowNodeId?: string; assignedTo?: string }): Promise<{ taskId: string }> {
-    const data = await this.request<{ ok: boolean; data: { taskId: string } }>("/api/nodes/run", {
-      method: "POST",
-      body: JSON.stringify(input),
-    });
+    const data = await this.request<{ ok: boolean; data: { taskId: string } }>("/api/nodes/run", { method: "POST", body: JSON.stringify(input) });
     return data.data;
   }
 
-  async retryNode(taskId: string): Promise<void> {
-    await this.request(`/api/nodes/${taskId}/retry`, { method: "POST" });
-  }
+  async retryNode(taskId: string): Promise<void> { await this.request(`/api/nodes/${taskId}/retry`, { method: "POST" }); }
+  async cancelNode(taskId: string): Promise<void> { await this.request(`/api/nodes/${taskId}/cancel`, { method: "POST" }); }
 
-  async cancelNode(taskId: string): Promise<void> {
-    await this.request(`/api/nodes/${taskId}/cancel`, { method: "POST" });
-  }
-
-  // ── Edges (dependencies) ────────────────────────────────────────
   async createEdge(source: string, target: string): Promise<void> {
-    await this.request("/api/edges", {
-      method: "POST",
-      body: JSON.stringify({ source, target }),
-    });
+    await this.request("/api/edges", { method: "POST", body: JSON.stringify({ source, target }) });
   }
 
-  async deleteEdge(source: string, target: string): Promise<void> {
-    await this.request(`/api/edges/${source}->${target}`, { method: "DELETE" });
-  }
+  async deleteEdge(source: string, target: string): Promise<void> { await this.request(`/api/edges/${source}->${target}`, { method: "DELETE" }); }
 
-  // ── Dispatch ────────────────────────────────────────────────────
   async dispatch(): Promise<number> {
     const data = await this.request<{ ok: boolean; data: { dispatched: number } }>("/api/dispatch", { method: "POST" });
     return data.data.dispatched;
   }
 
-  // ── Living workspace context zones ─────────────────────────────
   async contextZones(): Promise<ContextZone[]> {
     const data = await this.request<{ ok: boolean; data: ContextZone[] }>("/api/context-scopes");
     return data.data;
@@ -299,51 +275,32 @@ export class Api {
   }
 
   async redirectMission(id: string, goal: string): Promise<UiMission> {
-    const data = await this.request<{ ok: boolean; data: UiMission }>(`/api/missions/${encodeURIComponent(id)}`, {
-      method: "PATCH",
-      body: JSON.stringify({ goal }),
-    });
+    const data = await this.request<{ ok: boolean; data: UiMission }>(`/api/missions/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ goal }) });
     return data.data;
   }
 
   async interveneNode(id: string, text: string): Promise<void> {
-    await this.request(`/api/nodes/${encodeURIComponent(id)}/message`, {
-      method: "POST",
-      body: JSON.stringify({ message: text }),
-    });
+    await this.request(`/api/nodes/${encodeURIComponent(id)}/message`, { method: "POST", body: JSON.stringify({ message: text }) });
   }
 
   async createContextZone(input: ContextZoneInput): Promise<ContextZone> {
-    const data = await this.request<{ ok: boolean; data: ContextZone }>("/api/context-scopes", {
-      method: "POST",
-      body: JSON.stringify(input),
-    });
+    const data = await this.request<{ ok: boolean; data: ContextZone }>("/api/context-scopes", { method: "POST", body: JSON.stringify(input) });
     return data.data;
   }
 
   async updateContextZone(id: string, input: Partial<ContextZoneInput>): Promise<ContextZone> {
-    const data = await this.request<{ ok: boolean; data: ContextZone }>(`/api/context-scopes/${encodeURIComponent(id)}`, {
-      method: "PATCH",
-      body: JSON.stringify(input),
-    });
+    const data = await this.request<{ ok: boolean; data: ContextZone }>(`/api/context-scopes/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(input) });
     return data.data;
   }
 
-  async deleteContextZone(id: string): Promise<void> {
-    await this.request(`/api/context-scopes/${encodeURIComponent(id)}`, { method: "DELETE" });
-  }
+  async deleteContextZone(id: string): Promise<void> { await this.request(`/api/context-scopes/${encodeURIComponent(id)}`, { method: "DELETE" }); }
 
-  // ── Chat ────────────────────────────────────────────────────────
   async chat(message: string): Promise<{ ok: boolean; taskIds: string[]; report: string; missionId?: string; threadId?: string; accepted?: boolean }> {
     const threadId = selectedSimpleModeThreadId();
-    const result = await this.request<{
-      ok: boolean;
-      data: { ok: boolean; taskIds: string[]; report: string; missionId?: string; threadId?: string; accepted?: boolean };
-    }>(threadChatPath(threadId), {
+    const result = await this.request<{ ok: boolean; data: { ok: boolean; taskIds: string[]; report: string; missionId?: string; threadId?: string; accepted?: boolean } }>(threadChatPath(threadId), {
       method: "POST",
       body: JSON.stringify({ message }),
     }).then((r) => r.data);
-
     if (simpleModeEnabled() && result.ok && result.accepted && result.missionId) {
       rememberAcceptedMissionSubmission(missionSubmissionAccepted(threadId, result.missionId, message));
     }
@@ -355,20 +312,15 @@ export class Api {
     return data.data;
   }
 
-  // ── Templates ────────────────────────────────────────────────────
   async templates(): Promise<Template[]> {
     const data = await this.request<{ ok: boolean; data: Template[] }>("/api/templates");
     return data.data;
   }
 
   async createTemplate(input: { name: string; description?: string; nodes: unknown[]; metadata?: Record<string, unknown> }): Promise<void> {
-    await this.request("/api/templates", {
-      method: "POST",
-      body: JSON.stringify(input),
-    });
+    await this.request("/api/templates", { method: "POST", body: JSON.stringify(input) });
   }
 
-  // ── Sessions / terminals ────────────────────────────────────────
   async sendInput(sessionId: string, data: string): Promise<void> {
     await this.request("/api/sessions/send", { method: "POST", body: JSON.stringify({ sessionId, data }) });
   }
@@ -378,35 +330,20 @@ export class Api {
   }
 
   async sendPeerMessage(sessionId: string, from: string, text: string): Promise<void> {
-    await this.request(`/api/sessions/${sessionId}/message`, {
-      method: "POST",
-      body: JSON.stringify({ from, text }),
-    });
+    await this.request(`/api/sessions/${sessionId}/message`, { method: "POST", body: JSON.stringify({ from, text }) });
   }
 
   async sessions(): Promise<Array<{ id: string; taskId: string; status: string; pid: number }>> {
     const snapshot = await this.stateRaw();
-    return (snapshot.sessions as Array<{ id: string; taskId: string; status: string; pid: number }>).map((s) => ({
-      id: s.id,
-      taskId: s.taskId,
-      status: s.status,
-      pid: s.pid,
-    }));
+    return (snapshot.sessions as Array<{ id: string; taskId: string; status: string; pid: number }>).map((s) => ({ id: s.id, taskId: s.taskId, status: s.status, pid: s.pid }));
   }
 
   async sendToSession(sessionId: string, data: string): Promise<void> {
-    await this.request("/api/sessions/send", {
-      method: "POST",
-      body: JSON.stringify({ sessionId, data }),
-    });
+    await this.request("/api/sessions/send", { method: "POST", body: JSON.stringify({ sessionId, data }) });
   }
 
-  // ── Approvals ───────────────────────────────────────────────────
   async approve(approvalId: string, decision: "accept" | "reject"): Promise<void> {
-    await this.request(`/api/approvals/${approvalId}/${decision}`, {
-      method: "POST",
-      body: JSON.stringify({ approver: "ui" }),
-    });
+    await this.request(`/api/approvals/${approvalId}/${decision}`, { method: "POST", body: JSON.stringify({ approver: "ui" }) });
   }
 }
 
