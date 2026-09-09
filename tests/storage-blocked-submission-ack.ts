@@ -12,6 +12,13 @@ import {
   saveSelectedThreadId,
   sendThreadMessage,
 } from "../web/src/threadApi.ts";
+import { createThreadHistoryLoader } from "../web/src/threadSelection.ts";
+import {
+  persistWorkspaceDepth,
+  readPersistedWorkspaceDepth,
+  requestedWorkspaceDepth,
+} from "../web/src/canonicalWorkspaceModel.ts";
+import type { ChatMessage } from "../web/src/types.ts";
 
 const originalFetch = globalThis.fetch;
 const originalLocalStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
@@ -37,6 +44,22 @@ try {
   });
 
   assert.equal(
+    readPersistedWorkspaceDepth(),
+    "simple",
+    "denied browser storage must fail safe to the canonical Simple Mode workspace instead of aborting app boot",
+  );
+  assert.equal(
+    persistWorkspaceDepth("power"),
+    false,
+    "workspace-depth persistence must report denial without throwing into the current session",
+  );
+  assert.equal(
+    requestedWorkspaceDepth("simple"),
+    "simple",
+    "denied storage must keep Runtime details from mounting a surface that still requires browser persistence",
+  );
+
+  assert.equal(
     missionSubmissionAcknowledgement(),
     "Got it. I’m starting this now.",
     "blocked browser storage must not prevent Simple Mode from acknowledging accepted work",
@@ -58,6 +81,29 @@ try {
     loadSelectedThreadId(),
     "thread-a",
     "Thread selection must remain usable in-memory for the current session when persistent storage is denied",
+  );
+
+  const historyResolvers = new Map<string, (messages: ChatMessage[]) => void>();
+  const historyLoader = createThreadHistoryLoader((threadId) => new Promise<ChatMessage[]>((resolve) => {
+    historyResolvers.set(threadId, resolve);
+  }));
+  assert.doesNotThrow(
+    () => historyLoader.snapshot(),
+    "Thread-history ownership snapshots must treat denied browser storage as optional instead of crashing Simple Mode",
+  );
+  const threadAHistory = historyLoader.load("thread-a");
+  const threadBHistory = historyLoader.load("thread-b");
+  historyResolvers.get("thread-b")?.([]);
+  assert.deepEqual(
+    await threadBHistory,
+    { current: true, messages: [] },
+    "the newest explicit Thread history load must remain authoritative while storage is denied",
+  );
+  historyResolvers.get("thread-a")?.([]);
+  assert.deepEqual(
+    await threadAHistory,
+    { current: false },
+    "an older Thread history response must stay non-authoritative after the user moves to another Thread",
   );
 
   let chatRequests = 0;
@@ -88,15 +134,29 @@ try {
   );
   assert.equal(chatRequests, 1, "blocked storage must not prevent the canonical Thread chat request from being sent");
 
+  const healthyStorage = new Map<string, string>([["chef:selected-thread", "thread-a"]]);
   Object.defineProperty(globalThis, "localStorage", {
     configurable: true,
     value: {
       getItem(key: string) {
-        return key === "chef:selected-thread" ? "thread-a" : null;
+        return healthyStorage.get(key) ?? null;
+      },
+      setItem(key: string, value: string) {
+        healthyStorage.set(key, value);
       },
     },
   });
 
+  assert.equal(
+    requestedWorkspaceDepth("simple"),
+    "power",
+    "healthy storage must still allow the user to enter Runtime details",
+  );
+  assert.equal(
+    healthyStorage.get("chef:view-mode"),
+    "power",
+    "entering Runtime details must preserve the existing persisted workspace-depth contract",
+  );
   assert.equal(
     missionSubmissionAcknowledgement(),
     "Got it. I’m starting this now.",
@@ -128,4 +188,4 @@ try {
   }
 }
 
-console.log("storage-blocked-submission-ack: ok — selection, acknowledgement, and canonical Thread chat survive denied browser storage");
+console.log("storage-blocked-submission-ack: ok — workspace boot/depth, selection, history ownership, acknowledgement, and canonical Thread chat survive denied browser storage");

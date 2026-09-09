@@ -140,7 +140,13 @@ function threadHistoryMutationGeneration(threadId: string | null): number {
 }
 
 function selectedThreadIdFromStorage(): string | null {
-  return globalThis.localStorage?.getItem(SELECTED_THREAD_STORAGE_KEY) ?? null;
+  try {
+    return globalThis.localStorage?.getItem(SELECTED_THREAD_STORAGE_KEY) ?? null;
+  } catch {
+    // Browser persistence is optional. Explicit Thread-owned history loads still
+    // carry their owner even when a privacy/security policy denies storage.
+    return null;
+  }
 }
 
 /**
