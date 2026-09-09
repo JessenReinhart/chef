@@ -16,7 +16,8 @@ import { MissionActivityRail } from "./MissionActivityRail";
 import { SELECTED_THREAD_EVENT } from "./threadApi";
 import {
   nextWorkspaceDepth,
-  readWorkspaceDepth,
+  persistWorkspaceDepth,
+  readPersistedWorkspaceDepth,
   workspaceSurfacePlan,
   type WorkspaceDepth,
 } from "./canonicalWorkspaceModel";
@@ -26,19 +27,15 @@ import "./advanced-workspace.css";
 import "./workbench-depth.css";
 import "./canonical-workspace.css";
 
-function persistedDepth(): WorkspaceDepth {
-  return readWorkspaceDepth(localStorage.getItem("chef:view-mode"));
-}
-
 function ChefRoot() {
-  const [viewMode, setViewMode] = useState<WorkspaceDepth>(persistedDepth);
+  const [viewMode, setViewMode] = useState<WorkspaceDepth>(readPersistedWorkspaceDepth);
   const [threadSurfaceGeneration, setThreadSurfaceGeneration] = useState(0);
 
   // The Living Workspace still exposes its own Advanced action. Keep both
   // controls on the same persisted depth without mounting both streaming trees.
   useEffect(() => {
     const timer = window.setInterval(() => {
-      const persisted = persistedDepth();
+      const persisted = readPersistedWorkspaceDepth();
       setViewMode((current) => current === persisted ? current : persisted);
     }, 200);
     return () => window.clearInterval(timer);
@@ -57,7 +54,7 @@ function ChefRoot() {
 
   const toggleRuntimeDetails = () => {
     const next = nextWorkspaceDepth(viewMode);
-    localStorage.setItem("chef:view-mode", next);
+    persistWorkspaceDepth(next);
     setViewMode(next);
   };
 
