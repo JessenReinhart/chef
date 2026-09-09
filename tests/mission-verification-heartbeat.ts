@@ -86,9 +86,15 @@ assert.equal(
   null,
   "unowned verification failure must suppress heartbeat until Mission-level recovery is durable",
 );
-missionLevelFailure.push(event("mission-recovered", 3, "mission.status", { status: "active" }));
+missionLevelFailure.push(event("unrelated-task-after-unowned-failure", 3, "task.running", {}, "other-task"));
 assert.equal(
-  deriveMissionHeartbeat(missionLevelFailure, missionId, [], 13_000, 10_000)?.text,
+  deriveMissionHeartbeat(missionLevelFailure, missionId, ["other-task"], 13_000, 10_000),
+  null,
+  "unowned verification failure must not be cleared by unrelated task activity",
+);
+missionLevelFailure.push(event("mission-recovered", 4, "mission.status", { status: "active" }));
+assert.equal(
+  deriveMissionHeartbeat(missionLevelFailure, missionId, ["other-task"], 14_000, 10_000)?.text,
   "Chef is still working. Last runtime activity was 10 seconds ago.",
   "a later active Mission status may recover an unowned verification blocker",
 );
