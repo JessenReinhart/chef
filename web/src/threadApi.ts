@@ -166,10 +166,15 @@ export async function sendThreadMessage(threadId: string, message: string): Prom
 }
 
 export function loadSelectedThreadId(): string | null {
+  const storage = browserStorage();
+  if (!storage) return volatileSelectedThreadId;
   try {
-    const stored = browserStorage()?.getItem(SELECTED_THREAD_KEY) ?? null;
-    if (stored !== null) volatileSelectedThreadId = stored;
-    return stored ?? volatileSelectedThreadId;
+    const stored = storage.getItem(SELECTED_THREAD_KEY);
+    // Healthy storage is authoritative even when the key is absent. The in-memory
+    // copy exists only for denied/unavailable storage and must not resurrect a
+    // selection that was legitimately cleared from persistent browser state.
+    volatileSelectedThreadId = stored;
+    return stored;
   } catch {
     return volatileSelectedThreadId;
   }
