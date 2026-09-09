@@ -185,13 +185,14 @@ function projectedMissionStatus(
   tasksById: Map<string, UiTask>,
   taskIds: Iterable<string>,
 ): UiMission["status"] {
-  if (mission.status !== "active") return mission.status;
+  if (mission.status !== "active" && mission.status !== "verifying") return mission.status;
   const ownedTaskIds = [...taskIds];
   if (ownedTaskIds.length === 0) return mission.status;
   const missionTasks = ownedTaskIds.map((taskId) => tasksById.get(taskId));
   if (missionTasks.some((task) => task === undefined)) return mission.status;
   if (missionTasks.some((task) => task?.status === "failed")) return "failed";
   if (missionTasks.some((task) => task?.status === "blocked")) return "blocked";
+  if (mission.status === "verifying") return mission.status;
   if (missionTasks.every((task) => task?.status === "completed")) return "verifying";
 
   const allTerminal = missionTasks.every((task) => task?.status === "completed" || task?.status === "cancelled");
