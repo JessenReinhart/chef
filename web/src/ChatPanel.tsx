@@ -3,6 +3,7 @@ import { api } from "./api";
 import type { ChatMessage, LlmStatus, ViewMode } from "./types";
 import { summarizeMissionProgress, type MissionProgressItem } from "./missionProgress";
 import { subscribeMissionProgressProjection } from "./missionProgressStream";
+import { assistantContentSeenSinceLastUser, chatSubmissionFallback } from "./chatSubmissionFallback";
 
 interface ChatPanelProps {
   onPlanProposed: (taskIds: string[]) => void;
@@ -127,8 +128,7 @@ export function ChatPanel({ onPlanProposed, mode }: ChatPanelProps) {
             if (event.payload.content && !processedIdsRef.current.has(id)) {
               processedIdsRef.current.add(id);
               setMessages((prev) => {
-                const last = prev[prev.length - 1];
-                if (last?.role === "assistant" && last.content === event.payload.content) return prev;
+                if (assistantContentSeenSinceLastUser(prev, event.payload.content ?? "")) return prev;
                 return [
                   ...prev,
                   {
@@ -230,13 +230,21 @@ export function ChatPanel({ onPlanProposed, mode }: ChatPanelProps) {
 
     try {
       const result = await api.chat(text);
-      // The assistant reply arrives via SSE (chat.assistant). The POST
-      // response is a fallback in case the stream missed it.
-      if (!result.ok) {
-        setMessages((prev) => [
-          ...prev,
-          { role: "assistant", content: result.report, timestamp: Date.now(), bubbleKind: "error" },
-        ]);
+      // SSE is preferred for live chat, but the POST is authoritative fallback
+      // evidence when the stream is delayed or misses this acknowledgement.
+      const fallback = chatSubmissionFallback(result);
+      if (fallback) {
+        setMessages((prev) => assistantContentSeenSinceLastUser(prev, fallback.content)
+          ? prev
+          : [
+              ...prev,
+              {
+                role: "assistant",
+                content: fallback.content,
+                timestamp: Date.now(),
+                bubbleKind: fallback.isError ? "error" : undefined,
+              },
+            ]);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown error";

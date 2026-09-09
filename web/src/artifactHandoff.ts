@@ -64,11 +64,27 @@ function summaryText(artifact: ArtifactHandoffInput, durableLocation: string | n
   return name ? compactSummary(`Chef produced ${name}.`) : null;
 }
 
+function relativeLocationStaysWithinProject(location: string): boolean {
+  let depth = 0;
+  for (const segment of location.replace(/\\/g, "/").split("/")) {
+    if (!segment || segment === ".") continue;
+    if (segment === "..") {
+      if (depth === 0) return false;
+      depth -= 1;
+      continue;
+    }
+    depth += 1;
+  }
+  return true;
+}
+
 function isLocalLocation(location: string): boolean {
   if (hasFileScheme(location)) return fileUriLocation(location) !== null;
   if (/^(?:\/\/|\\\\)/.test(location)) return false;
   if (/^[A-Za-z]:[\\/]/.test(location)) return true;
-  return !/^[A-Za-z][A-Za-z0-9+.-]*:/.test(location);
+  if (/^[A-Za-z][A-Za-z0-9+.-]*:/.test(location)) return false;
+  if (/^[\\/]/.test(location)) return true;
+  return relativeLocationStaysWithinProject(location);
 }
 
 export function canRevealArtifact(artifact: ArtifactHandoffInput): boolean {
