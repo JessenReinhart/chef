@@ -28,6 +28,31 @@ export interface ThreadChatResult {
 
 const SELECTED_THREAD_KEY = "chef:selected-thread";
 export const SELECTED_THREAD_EVENT = "chef:selected-thread-changed";
+let volatileSelectedThreadId: string | null = null;
+
+function browserStorage(): Storage | null {
+  try {
+    return globalThis.localStorage ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function simpleModeEnabled(): boolean {
+  const browserContext = typeof globalThis.window !== "undefined";
+  const storage = browserStorage();
+  if (!storage) {
+    // In a real browser, denied storage must fail safe to Simple Mode. Outside a
+    // browser (for example runtime-only callers), preserve the previous unguarded
+    // behavior instead of inventing foreground UI ownership that does not exist.
+    return browserContext;
+  }
+  try {
+    return storage.getItem("chef:view-mode") !== "power";
+  } catch {
+    return browserContext;
+  }
+}
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
@@ -50,12 +75,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 function simpleModeActionOwner(): { threadId: string | null; guarded: boolean } {
   return {
     threadId: loadSelectedThreadId(),
-    guarded: localStorage.getItem("chef:view-mode") !== "power",
+    guarded: simpleModeEnabled(),
   };
 }
 
 function simpleModeSubmissionGuardEnabled(): boolean {
-  return typeof localStorage !== "undefined" && localStorage.getItem("chef:view-mode") !== "power";
+  return simpleModeEnabled();
 }
 
 function assertThreadActionStillOwnsForeground(
@@ -111,7 +136,7 @@ export async function archiveThread(threadId: string): Promise<UiThread> {
 
 export async function threadMessages(threadId: string): Promise<ChatMessage[]> {
   const selectedThreadAtStart = loadSelectedThreadId();
-  const simpleModeAtStart = localStorage.getItem("chef:view-mode") !== "power";
+  const simpleModeAtStart = simpleModeEnabled();
   const response = await request<{ ok: boolean; data: ChatMessage[] }>(`/api/threads/${encodeURIComponent(threadId)}/messages`);
   if (simpleModeAtStart && (selectedThreadAtStart !== threadId || loadSelectedThreadId() !== selectedThreadAtStart)) {
     throw new Error("Thread selection changed while history was loading");
@@ -141,14 +166,31 @@ export async function sendThreadMessage(threadId: string, message: string): Prom
 }
 
 export function loadSelectedThreadId(): string | null {
-  return localStorage.getItem(SELECTED_THREAD_KEY);
+  const storage = browserStorage();
+  if (!storage) return volatileSelectedThreadId;
+  try {
+    const stored = storage.getItem(SELECTED_THREAD_KEY);
+    // Healthy storage is authoritative even when the key is absent. The in-memory
+    // copy exists only for denied/unavailable storage and must not resurrect a
+    // selection that was legitimately cleared from persistent browser state.
+    volatileSelectedThreadId = stored;
+    return stored;
+  } catch {
+    return volatileSelectedThreadId;
+  }
 }
 
 export function saveSelectedThreadId(threadId: string | null): void {
   const previous = loadSelectedThreadId();
-  if (threadId) localStorage.setItem(SELECTED_THREAD_KEY, threadId);
-  else localStorage.removeItem(SELECTED_THREAD_KEY);
-  if (previous !== threadId && localStorage.getItem("chef:view-mode") !== "power") {
+  volatileSelectedThreadId = threadId;
+  try {
+    const storage = browserStorage();
+    if (threadId) storage?.setItem(SELECTED_THREAD_KEY, threadId);
+    else storage?.removeItem(SELECTED_THREAD_KEY);
+  } catch {
+    // Keep selection session-local when the browser denies persistent storage.
+  }
+  if (previous !== threadId && simpleModeEnabled()) {
     window.dispatchEvent(new CustomEvent(SELECTED_THREAD_EVENT, { detail: { threadId } }));
   }
 }
