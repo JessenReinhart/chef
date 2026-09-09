@@ -228,4 +228,51 @@ assert.equal(
   "failure without a durable error must stay truthful without inventing a reason",
 );
 
-console.log("living-workspace-concurrent-mission: ok — Mission selection and visible failure-to-retry recovery stay truthful, bounded, and free of raw runtime noise in Simple Mode");
+const verifyingMission: UiMission = {
+  id: "mission-verifying-owned-task",
+  goal: "Create a todo app",
+  status: "verifying",
+  taskIds: ["task-verifying-owned"],
+  metadata: {},
+  createdAt: 600,
+  updatedAt: 700,
+};
+const verifiedTaskBase: UiTask = {
+  id: "task-verifying-owned",
+  title: "Verify the todo app",
+  description: "Check the generated todo app",
+  status: "completed",
+  assignedTo: "codex",
+};
+const verifyingCompletedProjection = projectMissionActivity({
+  missions: [verifyingMission],
+  tasks: [verifiedTaskBase],
+  events: [],
+}, []);
+assert.ok(verifyingCompletedProjection);
+assert.equal(
+  verifyingCompletedProjection.missionState,
+  "Verifying",
+  "completed owned work must keep an explicitly verifying Mission in Verifying until terminal Mission state catches up",
+);
+
+for (const taskStatus of ["failed", "blocked"] as const) {
+  const attentionProjection = projectMissionActivity({
+    missions: [verifyingMission],
+    tasks: [{ ...verifiedTaskBase, status: taskStatus }],
+    events: [],
+  }, []);
+  assert.ok(attentionProjection, `a verifying Mission with a ${taskStatus} owned task must remain projectable`);
+  assert.equal(
+    attentionProjection.mission.status,
+    taskStatus,
+    `durable ${taskStatus} task state must override stale Verifying Mission projection immediately`,
+  );
+  assert.equal(
+    attentionProjection.missionState,
+    "Needs attention",
+    `Simple Mode must not keep saying Verifying after its owned task is durably ${taskStatus}`,
+  );
+}
+
+console.log("living-workspace-concurrent-mission: ok — Mission selection, failure/retry recovery, and verification ownership stay truthful and bounded in Simple Mode");
