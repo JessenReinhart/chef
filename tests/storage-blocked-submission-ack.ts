@@ -12,6 +12,8 @@ import {
   saveSelectedThreadId,
   sendThreadMessage,
 } from "../web/src/threadApi.ts";
+import { createThreadHistoryLoader } from "../web/src/threadSelection.ts";
+import type { ChatMessage } from "../web/src/types.ts";
 
 const originalFetch = globalThis.fetch;
 const originalLocalStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
@@ -58,6 +60,29 @@ try {
     loadSelectedThreadId(),
     "thread-a",
     "Thread selection must remain usable in-memory for the current session when persistent storage is denied",
+  );
+
+  const historyResolvers = new Map<string, (messages: ChatMessage[]) => void>();
+  const historyLoader = createThreadHistoryLoader((threadId) => new Promise<ChatMessage[]>((resolve) => {
+    historyResolvers.set(threadId, resolve);
+  }));
+  assert.doesNotThrow(
+    () => historyLoader.snapshot(),
+    "Thread-history ownership snapshots must treat denied browser storage as optional instead of crashing Simple Mode",
+  );
+  const threadAHistory = historyLoader.load("thread-a");
+  const threadBHistory = historyLoader.load("thread-b");
+  historyResolvers.get("thread-b")?.([]);
+  assert.deepEqual(
+    await threadBHistory,
+    { current: true, messages: [] },
+    "the newest explicit Thread history load must remain authoritative while storage is denied",
+  );
+  historyResolvers.get("thread-a")?.([]);
+  assert.deepEqual(
+    await threadAHistory,
+    { current: false },
+    "an older Thread history response must stay non-authoritative after the user moves to another Thread",
   );
 
   let chatRequests = 0;
@@ -128,4 +153,4 @@ try {
   }
 }
 
-console.log("storage-blocked-submission-ack: ok — selection, acknowledgement, and canonical Thread chat survive denied browser storage");
+console.log("storage-blocked-submission-ack: ok — selection, history ownership, acknowledgement, and canonical Thread chat survive denied browser storage");
