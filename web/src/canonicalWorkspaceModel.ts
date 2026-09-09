@@ -33,7 +33,9 @@ export function readPersistedWorkspaceDepth(): WorkspaceDepth {
 /** Report whether the requested depth was durably persisted without throwing into the UI session. */
 export function persistWorkspaceDepth(depth: WorkspaceDepth): boolean {
   try {
-    globalThis.localStorage?.setItem(WORKSPACE_DEPTH_STORAGE_KEY, depth);
+    const storage = globalThis.localStorage;
+    if (!storage) return false;
+    storage.setItem(WORKSPACE_DEPTH_STORAGE_KEY, depth);
     return true;
   } catch {
     return false;
