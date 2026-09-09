@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { loadSelectedThreadId, SELECTED_THREAD_EVENT, threadMessages } from "./threadApi";
 import {
   priorMissionRefreshFallback,
+  priorMissionRefreshStart,
   priorMissionResults,
   type PriorMissionRefreshSnapshot,
 } from "./priorMissionResults";
@@ -25,10 +26,8 @@ export function HomePriorMissionResults() {
     const sequence = ++refreshSequence.current;
     const selectedThreadId = loadSelectedThreadId();
     setTarget(document.querySelector('[aria-label="Recent Mission outcomes"]'));
-    if (!selectedThreadId) {
-      setSnapshot(EMPTY_REFRESH_SNAPSHOT);
-      return;
-    }
+    setSnapshot((previous) => priorMissionRefreshStart(previous, selectedThreadId));
+    if (!selectedThreadId) return;
 
     try {
       const [stateResponse, selectedMessages] = await Promise.all([
