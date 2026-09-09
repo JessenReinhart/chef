@@ -13,6 +13,10 @@ import {
   sendThreadMessage,
 } from "../web/src/threadApi.ts";
 import { createThreadHistoryLoader } from "../web/src/threadSelection.ts";
+import {
+  persistWorkspaceDepth,
+  readPersistedWorkspaceDepth,
+} from "../web/src/canonicalWorkspaceModel.ts";
 import type { ChatMessage } from "../web/src/types.ts";
 
 const originalFetch = globalThis.fetch;
@@ -37,6 +41,16 @@ try {
       throw new DOMException("Storage access denied", "SecurityError");
     },
   });
+
+  assert.equal(
+    readPersistedWorkspaceDepth(),
+    "simple",
+    "denied browser storage must fail safe to the canonical Simple Mode workspace instead of aborting app boot",
+  );
+  assert.doesNotThrow(
+    () => persistWorkspaceDepth("power"),
+    "workspace-depth changes must remain session-usable even when persistence is denied",
+  );
 
   assert.equal(
     missionSubmissionAcknowledgement(),
@@ -153,4 +167,4 @@ try {
   }
 }
 
-console.log("storage-blocked-submission-ack: ok — selection, history ownership, acknowledgement, and canonical Thread chat survive denied browser storage");
+console.log("storage-blocked-submission-ack: ok — workspace boot, selection, history ownership, acknowledgement, and canonical Thread chat survive denied browser storage");
