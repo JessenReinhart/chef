@@ -171,7 +171,7 @@ function recoveryClearsBlocker(recovery: UiRuntimeEvent, blocker: UiRuntimeEvent
   ) {
     const blockedTaskId = taskIdForEvent(blocker);
     if ((blocker.type === "node.failed" || blocker.type === "orchestrator.task.evaluated") && blockedTaskId === undefined) {
-      return resumesHeartbeat(recovery);
+      return recovery.type === "mission.status" && resumesHeartbeat(recovery);
     }
     return blockedTaskId !== undefined
       && taskIdForEvent(recovery) === blockedTaskId
