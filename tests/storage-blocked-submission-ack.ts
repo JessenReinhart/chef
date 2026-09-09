@@ -49,6 +49,11 @@ try {
     "denied browser storage must fail safe to the canonical Simple Mode workspace instead of aborting app boot",
   );
   assert.equal(
+    readPersistedWorkspaceDepth() !== "power",
+    true,
+    "the living workspace must remain enabled when storage access is denied",
+  );
+  assert.equal(
     persistWorkspaceDepth("power"),
     false,
     "workspace-depth persistence must report denial without throwing into the current session",
@@ -148,6 +153,11 @@ try {
   });
 
   assert.equal(
+    readPersistedWorkspaceDepth() !== "power",
+    true,
+    "the living workspace must remain enabled when healthy storage has no Power Mode selection",
+  );
+  assert.equal(
     requestedWorkspaceDepth("simple"),
     "power",
     "healthy storage must still allow the user to enter Runtime details",
@@ -156,6 +166,11 @@ try {
     healthyStorage.get("chef:view-mode"),
     "power",
     "entering Runtime details must preserve the existing persisted workspace-depth contract",
+  );
+  assert.equal(
+    readPersistedWorkspaceDepth() !== "power",
+    false,
+    "the living workspace must disable once healthy storage authoritatively selects Power Mode",
   );
   assert.equal(
     missionSubmissionAcknowledgement(),
@@ -188,4 +203,4 @@ try {
   }
 }
 
-console.log("storage-blocked-submission-ack: ok — workspace boot/depth, selection, history ownership, acknowledgement, and canonical Thread chat survive denied browser storage");
+console.log("storage-blocked-submission-ack: ok — workspace boot/depth, living workspace mode, selection, history ownership, acknowledgement, and canonical Thread chat survive denied browser storage");
