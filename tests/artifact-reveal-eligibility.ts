@@ -17,6 +17,8 @@ assert.equal(revealable("sideband://result", { resultLocation: "file:///tmp/bad%
 assert.equal(revealable("file://server"), false, "a file host without a usable path is not a revealable result");
 assert.equal(revealable("https://example.com/result"), false, "remote artifacts remain non-revealable through the local result action");
 assert.equal(revealable("sideband://result", { resultLocation: "https://example.com/result" }), false, "explicit remote locations remain non-revealable");
+assert.equal(revealable("sideband://result", { resultLocation: "//example.com/results/todo-app" }), false, "protocol-relative remote locations must not masquerade as project-local reveal paths");
+assert.equal(revealable("sideband://result", { resultLocation: "\\\\fileserver\\share\\todo-app" }), false, "UNC/network-style metadata must not advertise a project-local Show result action");
 
 assert.equal(
   artifactHandoff({ uri: "sideband://result", metadata: { resultLocation: "file:///tmp/chef-project/todo-app.mjs" } }).location,

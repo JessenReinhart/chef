@@ -66,6 +66,7 @@ function summaryText(artifact: ArtifactHandoffInput, durableLocation: string | n
 
 function isLocalLocation(location: string): boolean {
   if (hasFileScheme(location)) return fileUriLocation(location) !== null;
+  if (/^(?:\/\/|\\\\)/.test(location)) return false;
   if (/^[A-Za-z]:[\\/]/.test(location)) return true;
   return !/^[A-Za-z][A-Za-z0-9+.-]*:/.test(location);
 }
