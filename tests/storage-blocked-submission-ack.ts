@@ -16,6 +16,7 @@ import { createThreadHistoryLoader } from "../web/src/threadSelection.ts";
 import {
   persistWorkspaceDepth,
   readPersistedWorkspaceDepth,
+  requestedWorkspaceDepth,
 } from "../web/src/canonicalWorkspaceModel.ts";
 import type { ChatMessage } from "../web/src/types.ts";
 
@@ -47,9 +48,15 @@ try {
     "simple",
     "denied browser storage must fail safe to the canonical Simple Mode workspace instead of aborting app boot",
   );
-  assert.doesNotThrow(
-    () => persistWorkspaceDepth("power"),
-    "workspace-depth changes must remain session-usable even when persistence is denied",
+  assert.equal(
+    persistWorkspaceDepth("power"),
+    false,
+    "workspace-depth persistence must report denial without throwing into the current session",
+  );
+  assert.equal(
+    requestedWorkspaceDepth("simple"),
+    "simple",
+    "denied storage must keep Runtime details from mounting a surface that still requires browser persistence",
   );
 
   assert.equal(
@@ -127,15 +134,29 @@ try {
   );
   assert.equal(chatRequests, 1, "blocked storage must not prevent the canonical Thread chat request from being sent");
 
+  const healthyStorage = new Map<string, string>([["chef:selected-thread", "thread-a"]]);
   Object.defineProperty(globalThis, "localStorage", {
     configurable: true,
     value: {
       getItem(key: string) {
-        return key === "chef:selected-thread" ? "thread-a" : null;
+        return healthyStorage.get(key) ?? null;
+      },
+      setItem(key: string, value: string) {
+        healthyStorage.set(key, value);
       },
     },
   });
 
+  assert.equal(
+    requestedWorkspaceDepth("simple"),
+    "power",
+    "healthy storage must still allow the user to enter Runtime details",
+  );
+  assert.equal(
+    healthyStorage.get("chef:view-mode"),
+    "power",
+    "entering Runtime details must preserve the existing persisted workspace-depth contract",
+  );
   assert.equal(
     missionSubmissionAcknowledgement(),
     "Got it. I’m starting this now.",
@@ -167,4 +188,4 @@ try {
   }
 }
 
-console.log("storage-blocked-submission-ack: ok — workspace boot, selection, history ownership, acknowledgement, and canonical Thread chat survive denied browser storage");
+console.log("storage-blocked-submission-ack: ok — workspace boot/depth, selection, history ownership, acknowledgement, and canonical Thread chat survive denied browser storage");
