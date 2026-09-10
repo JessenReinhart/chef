@@ -159,6 +159,23 @@ function positiveVerificationText(value: string): string | null {
   return value;
 }
 
+function positiveVerifierAttribution(value: string): string | null {
+  if (!positiveVerificationText(value)) return null;
+  const normalized = value.toLowerCase();
+  for (const status of NON_SUCCESS_VERIFICATION_VALUES) {
+    let searchFrom = 0;
+    const marker = ` ${status}`;
+    while (searchFrom < normalized.length) {
+      const index = normalized.indexOf(marker, searchFrom);
+      if (index < 0) break;
+      const candidate = normalized.slice(index + 1);
+      if (candidate === status || negativeStatusHasFailureDetail(candidate, status)) return null;
+      searchFrom = index + marker.length;
+    }
+  }
+  return value;
+}
+
 function verificationText(metadata: Record<string, unknown>): string | null {
   const explicitVerification = firstText(metadata, ["verification"]);
   if (explicitVerification) return positiveVerificationText(explicitVerification);
@@ -173,7 +190,7 @@ function verificationText(metadata: Record<string, unknown>): string | null {
 
   const verifiedBy = firstText(metadata, ["verifiedBy"]);
   if (verifiedBy) {
-    const verifier = positiveVerificationText(verifiedBy);
+    const verifier = positiveVerifierAttribution(verifiedBy);
     return verifier ? `Verified by ${verifier}` : null;
   }
   return legacyVerified === true ? "Verified" : null;
