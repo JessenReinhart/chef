@@ -1,4 +1,5 @@
 import { strict as assert } from "node:assert";
+import { selectIntentHomeMission } from "../web/src/intentHomeMissionSelection.ts";
 import { projectMissionActivity, selectLivingWorkspaceMission } from "../web/src/missionActivityProjection.ts";
 import type { UiMission, UiRuntimeEvent, UiTask } from "../web/src/types.ts";
 
@@ -37,6 +38,16 @@ assert.equal(
   ongoing.id,
   "all Simple Mode surfaces, including current results, must select the same ongoing Mission instead of newer terminal history",
 );
+assert.equal(
+  selectIntentHomeMission([ongoing, newerCompleted], false)?.id,
+  ongoing.id,
+  "Simple Mode Home must keep ongoing work in the foreground instead of claiming the newer terminal Mission is current",
+);
+assert.equal(
+  selectIntentHomeMission([ongoing, newerCompleted], true),
+  null,
+  "a just-accepted submission must keep the explicit Starting state until its durable Mission arrives instead of resurfacing older work",
+);
 
 const completedOngoing = { ...ongoing, status: "completed" as const, completedAt: 300 };
 const historyOnly = projectMissionActivity({
@@ -51,6 +62,11 @@ assert.equal(
   selectLivingWorkspaceMission([completedOngoing, newerCompleted])?.id,
   newerCompleted.id,
   "result selection should fall back to the same newest terminal Mission when no ongoing work remains",
+);
+assert.equal(
+  selectIntentHomeMission([completedOngoing, newerCompleted], false)?.id,
+  newerCompleted.id,
+  "Simple Mode Home must fall back to the newest terminal outcome once no Mission is still progressing",
 );
 
 for (const staleStatus of ["waiting_for_approval", "paused"] as const) {
