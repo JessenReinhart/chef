@@ -156,8 +156,8 @@ export function missingResultHandoffNotice(
   resultWithLocationCount = resultCount,
 ): string | null {
   if (!missionStatus) return null;
-  // Zero results are only a durable claim when the artifact snapshot itself is known.
-  if (!resultSnapshotAvailable && resultCount === 0) return null;
+  // Completed-result completeness is only a durable claim when the artifact snapshot itself is known.
+  if (!resultSnapshotAvailable && missionStatus === "completed") return null;
   if (missionStatus === "completed" && resultCount === 0) {
     return "Work is marked complete, but Chef did not publish a durable result for this Mission.";
   }
