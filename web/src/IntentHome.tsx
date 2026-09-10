@@ -3,7 +3,7 @@ import { api } from "./api";
 import { dismissVisibleAppError, stateRefreshErrorMessage, visibleAppError } from "./appErrorProjection";
 import { chefReportPresentation } from "./chefReportPresentation";
 import { loadIntentHomeRefresh } from "./intentHomeRefresh";
-import { selectIntentHomeMission } from "./intentHomeMissionSelection";
+import { intentHomeThreadMissionSignal, selectIntentHomeMission } from "./intentHomeMissionSelection";
 import {
   archiveThread,
   createThread,
@@ -80,10 +80,6 @@ function missionOutcomePresentation(status: UiMission["status"]): { label: strin
     return { label: status === "paused" ? "Paused" : "Waiting for you", dot: "bg-amber-300", text: "text-amber-300" };
   }
   return { label: "In progress", dot: "bg-red-400", text: "text-red-300" };
-}
-
-function isMissionActive(status: UiMission["status"]): boolean {
-  return status !== "completed" && status !== "failed" && status !== "blocked" && status !== "cancelled";
 }
 
 function titleFromMessage(message: string): string {
@@ -229,15 +225,14 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
   const showingStartingState = composerSubmission.locked;
 
   const threadMissionSummaries = useMemo(() => {
-    const summaries = new Map<string, { count: number; active: boolean }>();
+    const summaries = new Map<string, { count: number; signal: ReturnType<typeof intentHomeThreadMissionSignal> }>();
     for (const thread of threads) {
       const threadMissionList = missions
         .filter((mission) => mission.metadata?.threadId === thread.id)
         .sort((a, b) => b.createdAt - a.createdAt);
-      const foregroundMission = selectIntentHomeMission(threadMissionList, false);
       summaries.set(thread.id, {
         count: threadMissionList.length,
-        active: foregroundMission ? isMissionActive(foregroundMission.status) : false,
+        signal: intentHomeThreadMissionSignal(threadMissionList),
       });
     }
     return summaries;
@@ -687,13 +682,16 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
                   className={`shrink-0 rounded-full border px-3 py-1.5 text-[11px] transition ${
                     thread.id === selectedThreadId
                       ? "border-red-300/30 bg-red-300/[0.09] text-red-200"
-                      : "border-white/[0.08] bg-black/20 text-zinc-500 hover:border-white/15 hover:text-zinc-300"
+                      : summary?.signal === "attention"
+                        ? "border-amber-300/20 bg-amber-300/[0.04] text-amber-200/80 hover:border-amber-300/35 hover:text-amber-100"
+                        : "border-white/[0.08] bg-black/20 text-zinc-500 hover:border-white/15 hover:text-zinc-300"
                   }`}
                 >
                   <span>{thread.title}</span>
                   {summary && summary.count > 0 && (
-                    <span className="ml-1.5 text-[9px] text-zinc-600">
-                      · {summary.count} {summary.count === 1 ? "Mission" : "Missions"}{summary.active ? " · active" : ""}
+                    <span className={`ml-1.5 text-[9px] ${summary.signal === "attention" ? "text-amber-300/70" : "text-zinc-600"}`}>
+                      · {summary.count} {summary.count === 1 ? "Mission" : "Missions"}
+                      {summary.signal === "active" ? " · active" : summary.signal === "attention" ? " · needs attention" : ""}
                     </span>
                   )}
                 </button>

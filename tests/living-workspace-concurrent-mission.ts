@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { selectIntentHomeMission } from "../web/src/intentHomeMissionSelection.ts";
+import { intentHomeThreadMissionSignal, selectIntentHomeMission } from "../web/src/intentHomeMissionSelection.ts";
 import { projectMissionActivity, selectLivingWorkspaceMission } from "../web/src/missionActivityProjection.ts";
 import type { UiMission, UiRuntimeEvent, UiTask } from "../web/src/types.ts";
 
@@ -48,6 +48,11 @@ assert.equal(
   null,
   "a just-accepted submission must keep the explicit Starting state until its durable Mission arrives instead of resurfacing older work",
 );
+assert.equal(
+  intentHomeThreadMissionSignal([ongoing, newerCompleted]),
+  "active",
+  "Thread navigation must use the shared living-Mission foreground and keep genuinely ongoing work labeled active",
+);
 
 const completedOngoing = { ...ongoing, status: "completed" as const, completedAt: 300 };
 const historyOnly = projectMissionActivity({
@@ -68,6 +73,27 @@ assert.equal(
   newerCompleted.id,
   "Simple Mode Home must fall back to the newest terminal outcome once no Mission is still progressing",
 );
+assert.equal(
+  intentHomeThreadMissionSignal([completedOngoing, newerCompleted]),
+  null,
+  "completed Thread history must stay quiet instead of looking active or actionable",
+);
+
+for (const attentionStatus of ["failed", "blocked", "cancelled", "waiting_for_approval", "paused"] as const) {
+  const attentionMission: UiMission = {
+    ...newerCompleted,
+    id: `mission-attention-${attentionStatus}`,
+    status: attentionStatus,
+    completedAt: undefined,
+    createdAt: 500,
+    updatedAt: 550,
+  };
+  assert.equal(
+    intentHomeThreadMissionSignal([newerCompleted, attentionMission]),
+    "attention",
+    `a foreground ${attentionStatus} Mission must make its Thread discoverably need attention in Simple Mode`,
+  );
+}
 
 for (const staleStatus of ["waiting_for_approval", "paused"] as const) {
   const staleAttentionMission: UiMission = {
@@ -102,6 +128,11 @@ for (const staleStatus of ["waiting_for_approval", "paused"] as const) {
     completedFollowUp.id,
     `current result selection must follow the newer completed Mission instead of stale ${staleStatus} history`,
   );
+  assert.equal(
+    intentHomeThreadMissionSignal([staleAttentionMission, completedFollowUp]),
+    null,
+    `stale ${staleStatus} history must not leave a false Thread attention badge after a newer completed follow-up`,
+  );
 }
 
 const newestApprovalMission: UiMission = {
@@ -115,6 +146,11 @@ assert.equal(
   selectLivingWorkspaceMission([newerCompleted, newestApprovalMission])?.id,
   newestApprovalMission.id,
   "when no Mission is actively progressing, the newest approval wait must remain the foreground attention state",
+);
+assert.equal(
+  intentHomeThreadMissionSignal([newerCompleted, newestApprovalMission]),
+  "attention",
+  "the Thread strip must make the foreground approval wait discoverable without opening the Thread",
 );
 
 const recoveryMission: UiMission = {
@@ -291,4 +327,4 @@ for (const taskStatus of ["failed", "blocked"] as const) {
   );
 }
 
-console.log("living-workspace-concurrent-mission: ok — Mission selection, failure/retry recovery, and verification ownership stay truthful and bounded in Simple Mode");
+console.log("living-workspace-concurrent-mission: ok — Mission selection, failure/retry recovery, verification ownership, and Thread attention stay truthful and bounded in Simple Mode");
