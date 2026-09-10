@@ -43,26 +43,13 @@ assert.equal(power.runtimeApp, true, "runtime detail should remain reachable");
 assert.equal(power.rooms, true, "Rooms remain available at advanced depth");
 assert.equal(power.agentContext, true, "agent context remains available at advanced depth");
 
-assert.equal(
-  chefReportPresentation({ missionStatus: "completed", starting: false }),
-  "expanded",
-  "a completed Mission must expose the whole final Chef handoff",
-);
-assert.equal(
-  chefReportPresentation({ missionStatus: "failed", starting: false }),
-  "expanded",
-  "a failed Mission must keep the whole recovery handoff readable",
-);
-assert.equal(
-  chefReportPresentation({ missionStatus: "blocked", starting: false }),
-  "expanded",
-  "a blocked Mission must keep the whole recovery handoff readable",
-);
-assert.equal(
-  chefReportPresentation({ missionStatus: "cancelled", starting: false }),
-  "expanded",
-  "a cancelled Mission must keep the whole terminal handoff readable",
-);
+for (const missionStatus of ["completed", "failed", "blocked", "cancelled", "waiting_for_approval", "paused"] as const) {
+  assert.equal(
+    chefReportPresentation({ missionStatus, starting: false }),
+    "expanded",
+    `${missionStatus} Mission reports must remain fully readable when work is finished or needs user attention`,
+  );
+}
 assert.equal(
   chefReportPresentation({ missionStatus: null, starting: false }),
   "expanded",
@@ -73,11 +60,11 @@ assert.equal(
   "expanded",
   "a direct final Chef report must outrank stale active Mission history in the same Thread",
 );
-for (const missionStatus of ["planning", "active", "verifying", "waiting_for_approval", "paused"] as const) {
+for (const missionStatus of ["planning", "active", "verifying"] as const) {
   assert.equal(
     chefReportPresentation({ missionStatus, starting: false }),
     "compact",
-    `${missionStatus} Mission updates may remain compact while work is non-terminal`,
+    `${missionStatus} Mission updates may remain compact while routine work is progressing`,
   );
 }
 assert.equal(
@@ -300,4 +287,4 @@ assert.deepEqual(startupActivity.feed, [
   "Chef chose one worker because this Mission fits one straightforward step.",
 ]);
 
-console.log("intent-home-ui: ok — canonical workspace, Mission activity, and terminal Chef handoff projection are verified by executable behavior");
+console.log("intent-home-ui: ok — canonical workspace, Mission activity, attention guidance, and terminal Chef handoff projection are verified by executable behavior");
