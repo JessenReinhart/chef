@@ -8,11 +8,13 @@ type ChefReportPresentationInput = {
   starting: boolean;
 };
 
-const TERMINAL_MISSION_STATUSES = new Set<UiMission["status"]>([
+const EXPANDED_MISSION_STATUSES = new Set<UiMission["status"]>([
   "completed",
   "failed",
   "blocked",
   "cancelled",
+  "paused",
+  "waiting_for_approval",
 ]);
 
 export function chefReportPresentation({
@@ -23,5 +25,5 @@ export function chefReportPresentation({
   if (starting) return "compact";
   if (directReport) return "expanded";
   if (!missionStatus) return "expanded";
-  return TERMINAL_MISSION_STATUSES.has(missionStatus) ? "expanded" : "compact";
+  return EXPANDED_MISSION_STATUSES.has(missionStatus) ? "expanded" : "compact";
 }
