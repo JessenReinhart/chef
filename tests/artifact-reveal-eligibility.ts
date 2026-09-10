@@ -9,6 +9,7 @@ assert.equal(revealable("file://localhost/tmp/chef-project/todo-app.mjs"), true,
 assert.equal(revealable("file://localhost/C:/Work/chef/todo-app.mjs"), true, "localhost Windows file results remain revealable as local results");
 assert.equal(revealable("file://server/share/todo-app.mjs"), false, "remote file authorities must not advertise a local Show result action");
 assert.equal(revealable("file://server/C:/Work/chef/todo-app.mjs"), false, "hosted drive-like file URIs are still remote and must not advertise local reveal");
+assert.equal(revealable("sideband://result", { resultLocation: "file://server/share/todo-app.mjs" }), false, "explicit remote file-URI locations must not advertise a local Show result action");
 assert.equal(revealable("sideband://result", { resultLocation: "dist/todo-app" }), true, "relative project-local result locations remain revealable");
 assert.equal(revealable("sideband://result", { resultLocation: "dist/../todo-app" }), true, "relative paths that normalize within the project remain revealable");
 assert.equal(revealable("sideband://result", { path: "C:\\Work\\chef\\todo-app" }), true, "explicit Windows result paths remain revealable");
