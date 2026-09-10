@@ -161,6 +161,37 @@ assert.equal(
   "the preserved runnable handoff must retain the exact durable run instruction instead of synthesizing one",
 );
 
+const hiddenLocatedArtifact: LivingArtifact = {
+  ...opaqueResult,
+  id: "hidden-located-result",
+  metadata: {
+    ...opaqueResult.metadata,
+    resultLocation: "todo-app/index.html",
+  },
+};
+const opaqueOverflowArtifacts: LivingArtifact[] = Array.from({ length: 5 }, (_, index) => ({
+  ...opaqueResult,
+  id: `opaque-leaf-${index + 1}`,
+  name: `opaque-leaf-${index + 1}`,
+}));
+const hiddenLocationProjection = missionResultHandoffProjection(
+  [hiddenLocatedArtifact, ...opaqueOverflowArtifacts],
+  scope,
+  "thread-current",
+  "completed",
+);
+assert.equal(hiddenLocationProjection.artifacts.length, 4, "visible result cards must stay bounded independently from handoff completeness");
+assert.equal(
+  hiddenLocationProjection.artifacts.some((artifact) => artifact.id === hiddenLocatedArtifact.id),
+  false,
+  "the regression requires the located artifact to sit outside the visible-card cap",
+);
+assert.equal(
+  hiddenLocationProjection.notice,
+  null,
+  "a valid foreground-Mission location outside the visible-card cap must still satisfy completion",
+);
+
 const newerRunnableResult: LivingArtifact = {
   ...result,
   id: "todo-result-newer",
@@ -356,4 +387,4 @@ assert.equal(
   "an empty workspace must not render an empty artifact shelf affordance",
 );
 
-console.log("result-handoff-projection: ok — runnable overflow stays visible, completed results require a durable location, incomplete handoffs stay truthful, result absence stays unknown during artifact outages, refresh failures retain cards only for the same selected Mission, and durable workspace artifacts remain rediscoverable whenever results are hidden");
+console.log("result-handoff-projection: ok — runnable overflow stays visible, completed results require a durable location across the full Mission artifact set, incomplete handoffs stay truthful, result absence stays unknown during artifact outages, refresh failures retain cards only for the same selected Mission, and durable workspace artifacts remain rediscoverable whenever results are hidden");
