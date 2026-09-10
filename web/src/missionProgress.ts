@@ -158,6 +158,10 @@ function recoveryClearsBlocker(recovery: UiRuntimeEvent, blocker: UiRuntimeEvent
     if (blockedTaskId === undefined) {
       return recovery.type === "mission.status" && resumesHeartbeat(recovery);
     }
+    const decision = stringValue(objectPayload(blocker), "decision");
+    if (decision === "rejected" && recovery.type === "mission.status") {
+      return stringValue(objectPayload(recovery), "status") === "planning";
+    }
     return taskIdForEvent(recovery) === blockedTaskId
       && (recovery.type === "task.assigned" || recovery.type === "task.running" || recovery.type === "session.data");
   }
