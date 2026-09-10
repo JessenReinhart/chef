@@ -162,10 +162,10 @@ assert.deepEqual(projectedHistory, [], "changing Threads must synchronously clea
 assert.deepEqual(historyLoads, ["thread-chat-a", "thread-chat-b"], "changing Threads must start a fresh history read for the new foreground selection");
 
 historyResolvers[0]?.(["Thread A message"]);
-await Promise.resolve();
+await new Promise<void>((resolve) => setImmediate(resolve));
 assert.deepEqual(projectedHistory, [], "a late history response from the previous Thread must not commit after selection changes");
 historyResolvers[1]?.(["Thread B message"]);
-await Promise.resolve();
+await new Promise<void>((resolve) => setImmediate(resolve));
 assert.deepEqual(projectedHistory, ["Thread B message"], "the newest foreground Thread history should commit normally");
 assert.equal(historyClearCount, 2, "history should clear once on mount and once for the actual Thread change");
 
