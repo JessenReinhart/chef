@@ -3,6 +3,7 @@ import { api } from "./api";
 import { dismissVisibleAppError, stateRefreshErrorMessage, visibleAppError } from "./appErrorProjection";
 import { chefReportPresentation } from "./chefReportPresentation";
 import { loadIntentHomeRefresh } from "./intentHomeRefresh";
+import { selectIntentHomeMission } from "./intentHomeMissionSelection";
 import {
   archiveThread,
   createThread,
@@ -251,7 +252,10 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
     [threadMissions],
   );
 
-  const latestMission = acceptedSubmissionPending ? null : missionChronology[0] ?? null;
+  const latestMission = useMemo(
+    () => selectIntentHomeMission(missionChronology, acceptedSubmissionPending),
+    [acceptedSubmissionPending, missionChronology],
+  );
 
   const recentPriorMissions = useMemo(
     () => missionChronology
