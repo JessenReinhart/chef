@@ -3,7 +3,7 @@ import { TaskMachine } from "../src/runtime/task-machine.ts";
 import { Scheduler, type HarnessLike, type HarnessRegistry } from "../src/runtime/scheduler.ts";
 import { Repository } from "../src/persistence/database.ts";
 import type { Task } from "../src/core/types.ts";
-import { canRetryMissionTask } from "../web/src/missionRecovery.ts";
+import { canRetryMissionTask, createTaskRetryOwnership } from "../web/src/missionRecovery.ts";
 
 assert.equal(canRetryMissionTask({
   missionStatus: "failed",
@@ -98,6 +98,31 @@ assert.equal(canRetryMissionTask({
   blockedByApproval: false,
   readOnly: false,
 }), true, "temporary Mission projection lag must not hide a valid recovery action");
+
+const retryOwnership = createTaskRetryOwnership();
+assert.equal(retryOwnership.begin("thread-a-task"), true, "the first retry for a Task must acquire ownership");
+assert.equal(retryOwnership.begin("thread-a-task"), false, "the same Task must remain single-flight while its retry is pending");
+assert.equal(retryOwnership.begin("thread-b-task"), true, "an unrelated Task must remain retryable while another Thread has a retry pending");
+assert.deepEqual(
+  [...retryOwnership.snapshot()].sort(),
+  ["thread-a-task", "thread-b-task"],
+  "independent pending retries must be tracked together rather than replacing one another",
+);
+retryOwnership.finish("thread-a-task");
+assert.deepEqual(
+  [...retryOwnership.snapshot()],
+  ["thread-b-task"],
+  "late settlement of one Thread's retry must not clear another Task's pending ownership",
+);
+assert.equal(retryOwnership.begin("thread-a-task"), true, "a settled Task must become retryable again without disturbing other pending work");
+retryOwnership.finish("thread-b-task");
+assert.deepEqual(
+  [...retryOwnership.snapshot()],
+  ["thread-a-task"],
+  "settling the second retry must preserve a newer retry acquired by the first Task",
+);
+retryOwnership.finish("thread-a-task");
+assert.equal(retryOwnership.snapshot().size, 0, "all ownership must clear once each Task settles");
 
 const failedTask: Task = {
   id: "task-retry-failed",
@@ -194,4 +219,4 @@ assert.ok(
 );
 repo.close();
 
-console.log("simple-mode-recovery-actions: ok — Retry follows Mission lifecycle, retry budget, approvals, read-only state, and clears stale Task failure state durably");
+console.log("simple-mode-recovery-actions: ok — Retry follows Mission lifecycle, per-Task ownership, retry budget, approvals, read-only state, and clears stale Task failure state durably");

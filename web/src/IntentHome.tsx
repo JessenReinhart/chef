@@ -47,7 +47,7 @@ import {
   type MissionHomeState,
 } from "./missionProgress";
 import { createMissionProgressRefreshQueue } from "./missionProgressStream";
-import { canRetryMissionTask } from "./missionRecovery";
+import { canRetryMissionTask, createTaskRetryOwnership } from "./missionRecovery";
 import { partitionMissionTasksForSimpleMode } from "./missionTaskVisibility";
 import type { ChatMessage, UiMission, UiRuntimeEvent, UiTask } from "./types";
 
@@ -121,7 +121,8 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
   const [submittingThreadKeys, setSubmittingThreadKeys] = useState<Set<string>>(() => new Set());
   const [creatingThread, setCreatingThread] = useState(false);
   const [managingThread, setManagingThread] = useState(false);
-  const [retryingTaskId, setRetryingTaskId] = useState<string | null>(null);
+  const retryOwnership = useMemo(() => createTaskRetryOwnership(), []);
+  const [retryingTaskIds, setRetryingTaskIds] = useState<Set<string>>(() => retryOwnership.snapshot());
   const [actionError, setActionError] = useState<string | null>(null);
   const [stateRefreshError, setStateRefreshError] = useState<string | null>(null);
   const [lastReport, setLastReport] = useState<string | null>(null);
@@ -552,9 +553,9 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
   }
 
   async function retryTask(taskId: string) {
-    if (retryingTaskId) return;
+    if (!retryOwnership.begin(taskId)) return;
     const actionThreadId = selectedThreadId;
-    setRetryingTaskId(taskId);
+    setRetryingTaskIds(retryOwnership.snapshot());
     setActionError(null);
     try {
       await api.retryNode(taskId);
@@ -564,7 +565,8 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
         setActionError(err instanceof Error ? err.message : "Chef could not retry this work");
       }
     } finally {
-      setRetryingTaskId(null);
+      retryOwnership.finish(taskId);
+      setRetryingTaskIds(retryOwnership.snapshot());
     }
   }
 
@@ -589,6 +591,7 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
       blockedByApproval: approvalTaskIds.has(task.id),
       readOnly: archivedThreadSelected,
     });
+    const retrying = retryingTaskIds.has(task.id);
     return (
       <div key={task.id} className="flex items-center gap-3 rounded-xl px-3 py-2.5 transition hover:bg-white/[0.025]">
         <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${presentation.dot}`} />
@@ -602,10 +605,10 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
           <button
             type="button"
             onClick={() => void retryTask(task.id)}
-            disabled={retryingTaskId !== null}
+            disabled={retrying}
             className="rounded-lg border border-rose-300/20 bg-rose-300/[0.05] px-2.5 py-1 text-[10px] font-semibold text-rose-200 transition hover:bg-rose-300/[0.1] disabled:cursor-not-allowed disabled:opacity-40"
           >
-            {retryingTaskId === task.id ? "Retrying…" : "Retry"}
+            {retrying ? "Retrying…" : "Retry"}
           </button>
         ) : (
           <span className={`text-[10px] font-medium ${presentation.text}`}>{presentation.label}</span>
