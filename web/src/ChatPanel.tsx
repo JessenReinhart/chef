@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { api } from "./api";
 import type { ChatMessage, LlmStatus, ViewMode } from "./types";
-import { summarizeMissionProgress, type MissionProgressItem } from "./missionProgress";
+import type { MissionProgressItem } from "./missionProgress";
+import { projectChatMissionProgress } from "./chatMissionProgressProjection";
 import { subscribeMissionProgressProjection } from "./missionProgressStream";
 import { assistantContentSeenSinceLastUser, chatSubmissionFallback } from "./chatSubmissionFallback";
 import { subscribeChatHistoryProjection } from "./chatHistoryProjection";
 import { createChatSubmissionOwnership, settleOwnedChatSubmission, type ChatSubmissionOwnership } from "./chatSubmissionOwnership";
+import { loadSelectedThreadId } from "./threadApi";
 
 interface ChatPanelProps {
   onPlanProposed: (taskIds: string[]) => void;
@@ -78,12 +80,15 @@ export function ChatPanel({ onPlanProposed, mode }: ChatPanelProps) {
     };
   }, []);
 
-  // Build the human-readable Mission digest from durable Thread-scoped state on mount
-  // and whenever the shared runtime stream signals that authoritative evidence changed.
+  // Build the human-readable Mission digest from durable foreground-owned state on mount
+  // and whenever the shared runtime stream or Simple Mode Thread selection changes.
   useEffect(() => subscribeMissionProgressProjection(
-    async () => summarizeMissionProgress((await api.stateRaw()).events),
+    async () => {
+      const snapshot = await api.stateRaw();
+      return projectChatMissionProgress(snapshot, mode, loadSelectedThreadId());
+    },
     setProgress,
-  ), []);
+  ), [mode]);
 
   // Chat history follows the foreground Simple Mode Thread. Clear the previous
   // conversation immediately on selection, then commit only the newest history read.
