@@ -50,6 +50,15 @@ function hasRunInstruction(artifact: MissionLinkedArtifact): boolean {
   });
 }
 
+function hasPublishedResultLocation(artifact: MissionLinkedArtifact): boolean {
+  for (const key of ["resultLocation", "path", "location"]) {
+    const value = artifact.metadata[key];
+    if (typeof value === "string" && value.trim().length > 0) return true;
+  }
+  const uri = (artifact as MissionLinkedArtifact & { uri?: unknown }).uri;
+  return typeof uri === "string" && /^file:/i.test(uri.trim());
+}
+
 function keepRunnableHandoffVisible<T extends MissionLinkedArtifact>(
   missionArtifacts: T[],
   visibleArtifacts: T[],
@@ -144,12 +153,16 @@ export function missingResultHandoffNotice(
   missionStatus: string | undefined,
   resultCount: number,
   resultSnapshotAvailable = true,
+  resultWithLocationCount = resultCount,
 ): string | null {
   if (!missionStatus) return null;
-  // Zero results are only a durable claim when the artifact snapshot itself is known.
+  if (!resultSnapshotAvailable && missionStatus === "completed") return null;
   if (!resultSnapshotAvailable && resultCount === 0) return null;
   if (missionStatus === "completed" && resultCount === 0) {
     return "Work is marked complete, but Chef did not publish a durable result for this Mission.";
+  }
+  if (missionStatus === "completed" && resultWithLocationCount === 0) {
+    return "Work is marked complete, but Chef did not publish a durable result location for this Mission.";
   }
   if (missionStatus === "failed" || missionStatus === "blocked" || missionStatus === "waiting_for_approval") {
     return resultCount > 0
@@ -181,9 +194,15 @@ export function missionResultHandoffProjection<T extends MissionLinkedArtifact>(
     return { artifacts: [], notice: null };
   }
   const visibleArtifacts = visibleArtifactsForCurrentMission(artifacts, scope, limit);
+  const locatedResultCount = visibleArtifacts.filter(hasPublishedResultLocation).length;
   return {
     artifacts: visibleArtifacts,
-    notice: missingResultHandoffNotice(missionStatus, visibleArtifacts.length, resultSnapshotAvailable),
+    notice: missingResultHandoffNotice(
+      missionStatus,
+      visibleArtifacts.length,
+      resultSnapshotAvailable,
+      locatedResultCount,
+    ),
   };
 }
 
