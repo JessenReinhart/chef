@@ -17,6 +17,7 @@ assert.doesNotMatch(panel, /dangerouslySetInnerHTML/, "verification copy must re
 const failureDetailPhrases = [
   "failed verification: npm test exited 1",
   "failed tests after build",
+  "failed to run tests",
   "error during browser acceptance",
   "not verified because Windows acceptance was unavailable",
 ];
