@@ -218,6 +218,7 @@ try {
 
   const failingBase = createServer((_req, res) => { res.writeHead(418); res.end("base"); });
   const failedHandoff = Promise.withResolvers<void>();
+  void failedHandoff.promise.catch(() => {});
   const failingServer = createProjectServer(runtime, failingBase, {
     recentProjectsPath: join(dir, "state", "failed-recent.json"),
     canPickDirectory: async () => false,
