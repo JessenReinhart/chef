@@ -25,6 +25,12 @@ assert.deepEqual(
   "a completed Mission must not look product-green when its only durable result has no usable location",
 );
 
+assert.deepEqual(
+  missionResultHandoffProjection([baseResult], scope, "thread-current", "completed", 4, false),
+  { artifacts: [baseResult], notice: null },
+  "a cached opaque result during an artifact outage is not proof that the latest durable handoff lacks a location",
+);
+
 const explicitLocation: LivingArtifact = {
   ...baseResult,
   id: "todo-result-with-location",
