@@ -172,7 +172,10 @@ function verificationText(metadata: Record<string, unknown>): string | null {
   }
 
   const verifiedBy = firstText(metadata, ["verifiedBy"]);
-  if (verifiedBy) return `Verified by ${verifiedBy}`;
+  if (verifiedBy) {
+    const verifier = positiveVerificationText(verifiedBy);
+    return verifier ? `Verified by ${verifier}` : null;
+  }
   return legacyVerified === true ? "Verified" : null;
 }
 
