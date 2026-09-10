@@ -46,16 +46,20 @@ const completed = summarizeMissionProgressEvent(event("done", "mission.status", 
 assert.equal(completed?.text, "Mission completed.");
 assert.equal(completed?.tone, "success");
 
-const timeout = summarizeMissionProgressEvent(event("timeout", "mission.timeout", { missionId: "mission-1", timeoutMs: 10_000 }, 6));
+const paused = summarizeMissionProgressEvent(event("paused", "mission.status", { status: "paused" }, 6));
+assert.equal(paused?.text, "Mission paused.");
+assert.equal(paused?.tone, "attention", "a paused Mission must stay visibly actionable in Simple Mode progress");
+
+const timeout = summarizeMissionProgressEvent(event("timeout", "mission.timeout", { missionId: "mission-1", timeoutMs: 10_000 }, 7));
 assert.equal(timeout?.text, "Mission timed out after 10 seconds.");
 assert.equal(timeout?.tone, "attention");
 
-const workerOutput = summarizeMissionProgressEvent(event("output", "session.data", { text: "raw terminal output" }, 7));
+const workerOutput = summarizeMissionProgressEvent(event("output", "session.data", { text: "raw terminal output" }, 8));
 assert.equal(workerOutput?.text, "A worker is actively producing output.");
 assert.equal(workerOutput?.tone, "active");
 assert.ok(!workerOutput?.text.includes("raw terminal output"), "Simple Mode must not echo raw terminal output");
 
-const noPlan = summarizeMissionProgressEvent(event("no-plan", "orchestrator.plan.none", { missionId: "mission-no-plan" }, 8));
+const noPlan = summarizeMissionProgressEvent(event("no-plan", "orchestrator.plan.none", { missionId: "mission-no-plan" }, 9));
 assert.equal(noPlan?.text, "Chef could not build a plan for this Mission.");
 assert.equal(noPlan?.tone, "attention");
 
@@ -63,7 +67,7 @@ const interrupted = summarizeMissionProgressEvent(event(
   "interrupted",
   "orchestrator.plan.interrupted",
   { missionId: "mission-interrupted", status: "cancelled" },
-  9,
+  10,
 ));
 assert.equal(interrupted?.text, "Mission execution was interrupted (cancelled).");
 assert.equal(interrupted?.tone, "attention");
@@ -72,7 +76,7 @@ const cancelled = summarizeMissionProgressEvent(event(
   "cancelled",
   "task.cancelled",
   { reason: "work was superseded" },
-  10,
+  11,
 ));
 assert.equal(cancelled?.text, "A work step was cancelled: work was superseded");
 assert.equal(cancelled?.tone, "attention");
@@ -308,4 +312,4 @@ assert.equal(
   "a real retry after approval rejection must restore heartbeat feedback",
 );
 
-console.log("mission-progress-summary: ok — routing, worker activity, recovered task lineage, verification lag, interrupted/cancelled attempts, no-plan recovery, and other blockers produce truthful Simple Mode progress");
+console.log("mission-progress-summary: ok — routing, worker activity, recovered task lineage, verification lag, interrupted/cancelled attempts, no-plan recovery, paused state, and other blockers produce truthful Simple Mode progress");

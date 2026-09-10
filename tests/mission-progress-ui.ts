@@ -159,7 +159,7 @@ assert.equal(active.tone, "active", "active Missions must keep their active proj
 
 const paused = summarizeMissionProgressEvent(missionStatusEvent("event-4", "paused"));
 assert.ok(paused);
-assert.equal(paused.tone, "neutral", "paused Missions retain the existing neutral projection in this slice");
+assert.equal(paused.tone, "attention", "paused Missions must remain visibly actionable in Simple Mode progress");
 
 const failedTask = summarizeMissionProgressEvent(taskEvent("event-5", "task.failed", { from: "running", to: "failed", error: "worker exited" }));
 assert.ok(failedTask);
