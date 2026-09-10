@@ -217,10 +217,12 @@ try {
   assert.equal(fallback.status, 418);
 
   const failingBase = createServer((_req, res) => { res.writeHead(418); res.end("base"); });
+  const failedHandoff = Promise.withResolvers<void>();
+  void failedHandoff.promise.catch(() => {});
   const failingServer = createProjectServer(runtime, failingBase, {
     recentProjectsPath: join(dir, "state", "failed-recent.json"),
     canPickDirectory: async () => false,
-    onOpenProject: async () => { throw new Error("restart failed"); },
+    onOpenProject: () => failedHandoff.promise,
   });
   await new Promise<void>((resolve) => failingServer.listen(0, "127.0.0.1", resolve));
   const failingAddress = failingServer.address();
@@ -284,6 +286,7 @@ try {
       409,
       "Mission redirect must stay gated while the old runtime is attempting the selected-project handoff",
     );
+    failedHandoff.reject(new Error("restart failed"));
     await new Promise((resolve) => setTimeout(resolve, 150));
     assert.equal(
       (await fetch(`${failingOrigin}/api/threads`, { method: "POST" })).status,
