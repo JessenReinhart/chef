@@ -118,7 +118,7 @@ const NON_SUCCESS_VERIFICATION_VALUES = new Set([
   "unverified",
 ]);
 
-const NON_SUCCESS_DETAIL_SEPARATORS = [":", " - ", " — ", " – ", ";", " (", "\n", "\r\n", "\t", ".", ","];
+const NON_SUCCESS_DETAIL_SEPARATORS = [":", " - ", " — ", " – ", ";", " (", "\n", "\r\n", "\t", ".", ",", ")", "]", "}"];
 const NON_SUCCESS_DETAIL_WORDS = new Set([
   "after",
   "because",
@@ -161,7 +161,7 @@ function positiveVerificationText(value: string): string | null {
 
 function positiveVerifierAttribution(value: string): string | null {
   if (!positiveVerificationText(value)) return null;
-  const normalized = value.toLowerCase();
+  const normalized = value.toLowerCase().replace(/[()[\]{}]/g, " ");
   for (const status of NON_SUCCESS_VERIFICATION_VALUES) {
     let searchFrom = 0;
     const marker = ` ${status}`;
@@ -169,7 +169,7 @@ function positiveVerifierAttribution(value: string): string | null {
       const index = normalized.indexOf(marker, searchFrom);
       if (index < 0) break;
       const candidate = normalized.slice(index + 1);
-      if (candidate === status || negativeStatusHasFailureDetail(candidate, status)) return null;
+      if (candidate.trim() === status || negativeStatusHasFailureDetail(candidate, status)) return null;
       searchFrom = index + marker.length;
     }
   }

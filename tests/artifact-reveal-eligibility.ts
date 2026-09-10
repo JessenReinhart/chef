@@ -83,4 +83,19 @@ assert.equal(
   "positive verification prose beginning with a status-like word must remain visible",
 );
 
+for (const verifiedBy of ["npm test (failed)", "npm test [failed]", "browser smoke (error)"] as const) {
+  assert.equal(
+    artifactHandoff({ uri: "file:///tmp/chef-project/todo-app.mjs", metadata: { verifiedBy } }).verification,
+    null,
+    `parenthesized or bracketed negative verifiedBy=${JSON.stringify(verifiedBy)} must not be presented as successful verification`,
+  );
+}
+for (const verifiedBy of ["failure-analysis-agent", "failure analysis agent", "error-handling-checker"] as const) {
+  assert.equal(
+    artifactHandoff({ uri: "file:///tmp/chef-project/todo-app.mjs", metadata: { verifiedBy } }).verification,
+    `Verified by ${verifiedBy}`,
+    `legitimate verifier name ${JSON.stringify(verifiedBy)} must remain visible`,
+  );
+}
+
 console.log("artifact reveal eligibility and handoff truthfulness behavior passed");
