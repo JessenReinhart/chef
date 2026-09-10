@@ -24,6 +24,7 @@ Object.defineProperty(globalThis, "window", { configurable: true, value: eventTa
 const { SELECTED_THREAD_EVENT, loadSelectedThreadId, saveSelectedThreadId, threadMessages } = await import("../web/src/threadApi.ts");
 const { subscribeMissionProgressProjection } = await import("../web/src/missionProgressStream.ts");
 const { subscribeChatHistoryProjection } = await import("../web/src/chatHistoryProjection.ts");
+const { createChatSubmissionOwnership, settleOwnedChatSubmission } = await import("../web/src/chatSubmissionOwnership.ts");
 const observed: Array<string | null> = [];
 eventTarget.addEventListener(SELECTED_THREAD_EVENT, (event) => {
   observed.push((event as CustomEvent<{ threadId: string | null }>).detail.threadId);
@@ -175,6 +176,84 @@ saveSelectedThreadId("thread-chat-after-unmount");
 await Promise.resolve();
 assert.equal(historyLoads.length, historyLoadsBeforeUnmount, "unmounted chat history must stop reacting to foreground Thread changes");
 
+// In-flight chat POST settlement must obey the same foreground ownership. Thread A
+// can keep executing server-side, but its late UI success/failure/finally callbacks
+// must never land in Thread B or release Thread B's newer submission state.
+saveSelectedThreadId("thread-submit-a");
+let submissionInvalidations = 0;
+const submissionEvents: string[] = [];
+const ownership = createChatSubmissionOwnership(
+  () => {
+    submissionInvalidations += 1;
+    submissionEvents.push("selection-released");
+  },
+  eventTarget,
+);
+let resolveA!: (value: string) => void;
+const operationA = new Promise<string>((resolve) => { resolveA = resolve; });
+const submissionA = settleOwnedChatSubmission(
+  ownership,
+  () => operationA,
+  {
+    onSuccess: (value) => submissionEvents.push(`A-success:${value}`),
+    onFailure: () => submissionEvents.push("A-failure"),
+    onSettled: () => submissionEvents.push("A-settled"),
+  },
+);
+
+saveSelectedThreadId("thread-submit-b");
+assert.equal(submissionInvalidations, 1, "switching Threads must immediately release the newly selected composer from the previous submission");
+let resolveB!: (value: string) => void;
+const operationB = new Promise<string>((resolve) => { resolveB = resolve; });
+const submissionB = settleOwnedChatSubmission(
+  ownership,
+  () => operationB,
+  {
+    onSuccess: (value) => submissionEvents.push(`B-success:${value}`),
+    onFailure: () => submissionEvents.push("B-failure"),
+    onSettled: () => submissionEvents.push("B-settled"),
+  },
+);
+
+resolveA("late Thread A acknowledgement");
+await submissionA;
+assert.deepEqual(
+  submissionEvents,
+  ["selection-released"],
+  "late success and settlement from the previous Thread must not mutate or release the foreground Thread",
+);
+
+resolveB("Thread B acknowledgement");
+await submissionB;
+assert.deepEqual(
+  submissionEvents,
+  ["selection-released", "B-success:Thread B acknowledgement", "B-settled"],
+  "the newest foreground Thread submission must settle normally after an older request finishes",
+);
+
+let rejectSameThread!: (reason: unknown) => void;
+const sameThreadFailure = new Promise<string>((_resolve, reject) => { rejectSameThread = reject; });
+const submissionFailure = settleOwnedChatSubmission(
+  ownership,
+  () => sameThreadFailure,
+  {
+    onSuccess: () => submissionEvents.push("unexpected-success"),
+    onFailure: (error) => submissionEvents.push(`B-failure:${error instanceof Error ? error.message : String(error)}`),
+    onSettled: () => submissionEvents.push("B-failure-settled"),
+  },
+);
+rejectSameThread(new Error("network unavailable"));
+await submissionFailure;
+assert.deepEqual(
+  submissionEvents.slice(-2),
+  ["B-failure:network unavailable", "B-failure-settled"],
+  "same-Thread submission failures must still surface and release the composer normally",
+);
+ownership.dispose();
+const invalidationsBeforeDisposedSelection = submissionInvalidations;
+saveSelectedThreadId("thread-submit-after-dispose");
+assert.equal(submissionInvalidations, invalidationsBeforeDisposedSelection, "unmounted submission ownership must stop reacting to Thread selection");
+
 // IntentHome waits for Thread history before committing its refreshed Mission,
 // Task, event, approval, and message projections. If the foreground Thread
 // changes during that await, the old refresh must fail before any of those
@@ -215,4 +294,4 @@ assert.deepEqual(
 );
 globalThis.fetch = originalFetch;
 
-console.log("thread-selection-event: ok — Simple Mode selection re-scopes Mission progress and Chat history without stale cross-Thread commits");
+console.log("thread-selection-event: ok — Simple Mode selection re-scopes Mission progress, Chat history, and in-flight chat settlement without stale cross-Thread commits");
