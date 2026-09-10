@@ -119,14 +119,42 @@ const NON_SUCCESS_VERIFICATION_VALUES = new Set([
 ]);
 
 const NON_SUCCESS_DETAIL_SEPARATORS = [":", " - ", " — ", " – ", ";", " (", "\n", "\r\n", "\t", ".", ","];
+const NON_SUCCESS_DETAIL_WORDS = new Set([
+  "after",
+  "because",
+  "check",
+  "checks",
+  "checking",
+  "due",
+  "during",
+  "on",
+  "test",
+  "tests",
+  "testing",
+  "to",
+  "verification",
+  "verify",
+  "verified",
+  "verifying",
+  "while",
+  "with",
+]);
+
+function negativeStatusHasFailureDetail(normalized: string, status: string): boolean {
+  if (!normalized.startsWith(status)) return false;
+  const suffix = normalized.slice(status.length);
+  if (NON_SUCCESS_DETAIL_SEPARATORS.some((separator) => suffix.startsWith(separator))) return true;
+  if (!/^\s+/.test(suffix)) return false;
+  if (/\s/.test(status)) return true;
+  const nextWord = suffix.trimStart().split(/\s|[:;,.()]/, 1)[0];
+  return NON_SUCCESS_DETAIL_WORDS.has(nextWord);
+}
 
 function positiveVerificationText(value: string): string | null {
   const normalized = value.toLowerCase();
   if (NON_SUCCESS_VERIFICATION_VALUES.has(normalized)) return null;
   for (const status of NON_SUCCESS_VERIFICATION_VALUES) {
-    if (NON_SUCCESS_DETAIL_SEPARATORS.some((separator) => normalized.startsWith(`${status}${separator}`))) {
-      return null;
-    }
+    if (negativeStatusHasFailureDetail(normalized, status)) return null;
   }
   return value;
 }
