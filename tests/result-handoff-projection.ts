@@ -8,6 +8,7 @@ import {
 } from "../web/src/artifactProjection.ts";
 
 const completedNotice = "Work is marked complete, but Chef did not publish a durable result for this Mission.";
+const completedLocationNotice = "Work is marked complete, but Chef did not publish a durable result location for this Mission.";
 const attentionPartialNotice = "Chef saved a partial result, but this Mission still needs attention before the handoff is complete.";
 const pausedPartialNotice = "Chef saved a partial result, but this Mission is paused before the handoff is complete.";
 const pausedEmptyNotice = "No durable result is available because this Mission is paused.";
@@ -55,6 +56,81 @@ assert.deepEqual(
   missionResultHandoffProjection([result], scope, "thread-current", "failed", 4, false),
   { artifacts: [result], notice: attentionPartialNotice },
   "a cached same-Mission artifact remains truthful evidence during an artifact refresh outage",
+);
+
+const opaqueResult: LivingArtifact = {
+  ...result,
+  id: "opaque-result",
+  type: "result",
+  uri: "sideband://worker/todo-result",
+  metadata: {
+    missionId: "mission-current",
+    summary: "Created the todo app",
+  },
+};
+assert.deepEqual(
+  missionResultHandoffProjection([opaqueResult], scope, "thread-current", "completed"),
+  { artifacts: [opaqueResult], notice: completedLocationNotice },
+  "a completed Mission must not look product-green when its only durable result has no usable location",
+);
+assert.deepEqual(
+  missionResultHandoffProjection([opaqueResult], scope, "thread-current", "completed", 4, false),
+  { artifacts: [opaqueResult], notice: null },
+  "a cached opaque result during an artifact outage is not proof that the latest durable handoff lacks a location",
+);
+
+const explicitLocationResult: LivingArtifact = {
+  ...opaqueResult,
+  id: "explicit-location-result",
+  metadata: {
+    ...opaqueResult.metadata,
+    resultLocation: "todo-app/index.html",
+  },
+};
+assert.deepEqual(
+  missionResultHandoffProjection([explicitLocationResult], scope, "thread-current", "completed"),
+  { artifacts: [explicitLocationResult], notice: null },
+  "an explicit durable result location must satisfy the completed handoff",
+);
+
+const pathLocationResult: LivingArtifact = {
+  ...opaqueResult,
+  id: "path-location-result",
+  metadata: {
+    ...opaqueResult.metadata,
+    path: "todo-app/index.html",
+  },
+};
+assert.deepEqual(
+  missionResultHandoffProjection([pathLocationResult], scope, "thread-current", "completed"),
+  { artifacts: [pathLocationResult], notice: null },
+  "durable path metadata must satisfy the completed handoff",
+);
+
+const unrelatedLocatedResult: LivingArtifact = {
+  ...explicitLocationResult,
+  id: "other-thread-result",
+  taskId: "task-other",
+  metadata: {
+    missionId: "mission-other",
+    resultLocation: "other/index.html",
+  },
+};
+assert.deepEqual(
+  missionResultHandoffProjection([opaqueResult, unrelatedLocatedResult], scope, "thread-current", "completed"),
+  { artifacts: [opaqueResult], notice: completedLocationNotice },
+  "a located result from another Mission must never make the foreground Mission look complete",
+);
+
+assert.deepEqual(
+  missionResultHandoffProjection([opaqueResult], scope, "thread-current", "active"),
+  { artifacts: [opaqueResult], notice: null },
+  "active work must not claim a missing final location before completion",
+);
+assert.deepEqual(
+  missionResultHandoffProjection([opaqueResult], scope, "thread-current", "failed"),
+  { artifacts: [opaqueResult], notice: attentionPartialNotice },
+  "failure recovery messaging must continue to outrank completed-handoff completeness",
 );
 
 const overflowLeafArtifacts: LivingArtifact[] = Array.from({ length: 5 }, (_, index) => ({
@@ -280,4 +356,4 @@ assert.equal(
   "an empty workspace must not render an empty artifact shelf affordance",
 );
 
-console.log("result-handoff-projection: ok — runnable overflow stays visible, incomplete handoffs stay truthful, result absence stays unknown during artifact outages, refresh failures retain cards only for the same selected Mission, and durable workspace artifacts remain rediscoverable whenever results are hidden");
+console.log("result-handoff-projection: ok — runnable overflow stays visible, completed results require a durable location, incomplete handoffs stay truthful, result absence stays unknown during artifact outages, refresh failures retain cards only for the same selected Mission, and durable workspace artifacts remain rediscoverable whenever results are hidden");
