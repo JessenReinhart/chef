@@ -5,6 +5,7 @@ import { summarizeMissionProgress, type MissionProgressItem } from "./missionPro
 import { subscribeMissionProgressProjection } from "./missionProgressStream";
 import { assistantContentSeenSinceLastUser, chatSubmissionFallback } from "./chatSubmissionFallback";
 import { subscribeChatHistoryProjection } from "./chatHistoryProjection";
+import { createChatSubmissionOwnership, settleOwnedChatSubmission, type ChatSubmissionOwnership } from "./chatSubmissionOwnership";
 
 interface ChatPanelProps {
   onPlanProposed: (taskIds: string[]) => void;
@@ -51,6 +52,7 @@ export function ChatPanel({ onPlanProposed, mode }: ChatPanelProps) {
   const onPlanProposedRef = useRef(onPlanProposed);
   onPlanProposedRef.current = onPlanProposed;
   const processedIdsRef = useRef<Set<string>>(new Set());
+  const submissionOwnershipRef = useRef<ChatSubmissionOwnership | null>(null);
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -94,6 +96,17 @@ export function ChatPanel({ onPlanProposed, mode }: ChatPanelProps) {
     },
     () => setMessages([]),
   ), []);
+
+  // Network settlement belongs to the foreground Thread too. A Thread switch
+  // releases the newly selected composer immediately while invalidating the old POST.
+  useEffect(() => {
+    const ownership = createChatSubmissionOwnership(() => setStreaming(false));
+    submissionOwnershipRef.current = ownership;
+    return () => {
+      ownership.dispose();
+      if (submissionOwnershipRef.current === ownership) submissionOwnershipRef.current = null;
+    };
+  }, []);
 
   // SSE subscription for live chat events (auto-reconnects; afterSeq param
   // makes restarts replay-safe).
@@ -217,39 +230,48 @@ export function ChatPanel({ onPlanProposed, mode }: ChatPanelProps) {
 
   const send = useCallback(async () => {
     if (!input.trim() || streaming) return;
+    const ownership = submissionOwnershipRef.current;
+    if (!ownership) return;
     const text = input.trim();
     setInput("");
     setStreaming(true);
     setMessages((prev) => [...prev, { role: "user", content: text, timestamp: Date.now() }]);
 
-    try {
-      const result = await api.chat(text);
-      // SSE is preferred for live chat, but the POST is authoritative fallback
-      // evidence when the stream is delayed or misses this acknowledgement.
-      const fallback = chatSubmissionFallback(result);
-      if (fallback) {
-        setMessages((prev) => assistantContentSeenSinceLastUser(prev, fallback.content)
-          ? prev
-          : [
-              ...prev,
-              {
-                role: "assistant",
-                content: fallback.content,
-                timestamp: Date.now(),
-                bubbleKind: fallback.isError ? "error" : undefined,
-              },
-            ]);
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Unknown error";
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: `Error: ${msg}`, timestamp: Date.now(), bubbleKind: "error" },
-      ]);
-    } finally {
-      setStreaming(false);
-      inputRef.current?.focus();
-    }
+    await settleOwnedChatSubmission(
+      ownership,
+      () => api.chat(text),
+      {
+        onSuccess: (result) => {
+          // SSE is preferred for live chat, but the POST is authoritative fallback
+          // evidence when the stream is delayed or misses this acknowledgement.
+          const fallback = chatSubmissionFallback(result);
+          if (fallback) {
+            setMessages((prev) => assistantContentSeenSinceLastUser(prev, fallback.content)
+              ? prev
+              : [
+                  ...prev,
+                  {
+                    role: "assistant",
+                    content: fallback.content,
+                    timestamp: Date.now(),
+                    bubbleKind: fallback.isError ? "error" : undefined,
+                  },
+                ]);
+          }
+        },
+        onFailure: (err) => {
+          const msg = err instanceof Error ? err.message : "Unknown error";
+          setMessages((prev) => [
+            ...prev,
+            { role: "assistant", content: `Error: ${msg}`, timestamp: Date.now(), bubbleKind: "error" },
+          ]);
+        },
+        onSettled: () => {
+          setStreaming(false);
+          inputRef.current?.focus();
+        },
+      },
+    );
   }, [input, streaming]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
