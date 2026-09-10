@@ -14,6 +14,9 @@ assert.equal(
 for (const verifiedBy of [
   "failed tests",
   "failed verification: npm test exited 1",
+  "tests failed",
+  "verification failed: npm test exited 1",
+  "browser smoke test error",
   "error during smoke test",
   "not verified by worker",
   "pending verification",
@@ -29,15 +32,17 @@ for (const verifiedBy of [
   );
 }
 
-const statusLikeVerifierName = artifactHandoff({
-  uri: "file:///tmp/chef-project/todo-app.mjs",
-  metadata: { verifiedBy: "failure-analysis-agent" },
-});
-assert.equal(
-  statusLikeVerifierName.verification,
-  "Verified by failure-analysis-agent",
-  "a legitimate verifier name that merely starts with a status-like token must not be suppressed",
-);
+for (const verifiedBy of ["failure-analysis-agent", "failure analysis agent"]) {
+  const handoff = artifactHandoff({
+    uri: "file:///tmp/chef-project/todo-app.mjs",
+    metadata: { verifiedBy },
+  });
+  assert.equal(
+    handoff.verification,
+    `Verified by ${verifiedBy}`,
+    "a legitimate verifier name that uses status-like language without claiming failure must not be suppressed",
+  );
+}
 
 const explicitPositiveStillWins = artifactHandoff({
   uri: "file:///tmp/chef-project/todo-app.mjs",
