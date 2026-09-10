@@ -234,9 +234,10 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
       const threadMissionList = missions
         .filter((mission) => mission.metadata?.threadId === thread.id)
         .sort((a, b) => b.createdAt - a.createdAt);
+      const foregroundMission = selectIntentHomeMission(threadMissionList, false);
       summaries.set(thread.id, {
         count: threadMissionList.length,
-        active: threadMissionList[0] ? isMissionActive(threadMissionList[0].status) : false,
+        active: foregroundMission ? isMissionActive(foregroundMission.status) : false,
       });
     }
     return summaries;
