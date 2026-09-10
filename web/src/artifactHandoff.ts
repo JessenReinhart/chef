@@ -118,7 +118,7 @@ const NON_SUCCESS_VERIFICATION_VALUES = new Set([
   "unverified",
 ]);
 
-const NON_SUCCESS_DETAIL_SEPARATORS = [":", " - ", " — ", " – ", ";", " (", "\n", "\r\n", "\t", ".", ","];
+const NON_SUCCESS_DETAIL_SEPARATORS = [":", " - ", " — ", " – ", ";", " (", "\n", "\r\n", "\t", ".", ",", ")", "]", "}"];
 const NON_SUCCESS_DETAIL_WORDS = new Set([
   "after",
   "because",
