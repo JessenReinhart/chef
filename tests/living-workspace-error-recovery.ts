@@ -1,5 +1,6 @@
 import { strict as assert } from "node:assert";
 import { dismissVisibleAppError, visibleAppError } from "../web/src/appErrorProjection.ts";
+import { chefReportPresentation } from "../web/src/chefReportPresentation.ts";
 import { runRecoverableWorkspaceRefresh } from "../web/src/livingWorkspaceRefresh.ts";
 
 let authoritativeSnapshot = "old";
@@ -60,4 +61,31 @@ actionError = dismissed.actionError;
 refreshError = dismissed.stateRefreshError;
 assert.equal(visibleAppError(actionError, refreshError), null, "the visible action error should remain dismissible after recovery");
 
-console.log("living workspace error recovery behavior passed");
+for (const missionStatus of ["paused", "waiting_for_approval", "blocked", "completed", "failed", "cancelled"] as const) {
+  assert.equal(
+    chefReportPresentation({ missionStatus, starting: false }),
+    "expanded",
+    `${missionStatus} work must keep Chef's full recovery/outcome report visible in Simple Mode`,
+  );
+}
+
+for (const missionStatus of ["planning", "active", "verifying"] as const) {
+  assert.equal(
+    chefReportPresentation({ missionStatus, starting: false }),
+    "compact",
+    `${missionStatus} work may keep the routine latest report compact while durable progress remains visible`,
+  );
+}
+
+assert.equal(
+  chefReportPresentation({ missionStatus: "waiting_for_approval", starting: true }),
+  "compact",
+  "the provisional Starting state must outrank stale attention status until the newly accepted Mission becomes authoritative",
+);
+assert.equal(
+  chefReportPresentation({ missionStatus: "active", directReport: true, starting: false }),
+  "expanded",
+  "an explicit direct Chef report must remain fully readable even while ordinary work is active",
+);
+
+console.log("living workspace error recovery behavior passed — attention states expose full Chef guidance without weakening active-work compaction");
