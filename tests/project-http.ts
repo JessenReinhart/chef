@@ -136,6 +136,29 @@ try {
   const blockedLegacyChatBody = await blockedLegacyChat.json() as { error?: string };
   assert.match(blockedLegacyChatBody.error ?? "", /selected project is active/i);
 
+  const blockedNodeCreate = await fetch(`${origin}/api/nodes`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ type: "harness.generic", title: "Build todo app", autoDispatch: true }),
+  });
+  assert.equal(blockedNodeCreate.status, 409, "node creation must not dispatch fresh worker execution against the old project during handoff");
+  const blockedNodeCreateBody = await blockedNodeCreate.json() as { error?: string };
+  assert.match(blockedNodeCreateBody.error ?? "", /selected project is active/i);
+
+  const blockedNodeActivate = await fetch(`${origin}/api/nodes/worker-old/activate`, { method: "POST" });
+  assert.equal(blockedNodeActivate.status, 409, "node activation must not start existing old-project work during handoff");
+  const blockedNodeActivateBody = await blockedNodeActivate.json() as { error?: string };
+  assert.match(blockedNodeActivateBody.error ?? "", /selected project is active/i);
+
+  const blockedDirectRun = await fetch(`${origin}/api/nodes/run`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ nodeId: "worker-old", title: "Build todo app" }),
+  });
+  assert.equal(blockedDirectRun.status, 409, "direct Run must not start fresh worker execution against the old project during handoff");
+  const blockedDirectRunBody = await blockedDirectRun.json() as { error?: string };
+  assert.match(blockedDirectRunBody.error ?? "", /selected project is active/i);
+
   const blockedRetry = await fetch(`${origin}/api/nodes/task-old/retry`, { method: "POST" });
   assert.equal(blockedRetry.status, 409, "Retry must not restart old-project work after another project is selected");
   const blockedRetryBody = await blockedRetry.json() as { error?: string };
@@ -210,6 +233,29 @@ try {
     assert.equal(reopen.status, 202);
     assert.equal((await fetch(`${failingOrigin}/api/threads`, { method: "POST" })).status, 409);
     assert.equal(
+      (await fetch(`${failingOrigin}/api/nodes`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ type: "harness.generic", title: "Build todo app", autoDispatch: true }),
+      })).status,
+      409,
+      "node creation must stay gated while the old runtime is attempting the selected-project handoff",
+    );
+    assert.equal(
+      (await fetch(`${failingOrigin}/api/nodes/worker-old/activate`, { method: "POST" })).status,
+      409,
+      "node activation must stay gated while the old runtime is attempting the selected-project handoff",
+    );
+    assert.equal(
+      (await fetch(`${failingOrigin}/api/nodes/run`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ nodeId: "worker-old", title: "Build todo app" }),
+      })).status,
+      409,
+      "direct Run must stay gated while the old runtime is attempting the selected-project handoff",
+    );
+    assert.equal(
       (await fetch(`${failingOrigin}/api/nodes/task-old/retry`, { method: "POST" })).status,
       409,
       "Retry must stay gated while the old runtime is attempting the selected-project handoff",
@@ -243,6 +289,29 @@ try {
       (await fetch(`${failingOrigin}/api/threads`, { method: "POST" })).status,
       418,
       "a failed runtime reopen must release the old-project work gate so recovery remains possible",
+    );
+    assert.equal(
+      (await fetch(`${failingOrigin}/api/nodes`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ type: "harness.generic", title: "Build todo app", autoDispatch: true }),
+      })).status,
+      418,
+      "a failed runtime reopen must release node creation back to the old runtime for recovery",
+    );
+    assert.equal(
+      (await fetch(`${failingOrigin}/api/nodes/worker-old/activate`, { method: "POST" })).status,
+      418,
+      "a failed runtime reopen must release node activation back to the old runtime for recovery",
+    );
+    assert.equal(
+      (await fetch(`${failingOrigin}/api/nodes/run`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ nodeId: "worker-old", title: "Build todo app" }),
+      })).status,
+      418,
+      "a failed runtime reopen must release direct Run back to the old runtime for recovery",
     );
     assert.equal(
       (await fetch(`${failingOrigin}/api/nodes/task-old/retry`, { method: "POST" })).status,
