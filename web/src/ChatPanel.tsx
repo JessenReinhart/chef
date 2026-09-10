@@ -4,6 +4,7 @@ import type { ChatMessage, LlmStatus, ViewMode } from "./types";
 import { summarizeMissionProgress, type MissionProgressItem } from "./missionProgress";
 import { subscribeMissionProgressProjection } from "./missionProgressStream";
 import { assistantContentSeenSinceLastUser, chatSubmissionFallback } from "./chatSubmissionFallback";
+import { subscribeChatHistoryProjection } from "./chatHistoryProjection";
 
 interface ChatPanelProps {
   onPlanProposed: (taskIds: string[]) => void;
@@ -82,24 +83,17 @@ export function ChatPanel({ onPlanProposed, mode }: ChatPanelProps) {
     setProgress,
   ), []);
 
-  // Initial history load — dedupes messages already present.
-  useEffect(() => {
-    let cancelled = false;
-    api
-      .chatMessages()
-      .then((msgs) => {
-        if (cancelled) return;
-        setMessages(
-          msgs.filter((m) => m.content && m.timestamp > 0).map((m) => ({ ...m, bubbleKind: m.type === "error" ? "error" : undefined }))
-        );
-      })
-      .catch(() => {
-        // no history — fine
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  // Chat history follows the foreground Simple Mode Thread. Clear the previous
+  // conversation immediately on selection, then commit only the newest history read.
+  useEffect(() => subscribeChatHistoryProjection(
+    () => api.chatMessages(),
+    (msgs) => {
+      setMessages(
+        msgs.filter((m) => m.content && m.timestamp > 0).map((m) => ({ ...m, bubbleKind: m.type === "error" ? "error" : undefined }))
+      );
+    },
+    () => setMessages([]),
+  ), []);
 
   // SSE subscription for live chat events (auto-reconnects; afterSeq param
   // makes restarts replay-safe).
