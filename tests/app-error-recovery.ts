@@ -5,6 +5,7 @@ import {
   stateRefreshErrorMessage,
   visibleAppError,
 } from "../web/src/appErrorProjection.ts";
+import { persistViewModePreference, readViewModePreference } from "../web/src/viewModePreference.ts";
 
 let stateRefreshError: string | null = null;
 let actionError: string | null = null;
@@ -85,6 +86,57 @@ assert.equal(
   null,
   "a recovered refresh-owned warning should retire automatically when no action failure exists",
 );
+
+const preferenceStorage = new Map<string, string>();
+const workingPreferenceStorage = {
+  getItem: (key: string) => preferenceStorage.get(key) ?? null,
+  setItem: (key: string, value: string) => preferenceStorage.set(key, value),
+};
+assert.equal(readViewModePreference(workingPreferenceStorage), "simple", "missing preference should default the app to Simple Mode");
+workingPreferenceStorage.setItem("chef:view-mode", "power");
+assert.equal(readViewModePreference(workingPreferenceStorage), "power", "a stored Power Mode preference should still be honored");
+persistViewModePreference("simple", workingPreferenceStorage);
+assert.equal(preferenceStorage.get("chef:view-mode"), "simple", "a usable storage backend should still persist mode changes");
+
+const blockedPreferenceStorage = {
+  getItem: (_key: string): string | null => {
+    throw new DOMException("Access denied", "SecurityError");
+  },
+  setItem: (_key: string, _value: string): void => {
+    throw new DOMException("Access denied", "SecurityError");
+  },
+};
+assert.equal(
+  readViewModePreference(blockedPreferenceStorage),
+  "simple",
+  "blocked preference reads must fall back to Simple Mode instead of preventing app startup",
+);
+assert.doesNotThrow(
+  () => persistViewModePreference("power", blockedPreferenceStorage),
+  "blocked preference writes must not make the mode toggle crash",
+);
+
+const originalPreferenceStorageProperty = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+try {
+  Object.defineProperty(globalThis, "localStorage", {
+    configurable: true,
+    get() {
+      throw new DOMException("Access denied", "SecurityError");
+    },
+  });
+  assert.equal(
+    readViewModePreference(),
+    "simple",
+    "a throwing browser localStorage property lookup must still let Chef boot into Simple Mode",
+  );
+  assert.doesNotThrow(
+    () => persistViewModePreference("power"),
+    "a throwing browser localStorage property lookup must not break mode switching",
+  );
+} finally {
+  if (originalPreferenceStorageProperty) Object.defineProperty(globalThis, "localStorage", originalPreferenceStorageProperty);
+  else delete (globalThis as { localStorage?: Storage }).localStorage;
+}
 
 const originalFetch = globalThis.fetch;
 const originalLocalStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");

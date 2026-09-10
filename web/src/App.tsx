@@ -8,6 +8,7 @@ import { dismissVisibleAppError, stateRefreshErrorMessage, visibleAppError } fro
 import { NODE_LIBRARY, registerHarnesses, subscribeLibrary } from "./nodeCatalog";
 import { TerminalView } from "./TerminalView";
 import { BrowserSurface } from "./BrowserSurface";
+import { persistViewModePreference, readViewModePreference } from "./viewModePreference";
 import type {
   UiTask,
   HarnessInfo,
@@ -73,7 +74,7 @@ export function App() {
   // Live agent sessions snapshot, polled so terminal nodes can resolve a
   // task id → session id and mount a TerminalView against it.
   const [sessions, setSessions] = useState<Array<{ id: string; taskId: string; status: string; pid: number }>>([]);
-  const [mode, setMode] = useState<ViewMode>(() => localStorage.getItem("chef:view-mode") === "power" ? "power" : "simple");
+  const [mode, setMode] = useState<ViewMode>(() => readViewModePreference());
   const [relationship, setRelationship] = useState<EdgeRelationship>("communication");
   const [showAutomation, setShowAutomation] = useState(false);
   const [showMissionControls, setShowMissionControls] = useState(false);
@@ -195,7 +196,7 @@ export function App() {
   const toggleMode = useCallback(() => {
     setMode((current) => {
       const next = current === "simple" ? "power" : "simple";
-      localStorage.setItem("chef:view-mode", next);
+      persistViewModePreference(next);
       return next;
     });
   }, []);
