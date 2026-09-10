@@ -23,6 +23,7 @@ Object.defineProperty(globalThis, "window", { configurable: true, value: eventTa
 
 const { SELECTED_THREAD_EVENT, loadSelectedThreadId, saveSelectedThreadId, threadMessages } = await import("../web/src/threadApi.ts");
 const { subscribeMissionProgressProjection } = await import("../web/src/missionProgressStream.ts");
+const { subscribeChatHistoryProjection } = await import("../web/src/chatHistoryProjection.ts");
 const observed: Array<string | null> = [];
 eventTarget.addEventListener(SELECTED_THREAD_EVENT, (event) => {
   observed.push((event as CustomEvent<{ threadId: string | null }>).detail.threadId);
@@ -130,6 +131,50 @@ await new Promise<void>((resolve) => setImmediate(resolve));
 assert.equal(progressLoads, loadsBeforeUnmountedSelection, "unmounted Mission progress must stop reacting to timer and Thread-selection changes");
 assert.equal(progressStreamClosed, true, "unmounting Mission progress must release its runtime stream alongside the selection listener");
 
+// ChatPanel history uses the same synchronous selection signal but owns its own
+// asynchronous read. The old conversation must disappear immediately and a slow
+// previous Thread read must never overwrite the newly selected history.
+saveSelectedThreadId("thread-chat-a");
+let projectedHistory = ["stale Thread history"];
+let historyClearCount = 0;
+const historyResolvers: Array<(history: string[]) => void> = [];
+const historyLoads: string[] = [];
+const unsubscribeChatHistory = subscribeChatHistoryProjection(
+  () => {
+    const requestedThread = loadSelectedThreadId() ?? "none";
+    historyLoads.push(requestedThread);
+    return new Promise<string[]>((resolve) => historyResolvers.push(resolve));
+  },
+  (history) => { projectedHistory = history; },
+  () => {
+    historyClearCount += 1;
+    projectedHistory = [];
+  },
+  eventTarget,
+);
+await Promise.resolve();
+assert.deepEqual(historyLoads, ["thread-chat-a"], "mounting chat history should load the foreground Thread");
+assert.deepEqual(projectedHistory, [], "mounting the projection must not retain unrelated rendered history");
+
+saveSelectedThreadId("thread-chat-b");
+await Promise.resolve();
+assert.deepEqual(projectedHistory, [], "changing Threads must synchronously clear the previous conversation before the new read settles");
+assert.deepEqual(historyLoads, ["thread-chat-a", "thread-chat-b"], "changing Threads must start a fresh history read for the new foreground selection");
+
+historyResolvers[0]?.(["Thread A message"]);
+await Promise.resolve();
+assert.deepEqual(projectedHistory, [], "a late history response from the previous Thread must not commit after selection changes");
+historyResolvers[1]?.(["Thread B message"]);
+await Promise.resolve();
+assert.deepEqual(projectedHistory, ["Thread B message"], "the newest foreground Thread history should commit normally");
+assert.equal(historyClearCount, 2, "history should clear once on mount and once for the actual Thread change");
+
+unsubscribeChatHistory();
+const historyLoadsBeforeUnmount = historyLoads.length;
+saveSelectedThreadId("thread-chat-after-unmount");
+await Promise.resolve();
+assert.equal(historyLoads.length, historyLoadsBeforeUnmount, "unmounted chat history must stop reacting to foreground Thread changes");
+
 // IntentHome waits for Thread history before committing its refreshed Mission,
 // Task, event, approval, and message projections. If the foreground Thread
 // changes during that await, the old refresh must fail before any of those
@@ -170,4 +215,4 @@ assert.deepEqual(
 );
 globalThis.fetch = originalFetch;
 
-console.log("thread-selection-event: ok — Simple Mode selection and silent-heartbeat invalidations re-scope Mission progress through one bounded refresh queue without disturbing Power Mode");
+console.log("thread-selection-event: ok — Simple Mode selection re-scopes Mission progress and Chat history without stale cross-Thread commits");
