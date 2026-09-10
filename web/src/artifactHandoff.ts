@@ -131,6 +131,7 @@ const NON_SUCCESS_DETAIL_WORDS = new Set([
   "test",
   "tests",
   "testing",
+  "to",
   "verification",
   "verify",
   "verified",
