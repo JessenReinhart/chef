@@ -193,13 +193,18 @@ export function missionResultHandoffProjection<T extends MissionLinkedArtifact>(
   if (!scope || !selectedThreadId || scope.threadId !== selectedThreadId) {
     return { artifacts: [], notice: null };
   }
-  const visibleArtifacts = visibleArtifactsForCurrentMission(artifacts, scope, limit);
-  const locatedResultCount = visibleArtifacts.filter(hasPublishedResultLocation).length;
+  const missionArtifacts = artifactsForCurrentMission(artifacts, scope);
+  const visibleArtifacts = keepRunnableHandoffVisible(
+    missionArtifacts,
+    recentArtifacts(missionArtifacts, limit),
+    limit,
+  );
+  const locatedResultCount = missionArtifacts.filter(hasPublishedResultLocation).length;
   return {
     artifacts: visibleArtifacts,
     notice: missingResultHandoffNotice(
       missionStatus,
-      visibleArtifacts.length,
+      missionArtifacts.length,
       resultSnapshotAvailable,
       locatedResultCount,
     ),
