@@ -49,6 +49,17 @@ function fileUriLocation(uri: string): string | null {
   }
 }
 
+function isLocalFileUri(value: string): boolean {
+  if (!hasFileScheme(value)) return false;
+  try {
+    const url = new URL(value);
+    if (url.host && url.hostname.toLowerCase() !== "localhost") return false;
+    return fileUriLocation(value) !== null;
+  } catch {
+    return false;
+  }
+}
+
 function resultNameFromLocation(location: string | null): string | null {
   if (!location) return null;
   const normalized = location.replace(/[\\/]+$/, "");
@@ -79,7 +90,7 @@ function relativeLocationStaysWithinProject(location: string): boolean {
 }
 
 function isLocalLocation(location: string): boolean {
-  if (hasFileScheme(location)) return fileUriLocation(location) !== null;
+  if (hasFileScheme(location)) return isLocalFileUri(location);
   if (/^(?:\/\/|\\\\)/.test(location)) return false;
   if (/^[A-Za-z]:[\\/]/.test(location)) return true;
   if (/^[A-Za-z][A-Za-z0-9+.-]*:/.test(location)) return false;
@@ -90,7 +101,7 @@ function isLocalLocation(location: string): boolean {
 export function canRevealArtifact(artifact: ArtifactHandoffInput): boolean {
   const explicitLocation = firstText(artifact.metadata, ["resultLocation", "path", "location"]);
   if (explicitLocation !== null) return isLocalLocation(explicitLocation);
-  return fileUriLocation(artifact.uri) !== null;
+  return isLocalFileUri(artifact.uri);
 }
 
 const NON_SUCCESS_VERIFICATION_VALUES = new Set([
