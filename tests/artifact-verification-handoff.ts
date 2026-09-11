@@ -85,12 +85,43 @@ for (const verification of detailedNonSuccessStates) {
   );
 }
 
+const mixedNonSuccessStates = [
+  "5 tests passed, 1 failed",
+  "Linux passed; Windows failed: smoke test exited 1",
+  "Build passed — browser verification timed out",
+  "Unit tests passed, integration tests pending: provider unavailable",
+];
+
+for (const verification of mixedNonSuccessStates) {
+  const explicit = artifactHandoff({
+    uri: "file:///tmp/chef-project/todo-app.mjs",
+    metadata: { verification, verifiedBy: "golden-path" },
+  });
+  assert.equal(
+    explicit.verification,
+    null,
+    `mixed explicit ${JSON.stringify(verification)} must not appear beneath the positive Verified heading`,
+  );
+
+  const legacy = artifactHandoff({
+    uri: "file:///tmp/chef-project/todo-app.mjs",
+    metadata: { verified: verification, verifiedBy: "golden-path" },
+  });
+  assert.equal(
+    legacy.verification,
+    null,
+    `mixed legacy verified=${JSON.stringify(verification)} must not become a positive verification claim`,
+  );
+}
+
 const positiveVerificationValues = [
   "Smoke test passed",
   "Error handling tests passed",
   "Cancellation recovery test passed",
   "Timeout handling tests passed",
   "Blocked-request recovery passed",
+  "5 tests passed, 0 failed",
+  "5 tests passed, no failed tests",
 ];
 
 for (const verification of positiveVerificationValues) {
@@ -105,4 +136,4 @@ for (const verification of positiveVerificationValues) {
   );
 }
 
-console.log("artifact-verification-handoff: ok — terminal non-success verification stays out of Verified while positive recovery evidence remains visible");
+console.log("artifact-verification-handoff: ok — terminal and mixed non-success verification stays out of Verified while positive recovery evidence remains visible");
