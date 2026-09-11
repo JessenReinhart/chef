@@ -90,6 +90,8 @@ const mixedNonSuccessStates = [
   "Linux passed; Windows failed: smoke test exited 1",
   "Build passed — browser verification timed out",
   "Unit tests passed, integration tests pending: provider unavailable",
+  "No regressions observed; Windows failed: smoke test exited 1",
+  "No regressions and Windows failed: smoke test exited 1",
 ];
 
 for (const verification of mixedNonSuccessStates) {
@@ -122,6 +124,9 @@ const positiveVerificationValues = [
   "Blocked-request recovery passed",
   "5 tests passed, 0 failed",
   "5 tests passed, no failed tests",
+  "No tests failed",
+  "0 integration tests failed",
+  "Zero checks failed",
 ];
 
 for (const verification of positiveVerificationValues) {
