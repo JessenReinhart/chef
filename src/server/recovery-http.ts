@@ -17,7 +17,10 @@ function retryErrorMessage(error: unknown): string {
   return message;
 }
 
-function terminalMissionRecoveryMessage(status: "completed" | "cancelled"): string {
+function terminalMissionRecoveryMessage(status: "failed" | "completed" | "cancelled"): string {
+  if (status === "failed") {
+    return "This Mission failed, so its history is final. Continue it as new work in this Thread instead of retrying this step in place.";
+  }
   return status === "cancelled"
     ? "This Mission was cancelled, so its history is final. Continue it as new work instead of retrying this step in place."
     : "This Mission is already complete, so its history is final. Start new work instead of retrying this step in place.";
@@ -29,6 +32,8 @@ function terminalMissionRecoveryMessage(status: "completed" | "cancelled"): stri
  * Retry remains owned by the runtime scheduler. This HTTP layer only validates
  * active-workspace ownership and retryable state before delegating, so Simple
  * Mode never needs Workbench/runtime internals to recover ordinary failures.
+ * Mission-terminal work stays immutable because its orchestrator/verification
+ * loop has already ended; recovery continues as new work in the same Thread.
  */
 export function createRecoveryServer(runtime: ChefRuntime, baseServer: Server): Server {
   const baseHandler = baseServer.listeners("request")[0] as RequestHandler | undefined;
@@ -53,7 +58,7 @@ export function createRecoveryServer(runtime: ChefRuntime, baseServer: Server): 
         if (task.missionId) {
           const mission = runtime.repository.getMission(task.missionId);
           if (mission && mission.workspaceId === runtime.workspaceId
-            && (mission.status === "cancelled" || mission.status === "completed")) {
+            && (mission.status === "failed" || mission.status === "cancelled" || mission.status === "completed")) {
             sendJson(res, 409, { error: terminalMissionRecoveryMessage(mission.status) });
             return;
           }
