@@ -5,6 +5,13 @@ import { join } from "node:path";
 
 const sessionId = process.env.CHEF_SESSION_ID;
 if (!sessionId) throw new Error("CHEF_SESSION_ID is required");
+const prompt = process.argv[2] ?? "";
+const metadata = {
+  runCommand: "npm run dev",
+  ...(prompt.includes("explicit result location")
+    ? { resultLocation: "file:///D:/Chef%20Output/todo-explicit" }
+    : {}),
+};
 const envelope = {
   version: 1,
   id: randomUUID(),
@@ -14,9 +21,7 @@ const envelope = {
     type: "result",
     name: "specialized-result",
     uri: "file:///C:/Work/Chef%20Projects/todo-app",
-    metadata: {
-      runCommand: "npm run dev",
-    },
+    metadata,
   },
   timestamp: Date.now(),
 };
