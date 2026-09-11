@@ -156,22 +156,24 @@ export function createRecoveryServer(runtime: ChefRuntime, baseServer: Server): 
         let retryMission: RetryMissionContext | null = null;
         if (task.missionId) {
           const mission = runtime.repository.getMission(task.missionId);
-          if (mission && mission.workspaceId === runtime.workspaceId) {
-            if (mission.status === "cancelled" || mission.status === "completed") {
-              sendJson(res, 409, { error: terminalMissionRecoveryMessage(mission.status) });
+          if (!mission || mission.workspaceId !== runtime.workspaceId) {
+            sendJson(res, 409, { error: incompleteMissionRecoveryMessage() });
+            return;
+          }
+          if (mission.status === "cancelled" || mission.status === "completed") {
+            sendJson(res, 409, { error: terminalMissionRecoveryMessage(mission.status) });
+            return;
+          }
+          if (mission.status === "failed") {
+            const plan = mission.planId ? runtime.repository.getPlan(mission.planId) : null;
+            const hasCompleteLineage = plan?.workspaceId === runtime.workspaceId
+              && mission.taskIds.includes(taskId)
+              && plan.taskIds.includes(taskId);
+            if (!hasCompleteLineage) {
+              sendJson(res, 409, { error: incompleteMissionRecoveryMessage() });
               return;
             }
-            if (mission.status === "failed") {
-              const plan = mission.planId ? runtime.repository.getPlan(mission.planId) : null;
-              const hasCompleteLineage = plan?.workspaceId === runtime.workspaceId
-                && mission.taskIds.includes(taskId)
-                && plan.taskIds.includes(taskId);
-              if (!hasCompleteLineage) {
-                sendJson(res, 409, { error: incompleteMissionRecoveryMessage() });
-                return;
-              }
-              retryMission = { id: mission.id, planId: mission.planId, taskIds: [...mission.taskIds] };
-            }
+            retryMission = { id: mission.id, planId: mission.planId, taskIds: [...mission.taskIds] };
           }
         }
         if (task.status === "blocked" && task.approvalId) {
