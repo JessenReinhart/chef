@@ -247,6 +247,24 @@ try {
     "negative verification evidence is not rewritten into a positive claim",
   );
 
+  const legacyHandoffResult = await chef.sendUserMessage("run through the specialized adapter with legacy handoff");
+  assert.equal(legacyHandoffResult.ok, true, legacyHandoffResult.report);
+  assert.match(
+    legacyHandoffResult.report,
+    /summary: Created runnable todo app/,
+    "the final assistant completion report preserves the canonical worker's what-changed summary",
+  );
+  assert.match(
+    legacyHandoffResult.report,
+    /run: npm run dev/,
+    "legacy canonical handoff metadata preserves its run command",
+  );
+  assert.match(
+    legacyHandoffResult.report,
+    /verification: Verified by golden-path/,
+    "legacy canonical verifiedBy metadata remains visible in the final completion report",
+  );
+
   const snapshot = await chef.inspectState();
   assert.ok(
     snapshot.sessions.some((session) => session.harnessId === "test-cli" && session.status === "completed"),
