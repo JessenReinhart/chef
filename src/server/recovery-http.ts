@@ -28,6 +28,10 @@ function terminalMissionRecoveryMessage(status: "completed" | "cancelled"): stri
     : "This Mission is already complete, so its history is final. Start new work instead of retrying this step in place.";
 }
 
+function incompleteMissionRecoveryMessage(): string {
+  return "This failed work no longer has a complete recovery path. Start it as new work instead of retrying it in place.";
+}
+
 function updateRetryMission(
   runtime: ChefRuntime,
   mission: RetryMissionContext,
@@ -158,6 +162,14 @@ export function createRecoveryServer(runtime: ChefRuntime, baseServer: Server): 
               return;
             }
             if (mission.status === "failed") {
+              const plan = mission.planId ? runtime.repository.getPlan(mission.planId) : null;
+              const hasCompleteLineage = plan?.workspaceId === runtime.workspaceId
+                && mission.taskIds.includes(taskId)
+                && plan.taskIds.includes(taskId);
+              if (!hasCompleteLineage) {
+                sendJson(res, 409, { error: incompleteMissionRecoveryMessage() });
+                return;
+              }
               retryMission = { id: mission.id, planId: mission.planId, taskIds: [...mission.taskIds] };
             }
           }
