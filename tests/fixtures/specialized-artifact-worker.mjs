@@ -6,12 +6,22 @@ import { join } from "node:path";
 const sessionId = process.env.CHEF_SESSION_ID;
 if (!sessionId) throw new Error("CHEF_SESSION_ID is required");
 const prompt = process.argv[2] ?? "";
-const metadata = {
-  runCommand: "npm run dev",
-  ...(prompt.includes("explicit result location")
-    ? { resultLocation: "file:///D:/Chef%20Output/todo-explicit" }
-    : {}),
-};
+const legacyHandoff = prompt.includes("legacy handoff");
+const metadata = legacyHandoff
+  ? {
+      content: "Created runnable todo app",
+      run: "npm run dev",
+      verifiedBy: "golden-path",
+    }
+  : {
+      runCommand: "npm run dev",
+      verification: prompt.includes("failed verification")
+        ? "5 tests passed, 1 failed"
+        : "npm test passed (12 tests)",
+      ...(prompt.includes("explicit result location")
+        ? { resultLocation: "file:///D:/Chef%20Output/todo-explicit" }
+        : {}),
+    };
 const envelope = {
   version: 1,
   id: randomUUID(),
