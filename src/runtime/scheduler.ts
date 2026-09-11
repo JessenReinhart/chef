@@ -116,14 +116,21 @@ function artifactCompletionSummary(
     }
     return undefined;
   };
+  const summary = firstText(["summary", "preview", "description", "content"]);
   const explicitLocation = firstText(["resultLocation", "path", "location"]);
   const location = explicitLocation === undefined
     ? fileUriLocation(inner.uri)
     : fileUriLocation(explicitLocation) ?? explicitLocation;
   const runCommand = firstText(["run", "runCommand", "command"]);
-  const verification = firstText(["verification"]);
+  const explicitVerification = firstText(["verification"]);
+  const legacyVerified = metadata.verified;
+  const verifiedBy = firstText(["verifiedBy"]);
+  const verification = explicitVerification
+    ?? (typeof legacyVerified === "string" && legacyVerified.trim() ? legacyVerified.trim() : undefined)
+    ?? (verifiedBy ? `Verified by ${verifiedBy}` : legacyVerified === true ? "Verified" : undefined);
   return [
     `artifact: ${(inner.name as string) || artifactType}`,
+    summary ? `summary: ${summary}` : undefined,
     location ? `result: ${location}` : undefined,
     runCommand ? `run: ${runCommand}` : undefined,
     verification ? `verification: ${verification}` : undefined,
