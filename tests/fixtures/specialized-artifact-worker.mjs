@@ -14,6 +14,10 @@ const envelope = {
     type: "result",
     name: "specialized-result",
     uri: `sideband://${sessionId}/specialized-result`,
+    metadata: {
+      resultLocation: "generated/todo-app",
+      runCommand: "npm run dev",
+    },
   },
   timestamp: Date.now(),
 };
