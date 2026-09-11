@@ -113,6 +113,31 @@ repo.insertTask({
 });
 repo.updateMission("partial-mission", { status: "failed" });
 
+repo.insertMission({
+  id: "orphaned-mission",
+  workspaceId: "workspace-a",
+  goal: "Recover work with missing plan linkage",
+  status: "planning",
+  taskIds: [],
+});
+repo.updateMission("orphaned-mission", {
+  status: "active",
+  taskIds: ["orphaned-mission-task"],
+});
+repo.insertTask({
+  id: "orphaned-mission-task",
+  workspaceId: "workspace-a",
+  title: "Do not dispatch broken recovery",
+  description: "failed Mission task whose owning Plan is missing",
+  status: "failed",
+  missionId: "orphaned-mission",
+  dependencies: [],
+  contextRefs: [],
+  retryCount: 0,
+  error: "previous attempt failed",
+});
+repo.updateMission("orphaned-mission", { status: "failed" });
+
 repo.insertTask({
   id: "standalone-failed-task",
   workspaceId: "workspace-a",
@@ -269,6 +294,18 @@ try {
   assert.equal(repo.getPlan("partial-plan")?.status, "failed");
   assert.equal(repo.getTask("partial-pending-task")?.status, "pending", "recovery must not pretend the stopped plan dispatcher ran unfinished work");
 
+  const brokenLineage = await post("/api/nodes/orphaned-mission-task/retry");
+  assert.equal(brokenLineage.status, 409);
+  assert.match(brokenLineage.json.error ?? "", /complete recovery path/i);
+  assert.match(brokenLineage.json.error ?? "", /Start it as new work/i);
+  assert.equal(repo.getMission("orphaned-mission")?.status, "failed", "rejected recovery must not reactivate a Mission whose Plan linkage is missing");
+  assert.equal(repo.getTask("orphaned-mission-task")?.status, "failed", "broken Mission lineage must be rejected before worker dispatch");
+  assert.deepEqual(
+    retryCalls,
+    ["failed-mission-task", "failed-mission-task", "partial-retry-task"],
+    "broken Mission lineage must not dispatch hidden retry work underneath an error response",
+  );
+
   const success = await post("/api/nodes/standalone-failed-task/retry");
   assert.equal(success.status, 200);
   assert.equal(success.json.ok, true);
@@ -306,7 +343,7 @@ try {
   assert.equal(fallbackResult.status, 418);
   assert.equal(fallbackResult.json.fallback, true);
 
-  console.log("simple-mode-recovery-http: ok — bounded Retry reconnects Task, Mission, and Plan without leaving partial Mission work falsely active");
+  console.log("simple-mode-recovery-http: ok — bounded Retry reconnects Task, Mission, and Plan without dispatching broken recovery lineage");
 } finally {
   if (server.listening) await new Promise<void>((resolve) => server.close(() => resolve()));
   repo.close();
