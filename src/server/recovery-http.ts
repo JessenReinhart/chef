@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { Mission, PlanStatus, RuntimeEvent } from "../core/types.ts";
 import type { ChefRuntime } from "../main.ts";
+import { reactivateFailedMission } from "../persistence/mission-recovery.ts";
 
 type RequestHandler = (req: IncomingMessage, res: ServerResponse) => void | Promise<void>;
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8" } as const;
@@ -35,7 +36,11 @@ function updateRetryMission(
 ): void {
   const current = runtime.repository.getMission(mission.id);
   if (!current || current.workspaceId !== runtime.workspaceId) return;
-  runtime.repository.updateMission(mission.id, { status });
+  if (current.status === "failed" && status === "active") {
+    reactivateFailedMission(runtime.repository, mission.id);
+  } else {
+    runtime.repository.updateMission(mission.id, { status });
+  }
   if (mission.planId && planStatus) runtime.repository.updatePlanStatus(mission.planId, planStatus);
   runtime.repository.appendEvent({
     workspaceId: runtime.workspaceId,
