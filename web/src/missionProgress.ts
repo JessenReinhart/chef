@@ -55,6 +55,23 @@ function belongsToMission(event: UiRuntimeEvent, missionId: string, taskIds: Set
     || payloadTaskIds.some((taskId) => taskIds.has(taskId));
 }
 
+function missionIdForProgressEvent(event: UiRuntimeEvent): string | undefined {
+  if (event.source.type === "mission" && event.source.id.trim()) return event.source.id;
+  return stringValue(objectPayload(event), "missionId") ?? event.correlationId;
+}
+
+function heartbeatCandidateMissionIds(events: UiRuntimeEvent[]): string[] {
+  const latestSeq = new Map<string, number>();
+  for (const event of events) {
+    const missionId = missionIdForProgressEvent(event);
+    if (!missionId) continue;
+    latestSeq.set(missionId, Math.max(latestSeq.get(missionId) ?? -Infinity, event.seq));
+  }
+  return [...latestSeq.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([missionId]) => missionId);
+}
+
 function scopeMissionEvents(
   events: UiRuntimeEvent[],
   missionId: string,
@@ -385,11 +402,27 @@ export function summarizeMissionProgressEvent(event: UiRuntimeEvent): MissionPro
   return { id: event.id, eventType: event.type, timestamp: event.timestamp, text, tone };
 }
 
-export function summarizeMissionProgress(events: UiRuntimeEvent[], limit = 5): MissionProgressItem[] {
-  return events
+/**
+ * Build the Simple Mode Thread digest from durable runtime evidence. The shared
+ * projection refreshes on a timer, so fold in the existing Mission heartbeat here
+ * rather than requiring a fresh runtime event while healthy work is quiet.
+ */
+export function summarizeMissionProgress(
+  events: UiRuntimeEvent[],
+  limit = 5,
+  now = Date.now(),
+): MissionProgressItem[] {
+  if (limit <= 0) return [];
+
+  const translated = events
     .map(summarizeMissionProgressEvent)
-    .filter((item): item is MissionProgressItem => item !== null)
-    .slice(-limit);
+    .filter((item): item is MissionProgressItem => item !== null);
+  const heartbeat = heartbeatCandidateMissionIds(events)
+    .map((missionId) => deriveMissionHeartbeat(events, missionId, [], now))
+    .find((item): item is MissionProgressItem => item !== null);
+
+  if (!heartbeat) return translated.slice(-limit);
+  return [...translated.slice(-(limit - 1)), heartbeat];
 }
 
 export function deriveMissionHeartbeat(

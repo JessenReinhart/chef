@@ -291,6 +291,62 @@ const heartbeatProgress = summarizeMissionProgressForMission(
 assert.equal(heartbeatProgress[0]?.eventType, "mission.heartbeat", "stale active work must surface a heartbeat before older activity");
 assert.equal(heartbeatProgress[0]?.text, "Chef is still working. Last runtime activity was 12 seconds ago.");
 
+const simpleModeHeartbeatEvents: UiRuntimeEvent[] = [
+  missionStatusEvent("event-60", "active", "mission-simple-heartbeat", 1_000),
+  {
+    id: "event-61",
+    seq: 61,
+    timestamp: 2_000,
+    source: { type: "orchestrator", id: "orchestrator" },
+    type: "orchestrator.plan.proposed",
+    payload: { missionId: "mission-simple-heartbeat", taskIds: ["task-simple-heartbeat"], routingMode: "single-worker" },
+    correlationId: "mission-simple-heartbeat",
+  },
+  taskEvent("event-62", "task.running", { from: "assigned", to: "running" }, "task-simple-heartbeat", 3_000),
+  {
+    id: "event-63",
+    seq: 63,
+    timestamp: 5_000,
+    source: { type: "runtime", id: "session-simple-heartbeat" },
+    type: "session.data",
+    payload: { data: "quiet work continues" },
+    taskId: "task-simple-heartbeat",
+    sessionId: "session-simple-heartbeat",
+  },
+];
+const quietSimpleModeProgress = summarizeMissionProgress(simpleModeHeartbeatEvents, 5, 17_000);
+assert.equal(
+  quietSimpleModeProgress.at(-1)?.eventType,
+  "mission.heartbeat",
+  "the actual Simple Mode Thread digest must surface the heartbeat when timer-driven refresh observes quiet healthy work",
+);
+assert.equal(
+  quietSimpleModeProgress.at(-1)?.text,
+  "Chef is still working. Last runtime activity was 12 seconds ago.",
+  "the Thread digest heartbeat must measure silence from the latest owned runtime activity",
+);
+
+const historicalCompletedAndCurrentWork = [
+  missionStatusEvent("event-70", "completed", "mission-history", 6_000),
+  ...simpleModeHeartbeatEvents,
+];
+assert.ok(
+  summarizeMissionProgress(historicalCompletedAndCurrentWork, 5, 17_000).some((item) => item.eventType === "mission.heartbeat"),
+  "historical completed work must not suppress a truthful heartbeat for another still-active Mission in the selected Thread",
+);
+
+const blockedSimpleModeProgress = summarizeMissionProgress([
+  ...simpleModeHeartbeatEvents,
+  {
+    ...taskEvent("event-64", "task.blocked", { reason: "waiting for dependency" }, "task-simple-heartbeat", 6_000),
+    correlationId: "mission-simple-heartbeat",
+  },
+], 5, 20_000);
+assert.ok(
+  blockedSimpleModeProgress.every((item) => item.eventType !== "mission.heartbeat"),
+  "a blocked selected-Thread Mission must show attention instead of a misleading healthy heartbeat",
+);
+
 const completedHeartbeatEvents = [
   ...heartbeatEvents,
   missionStatusEvent("event-33", "completed", "mission-heartbeat", 6_000),
