@@ -161,11 +161,31 @@ function negativeStatusHasFailureDetail(normalized: string, status: string): boo
   return NON_SUCCESS_DETAIL_WORDS.has(nextWord);
 }
 
+function precedingTokenIsZero(normalized: string, index: number): boolean {
+  const before = normalized.slice(0, index).trimEnd();
+  const token = before.split(/\s+/).at(-1)?.replace(/^[([{,;:]+|[\])},;:]+$/g, "") ?? "";
+  return token === "0" || token === "zero" || token === "no";
+}
+
 function positiveVerificationText(value: string): string | null {
   const normalized = value.toLowerCase();
   if (NON_SUCCESS_VERIFICATION_VALUES.has(normalized)) return null;
   for (const status of NON_SUCCESS_VERIFICATION_VALUES) {
     if (negativeStatusHasFailureDetail(normalized, status)) return null;
+
+    const marker = ` ${status}`;
+    let searchFrom = 0;
+    while (searchFrom < normalized.length) {
+      const index = normalized.indexOf(marker, searchFrom);
+      if (index < 0) break;
+      const statusIndex = index + 1;
+      const candidate = normalized.slice(statusIndex);
+      if (
+        !precedingTokenIsZero(normalized, index)
+        && (candidate.trim() === status || negativeStatusHasFailureDetail(candidate, status))
+      ) return null;
+      searchFrom = statusIndex + status.length;
+    }
   }
   return value;
 }
