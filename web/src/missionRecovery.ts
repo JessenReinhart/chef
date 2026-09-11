@@ -34,7 +34,8 @@ export function canRetryMissionTask(input: {
 }): boolean {
   if (input.readOnly) return false;
   if (
-    input.missionStatus === "cancelled"
+    input.missionStatus === "failed"
+    || input.missionStatus === "cancelled"
     || input.missionStatus === "completed"
     || input.missionStatus === "paused"
     || input.missionStatus === "waiting_for_approval"
