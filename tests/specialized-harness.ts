@@ -205,6 +205,11 @@ try {
     /run: npm run dev/,
     "the final assistant completion report surfaces the durable run command",
   );
+  assert.match(
+    result.report,
+    /verification: npm test passed \(12 tests\)/,
+    "the final assistant completion report carries durable verification evidence",
+  );
 
   const explicitResult = await chef.sendUserMessage("run through the specialized adapter with explicit result location");
   assert.equal(explicitResult.ok, true, explicitResult.report);
@@ -222,6 +227,24 @@ try {
     explicitResult.report,
     /run: npm run dev/,
     "an explicit result location preserves the durable run command",
+  );
+  assert.match(
+    explicitResult.report,
+    /verification: npm test passed \(12 tests\)/,
+    "an explicit result location preserves the durable verification evidence",
+  );
+
+  const failedVerificationResult = await chef.sendUserMessage("run through the specialized adapter with failed verification");
+  assert.equal(failedVerificationResult.ok, true, failedVerificationResult.report);
+  assert.match(
+    failedVerificationResult.report,
+    /verification: 5 tests passed, 1 failed/,
+    "negative verification wording is preserved truthfully in the final completion report",
+  );
+  assert.doesNotMatch(
+    failedVerificationResult.report,
+    /verification: Verified/,
+    "negative verification evidence is not rewritten into a positive claim",
   );
 
   const snapshot = await chef.inspectState();
