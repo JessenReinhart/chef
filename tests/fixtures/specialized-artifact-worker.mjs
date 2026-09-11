@@ -8,6 +8,9 @@ if (!sessionId) throw new Error("CHEF_SESSION_ID is required");
 const prompt = process.argv[2] ?? "";
 const metadata = {
   runCommand: "npm run dev",
+  verification: prompt.includes("failed verification")
+    ? "5 tests passed, 1 failed"
+    : "npm test passed (12 tests)",
   ...(prompt.includes("explicit result location")
     ? { resultLocation: "file:///D:/Chef%20Output/todo-explicit" }
     : {}),
