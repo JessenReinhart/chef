@@ -57,13 +57,22 @@ function reconcileRetryMission(runtime: ChefRuntime, mission: RetryMissionContex
   const tasks = current.taskIds
     .map((taskId) => runtime.repository.getTask(taskId))
     .filter((task) => task !== null);
-  if (tasks.length !== current.taskIds.length) return;
+  if (tasks.length !== current.taskIds.length) {
+    updateRetryMission(runtime, mission, "failed", "failed");
+    return;
+  }
 
   if (tasks.some((task) => task.status === "failed" || task.status === "cancelled")) {
     updateRetryMission(runtime, mission, "failed", "failed");
     return;
   }
-  if (!tasks.every((task) => task.status === "completed")) return;
+  if (!tasks.every((task) => task.status === "completed")) {
+    // A same-task retry does not restart the original plan dispatcher. If
+    // other plan work is still unfinished when this retry ends, returning the
+    // Mission to failed is truthful and avoids a permanently "working" zombie.
+    updateRetryMission(runtime, mission, "failed", "failed");
+    return;
+  }
 
   // Mirror the normal Mission terminal handoff: successful execution becomes
   // verifying before completion instead of jumping straight from working to done.
@@ -188,7 +197,13 @@ export function createRecoveryServer(runtime: ChefRuntime, baseServer: Server): 
         if (updated.error !== undefined) {
           updated = runtime.repository.updateTask(taskId, { error: null as never });
         }
-        missionWatch?.started();
+        try {
+          missionWatch?.started();
+        } catch (error) {
+          missionWatch?.cancel();
+          sendJson(res, 500, { error: error instanceof Error ? error.message : String(error) });
+          return;
+        }
 
         sendJson(res, 200, { ok: true, data: updated });
         return;
