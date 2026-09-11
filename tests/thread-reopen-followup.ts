@@ -25,8 +25,12 @@ function createRuntime(repository: Repository, submissions: SubmissionContext[])
     repository,
     sendUserMessage(message: string, context?: { threadId?: string; recentMessages?: ThreadMessageContext[] }) {
       submissions.push({ message, threadId: context?.threadId, recentMessages: context?.recentMessages });
-      repository.insertMission({ workspaceId, goal: message, status: "planning", createdBy: "user" });
-      return Promise.resolve({ workspaceId, taskIds: [] as string[], report: `Completed: ${message}`, ok: true });
+      const mission = repository.insertMission({ workspaceId, goal: message, status: "planning", createdBy: "user" });
+      return Promise.resolve().then(() => {
+        repository.updateMission(mission.id, { status: "active" });
+        repository.updateMission(mission.id, { status: "completed" });
+        return { workspaceId, taskIds: [] as string[], report: `Completed: ${message}`, ok: true };
+      });
     },
   } as never;
 }
@@ -100,6 +104,7 @@ try {
   const firstHistory = await waitForCompletion(firstRuntime.origin, thread.id, first.missionId);
   assert.ok(firstHistory.some((message) => message.content === "Completed: Create a simple todo app"));
   assert.equal(firstRepository.getMission(first.missionId)?.metadata.threadId, thread.id);
+  assert.equal(firstRepository.getMission(first.missionId)?.status, "completed", "the persisted first turn must be genuinely complete before restart");
   assert.equal(firstSubmissions.length, 1);
   assert.equal(firstSubmissions[0]?.threadId, thread.id, "the initial turn must be explicitly scoped to its Thread");
 
@@ -128,11 +133,11 @@ try {
   assert.deepEqual(
     reopenedSubmission?.recentMessages?.map(({ role, content }) => [role, content]),
     [
-      ["system", "Prior Mission (planning; context only): Create a simple todo app"],
+      ["system", "Prior Mission (completed; context only): Create a simple todo app"],
       ["user", "Create a simple todo app"],
       ["assistant", "Completed: Create a simple todo app"],
     ],
-    "the reopened follow-up must receive durable prior Mission and conversation context before new work starts",
+    "the reopened follow-up must receive the completed prior Mission and conversation context before new work starts",
   );
 
   const history = await waitForCompletion(reopenedRuntime.origin, thread.id, followUp.missionId);
@@ -152,7 +157,7 @@ try {
     "the reopened completion handoff must retain the new Mission lineage in the same Thread",
   );
 
-  console.log("thread-reopen-followup: ok — a persisted Thread restores prior context, accepts a distinct follow-up Mission through production HTTP, and retains both turns in one conversation");
+  console.log("thread-reopen-followup: ok — a completed persisted Thread restores prior context, accepts a distinct follow-up Mission through production HTTP, and retains both turns in one conversation");
 } finally {
   if (firstServer) await closeServer(firstServer);
   if (reopenedServer) await closeServer(reopenedServer);
