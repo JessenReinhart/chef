@@ -422,6 +422,7 @@ export function summarizeMissionProgress(
     .find((item): item is MissionProgressItem => item !== null);
 
   if (!heartbeat) return translated.slice(-limit);
+  if (limit === 1) return [heartbeat];
   return [...translated.slice(-(limit - 1)), heartbeat];
 }
 
