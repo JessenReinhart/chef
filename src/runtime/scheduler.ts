@@ -116,7 +116,10 @@ function artifactCompletionSummary(
     }
     return undefined;
   };
-  const location = firstText(["resultLocation", "path", "location"]) ?? fileUriLocation(inner.uri);
+  const explicitLocation = firstText(["resultLocation", "path", "location"]);
+  const location = explicitLocation === undefined
+    ? fileUriLocation(inner.uri)
+    : fileUriLocation(explicitLocation) ?? explicitLocation;
   const runCommand = firstText(["run", "runCommand", "command"]);
   return [
     `artifact: ${(inner.name as string) || artifactType}`,
