@@ -114,7 +114,9 @@ await new Promise<void>((resolve, reject) => {
   });
 });
 
-const runtime = createChef({ dbPath: join(projectDir, "chef.sqlite"), projectDir });
+const dbPath = join(projectDir, "chef.sqlite");
+const runtime = createChef({ dbPath, projectDir });
+let runtimeClosed = false;
 const revealed: Array<{ path: string; isDirectory: boolean }> = [];
 const server = createArtifactServer(runtime, createHttpServer(runtime), {
   revealPath: async (path, isDirectory) => { revealed.push({ path, isDirectory }); },
@@ -305,10 +307,53 @@ try {
   assert.match(outsideReveal.body.error ?? "", /outside the project root/);
   assert.equal(revealed.length, 6, "rejected result locations must never invoke the OS opener");
 
-  console.log("artifact-local-result-reveal: ok — Simple Mode keeps result reveal/save/copy actions version-owned and project-scoped");
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  await runtime.close();
+  runtimeClosed = true;
+
+  const reopened = createChef({ dbPath, projectDir });
+  const reopenedRevealed: Array<{ path: string; isDirectory: boolean }> = [];
+  const reopenedServer = createArtifactServer(reopened, createHttpServer(reopened), {
+    revealPath: async (path, isDirectory) => { reopenedRevealed.push({ path, isDirectory }); },
+  });
+  try {
+    await reopened.start();
+    const restored = await reopened.inspectState();
+    const restoredCanonicalTodo = restored.artifacts.find((artifact) => artifact.id === canonicalTodo.id);
+    assert.ok(restoredCanonicalTodo, "the canonical todo result must survive closing and reopening the selected project");
+    assert.equal(restoredCanonicalTodo.version, canonicalTodo.version, "reopen must preserve the artifact version owned by the Simple Mode result card");
+
+    await new Promise<void>((resolve) => reopenedServer.listen(0, "127.0.0.1", resolve));
+    const reopenedAddress = reopenedServer.address();
+    assert.ok(reopenedAddress && typeof reopenedAddress === "object", "reopened artifact server must listen on TCP");
+    const reopenedResponse = await fetch(
+      `http://127.0.0.1:${reopenedAddress.port}/api/artifacts/${encodeURIComponent(restoredCanonicalTodo.id)}/reveal`,
+      {
+        method: "POST",
+        headers: {
+          "x-chef-action": "reveal-artifact",
+          "x-chef-expected-artifact-version": String(restoredCanonicalTodo.version),
+        },
+      },
+    );
+    assert.equal(reopenedResponse.status, 200, "Show result must still work from the restored Simple Mode result after reopening Chef");
+    const reopenedBody = await reopenedResponse.json() as { ok?: boolean; data?: { location?: string } };
+    assert.equal(reopenedBody.ok, true, "reopened canonical reveal must report success");
+    assert.equal(reopenedBody.data?.location, resultPath, "reopened Show result must resolve the same generated todo result inside the selected project");
+    assert.deepEqual(
+      reopenedRevealed,
+      [{ path: resultPath, isDirectory: false }],
+      "reopened Show result must invoke the desktop reveal exactly once for the persisted canonical result",
+    );
+  } finally {
+    if (reopenedServer.listening) await new Promise<void>((resolve) => reopenedServer.close(() => resolve()));
+    await reopened.close();
+  }
+
+  console.log("artifact-local-result-reveal: ok — Simple Mode keeps result reveal/save/copy actions version-owned, project-scoped, and durable across reopen");
 } finally {
   if (server.listening) await new Promise<void>((resolve) => server.close(() => resolve()));
-  await runtime.close();
+  if (!runtimeClosed) await runtime.close();
   await rm(projectDir, { recursive: true, force: true });
   await rm(outsideDir, { recursive: true, force: true });
 }
