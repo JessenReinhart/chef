@@ -2,14 +2,15 @@ import { strict as assert } from "node:assert";
 import { once } from "node:events";
 import { spawn } from "node:child_process";
 import { createServer as createHttpServer } from "node:http";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { GenericTerminalHarness } from "../src/harness/generic.ts";
 import { createChef } from "../src/main.ts";
+import { createArtifactServer } from "../src/server/artifact-http.ts";
 import { createProjectServer } from "../src/server/project-http.ts";
 import { createThreadServer } from "../src/server/thread-http.ts";
-import { artifactHandoff } from "../web/src/artifactHandoff.ts";
+import { artifactHandoff, canRevealArtifact } from "../web/src/artifactHandoff.ts";
 import type { LivingArtifact } from "../web/src/artifactProjection.ts";
 import type {
   AgentId,
@@ -136,6 +137,7 @@ async function writeTodoWorker(projectDir: string): Promise<string> {
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const { pathToFileURL } = require("url");
 const crypto = require("crypto");
 
 const appPath = path.join(process.cwd(), ${JSON.stringify(TODO_APP)});
@@ -151,7 +153,7 @@ const envelope = {
   payload: {
     type: "result",
     name: "todo-app",
-    uri: "file://" + appPath.replace(/\\\\/g, "/"),
+    uri: pathToFileURL(appPath).href,
     metadata: {
       content: "Created runnable todo app at " + appPath,
       run: process.execPath + " " + appPath,
@@ -206,6 +208,42 @@ async function assertGeneratedAppRuns(appPath: string): Promise<void> {
       once(child, "exit"),
       new Promise((resolve) => setTimeout(resolve, 1_000)),
     ]);
+  }
+}
+
+async function assertCanonicalResultReveal(
+  chef: ReturnType<typeof createChef>,
+  artifact: LivingArtifact,
+  appPath: string,
+): Promise<void> {
+  assert.equal(canRevealArtifact(artifact), true, "canonical todo result must advertise Show result in Simple Mode");
+  const expectedPath = await realpath(appPath);
+  const revealed: Array<{ path: string; isDirectory: boolean }> = [];
+  const base = createHttpServer((_req, res) => {
+    res.writeHead(404);
+    res.end("not found");
+  });
+  const server = createArtifactServer(chef, base, {
+    revealPath: async (path, isDirectory) => { revealed.push({ path, isDirectory }); },
+  });
+  try {
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    assert.ok(address && typeof address === "object", "artifact reveal server must listen on TCP");
+    const response = await fetch(`http://127.0.0.1:${address.port}/api/artifacts/${encodeURIComponent(artifact.id)}/reveal`, {
+      method: "POST",
+      headers: {
+        "x-chef-action": "reveal-artifact",
+        "x-chef-expected-artifact-version": String(artifact.version),
+      },
+    });
+    assert.equal(response.status, 200, "Show result must succeed for the actual canonical todo artifact");
+    const body = await response.json() as { ok?: boolean; data?: { location?: string } };
+    assert.equal(body.ok, true, "canonical reveal must report success");
+    assert.equal(body.data?.location, expectedPath, "canonical reveal must resolve the generated app inside the selected project");
+    assert.deepEqual(revealed, [{ path: expectedPath, isDirectory: false }], "Show result must reveal the exact generated todo app once");
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 }
 
@@ -481,7 +519,9 @@ async function main(): Promise<void> {
     assert.equal(snapshot.artifacts.length, 1, "worker must produce one durable result artifact");
     assert.equal(snapshot.artifacts[0].name, "todo-app", "artifact must make the generated result discoverable");
     assert.ok(snapshot.artifacts[0].uri.includes(TODO_APP), "artifact URI must point at the generated app");
-    const handoff = resultHandoff(snapshot.artifacts[0] as LivingArtifact, appPath);
+    const artifact = snapshot.artifacts[0] as LivingArtifact;
+    const handoff = resultHandoff(artifact, appPath);
+    await assertCanonicalResultReveal(chef, artifact, appPath);
     assert.ok(snapshot.sessions.some((session) => session.status === "completed"), "real PTY session must exit successfully");
     assert.ok(snapshot.sessions.every((session) => session.command.length > 0), "session command must be recorded");
     assert.ok(snapshot.sessions.every((session) => session.status !== "running"), "no session may remain stuck after completion");
