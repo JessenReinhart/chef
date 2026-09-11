@@ -197,8 +197,8 @@ try {
   assert.equal(result.ok, true, result.report);
   assert.match(
     result.report,
-    /result: generated\/todo-app/,
-    "the final assistant completion report surfaces the durable result location",
+    /result: C:\/Work\/Chef Projects\/todo-app/,
+    "the final assistant completion report falls back to the durable file artifact URI when explicit location metadata is absent",
   );
   assert.match(
     result.report,
