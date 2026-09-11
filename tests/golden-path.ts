@@ -2,7 +2,7 @@ import { strict as assert } from "node:assert";
 import { once } from "node:events";
 import { spawn } from "node:child_process";
 import { createServer as createHttpServer } from "node:http";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { GenericTerminalHarness } from "../src/harness/generic.ts";
@@ -81,6 +81,9 @@ class TodoAcceptanceDecisionProvider implements DecisionProvider {
 
   async proposePlan(input: PlanProposalContext): Promise<Plan & { routingMode: "single-worker" }> {
     this.#workspaceId = input.workspaceId;
+    // Keep planning open briefly so the Thread HTTP acknowledgement is
+    // observable before the worker can finish, without requiring mutable
+    // persisted Mission state to still be planning when the client reads 202.
     await new Promise((resolve) => setTimeout(resolve, 200));
     const taskId = crypto.randomUUID();
     return {
@@ -134,6 +137,7 @@ async function writeTodoWorker(projectDir: string): Promise<string> {
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const { pathToFileURL } = require("url");
 const crypto = require("crypto");
 
 const appPath = path.join(process.cwd(), ${JSON.stringify(TODO_APP)});
@@ -149,7 +153,7 @@ const envelope = {
   payload: {
     type: "result",
     name: "todo-app",
-    uri: "file://" + appPath.replace(/\\\\/g, "/"),
+    uri: pathToFileURL(appPath).href,
     metadata: {
       content: "Created runnable todo app at " + appPath,
       run: process.execPath + " " + appPath,
@@ -213,6 +217,7 @@ async function assertCanonicalResultReveal(
   appPath: string,
 ): Promise<void> {
   assert.equal(canRevealArtifact(artifact), true, "canonical todo result must advertise Show result in Simple Mode");
+  const expectedPath = await realpath(appPath);
   const revealed: Array<{ path: string; isDirectory: boolean }> = [];
   const base = createHttpServer((_req, res) => {
     res.writeHead(404);
@@ -235,8 +240,8 @@ async function assertCanonicalResultReveal(
     assert.equal(response.status, 200, "Show result must succeed for the actual canonical todo artifact");
     const body = await response.json() as { ok?: boolean; data?: { location?: string } };
     assert.equal(body.ok, true, "canonical reveal must report success");
-    assert.equal(body.data?.location, appPath, "canonical reveal must resolve the generated app inside the selected project");
-    assert.deepEqual(revealed, [{ path: appPath, isDirectory: false }], "Show result must reveal the exact generated todo app once");
+    assert.equal(body.data?.location, expectedPath, "canonical reveal must resolve the generated app inside the selected project");
+    assert.deepEqual(revealed, [{ path: expectedPath, isDirectory: false }], "Show result must reveal the exact generated todo app once");
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
@@ -370,14 +375,26 @@ function assertRoutingModeIsDurable(events: readonly RuntimeEvent[]): void {
 }
 
 function assertObservableMissionLifecycle(events: readonly RuntimeEvent[], taskIds: readonly string[]): void {
-  const missionCreated = events.findIndex((event) => event.type === "mission.created" && eventStatus(event) === "planning");
+  const missionCreated = events.findIndex((event) =>
+    event.type === "mission.created" && eventStatus(event) === "planning"
+  );
   assert.ok(missionCreated >= 0, "golden path must visibly enter planning");
+
   const missionId = events[missionCreated].source.id;
   const taskIdSet = new Set(taskIds);
-  const missionActive = events.findIndex((event) => event.source.id === missionId && event.type === "mission.status" && eventStatus(event) === "active");
-  const workerActivity = events.findIndex((event) => event.taskId !== undefined && taskIdSet.has(event.taskId) && event.type.startsWith("task."));
-  const missionVerifying = events.findIndex((event) => event.source.id === missionId && event.type === "mission.status" && eventStatus(event) === "verifying");
-  const missionCompleted = events.findIndex((event) => event.source.id === missionId && event.type === "mission.status" && eventStatus(event) === "completed");
+  const missionActive = events.findIndex((event) =>
+    event.source.id === missionId && event.type === "mission.status" && eventStatus(event) === "active"
+  );
+  const workerActivity = events.findIndex((event) =>
+    event.taskId !== undefined && taskIdSet.has(event.taskId) && event.type.startsWith("task.")
+  );
+  const missionVerifying = events.findIndex((event) =>
+    event.source.id === missionId && event.type === "mission.status" && eventStatus(event) === "verifying"
+  );
+  const missionCompleted = events.findIndex((event) =>
+    event.source.id === missionId && event.type === "mission.status" && eventStatus(event) === "completed"
+  );
+
   assert.ok(missionActive > missionCreated, "golden path must visibly leave planning before worker activity");
   assert.ok(workerActivity > missionActive, "golden path must expose authoritative worker activity after Mission activation");
   assert.ok(missionVerifying > workerActivity, "golden path must visibly enter verification after worker activity");
@@ -393,6 +410,12 @@ function resultHandoff(artifact: LivingArtifact, appPath: string): ReturnType<ty
   return handoff;
 }
 
+/**
+ * P0 golden path: the permanent boring acceptance task traverses the real
+ * project selection -> Thread HTTP -> Mission -> Plan -> Task -> PTY lifecycle,
+ * produces a discoverable result in the selected project, runs successfully,
+ * and survives close/reopen.
+ */
 async function main(): Promise<void> {
   const projectDir = await mkdtemp(join(tmpdir(), "chef-golden-project-"));
   const dbPath = join(projectDir, "chef.sqlite");
@@ -419,13 +442,30 @@ async function main(): Promise<void> {
     const unsubscribe = chef.subscribeEvents((event) => liveEvents.push(event));
     const acknowledgement = await submitTodoThroughThreadHttp(journey.baseUrl, workspaceId);
 
-    const planningEvent = await waitForObservableEvent(liveEvents, (event) => event.type === "mission.created" && eventStatus(event) === "planning", 500, "planning acknowledgement");
-    const acknowledgedMission = chef.repository.listMissions(workspaceId).find((candidate) => candidate.id === acknowledgement.missionId);
+    const planningEvent = await waitForObservableEvent(
+      liveEvents,
+      (event) => event.type === "mission.created" && eventStatus(event) === "planning",
+      500,
+      "planning acknowledgement",
+    );
+    const acknowledgedMission = chef.repository.listMissions(workspaceId).find(
+      (candidate) => candidate.id === acknowledgement.missionId,
+    );
     assert.ok(acknowledgedMission, "Thread acknowledgement must name a durable Mission in the selected workspace");
     assert.equal(acknowledgedMission.metadata.threadId, acknowledgement.threadId, "acknowledged Mission must already be linked to its originating Thread");
 
-    await waitForObservableEvent(liveEvents, (event) => event.source.id === planningEvent.source.id && event.type === "mission.status" && eventStatus(event) === "active", 2_000, "active working state");
-    await waitForObservableEvent(liveEvents, (event) => event.source.id === planningEvent.source.id && event.type === "mission.status" && eventStatus(event) === "completed", 10_000, "completed canonical Mission");
+    await waitForObservableEvent(
+      liveEvents,
+      (event) => event.source.id === planningEvent.source.id && event.type === "mission.status" && eventStatus(event) === "active",
+      2_000,
+      "active working state",
+    );
+    await waitForObservableEvent(
+      liveEvents,
+      (event) => event.source.id === planningEvent.source.id && event.type === "mission.status" && eventStatus(event) === "completed",
+      10_000,
+      "completed canonical Mission",
+    );
     unsubscribe();
 
     const snapshot = await chef.inspectState();
@@ -437,12 +477,32 @@ async function main(): Promise<void> {
     assert.equal(mission.taskIds.length, 1, "simple todo acceptance task should execute as one worker task");
     const resultTaskIds = mission.taskIds;
 
-    const completionMessage = await waitForThreadCompletionMessage(journey.baseUrl, acknowledgement.threadId, acknowledgement.missionId);
+    const completionMessage = await waitForThreadCompletionMessage(
+      journey.baseUrl,
+      acknowledgement.threadId,
+      acknowledgement.missionId,
+    );
     assert.match(completionMessage.content, /todo app/i, "Thread completion handoff must identify the requested result");
-    assert.match(completionMessage.content, /summary: Created runnable todo app at /, "Thread completion handoff must explain what changed");
-    assert.match(completionMessage.content, /result: [^|\n]*todo-app\.mjs/, "Thread completion handoff must expose the generated result location");
-    assert.match(completionMessage.content, /run: [^|\n]*todo-app\.mjs/, "Thread completion handoff must expose the runnable command");
-    assert.match(completionMessage.content, /verification: Verified by golden-path/, "Thread completion handoff must expose worker verification evidence");
+    assert.match(
+      completionMessage.content,
+      /summary: Created runnable todo app at /,
+      "Thread completion handoff must explain what changed",
+    );
+    assert.match(
+      completionMessage.content,
+      /result: [^|\n]*todo-app\.mjs/,
+      "Thread completion handoff must expose the generated result location",
+    );
+    assert.match(
+      completionMessage.content,
+      /run: [^|\n]*todo-app\.mjs/,
+      "Thread completion handoff must expose the runnable command",
+    );
+    assert.match(
+      completionMessage.content,
+      /verification: Verified by golden-path/,
+      "Thread completion handoff must expose worker verification evidence",
+    );
     assert.deepEqual(completionMessage.metadata?.taskIds, resultTaskIds, "Thread completion handoff must retain Mission task lineage");
 
     assert.equal(snapshot.tasks.length, 1, "golden path should persist its worker task");
