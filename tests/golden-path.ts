@@ -445,6 +445,26 @@ async function main(): Promise<void> {
       acknowledgement.missionId,
     );
     assert.match(completionMessage.content, /todo app/i, "Thread completion handoff must identify the requested result");
+    assert.match(
+      completionMessage.content,
+      /summary: Created runnable todo app at /,
+      "Thread completion handoff must explain what changed",
+    );
+    assert.match(
+      completionMessage.content,
+      /result: [^|\n]*todo-app\.mjs/,
+      "Thread completion handoff must expose the generated result location",
+    );
+    assert.match(
+      completionMessage.content,
+      /run: [^|\n]*todo-app\.mjs/,
+      "Thread completion handoff must expose the runnable command",
+    );
+    assert.match(
+      completionMessage.content,
+      /verification: Verified by golden-path/,
+      "Thread completion handoff must expose worker verification evidence",
+    );
     assert.deepEqual(completionMessage.metadata?.taskIds, resultTaskIds, "Thread completion handoff must retain Mission task lineage");
 
     assert.equal(snapshot.tasks.length, 1, "golden path should persist its worker task");
