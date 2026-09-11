@@ -1,8 +1,12 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import type { Mission, PlanStatus, RuntimeEvent } from "../core/types.ts";
 import type { ChefRuntime } from "../main.ts";
 
 type RequestHandler = (req: IncomingMessage, res: ServerResponse) => void | Promise<void>;
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8" } as const;
+
+type RetryMissionContext = Pick<Mission, "id" | "planId" | "taskIds">;
+type RetryTerminalEvent = "task.completed" | "task.failed" | "task.cancelled";
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, JSON_HEADERS);
@@ -17,23 +21,98 @@ function retryErrorMessage(error: unknown): string {
   return message;
 }
 
-function terminalMissionRecoveryMessage(status: "failed" | "completed" | "cancelled"): string {
-  if (status === "failed") {
-    return "This Mission failed, so its history is final. Continue it as new work in this Thread instead of retrying this step in place.";
-  }
+function terminalMissionRecoveryMessage(status: "completed" | "cancelled"): string {
   return status === "cancelled"
     ? "This Mission was cancelled, so its history is final. Continue it as new work instead of retrying this step in place."
     : "This Mission is already complete, so its history is final. Start new work instead of retrying this step in place.";
 }
 
+function updateRetryMission(
+  runtime: ChefRuntime,
+  mission: RetryMissionContext,
+  status: Mission["status"],
+  planStatus?: PlanStatus,
+): void {
+  const current = runtime.repository.getMission(mission.id);
+  if (!current || current.workspaceId !== runtime.workspaceId) return;
+  runtime.repository.updateMission(mission.id, { status });
+  if (mission.planId && planStatus) runtime.repository.updatePlanStatus(mission.planId, planStatus);
+  runtime.repository.appendEvent({
+    workspaceId: runtime.workspaceId,
+    source: { type: "runtime", id: "recovery" },
+    type: "mission.status",
+    payload: { missionId: mission.id, status, planId: mission.planId, recovered: true },
+  });
+}
+
+function reconcileRetryMission(runtime: ChefRuntime, mission: RetryMissionContext): void {
+  const current = runtime.repository.getMission(mission.id);
+  if (!current || current.workspaceId !== runtime.workspaceId || current.status !== "active") return;
+
+  const tasks = current.taskIds
+    .map((taskId) => runtime.repository.getTask(taskId))
+    .filter((task) => task !== null);
+  if (tasks.length !== current.taskIds.length) return;
+
+  if (tasks.some((task) => task.status === "failed" || task.status === "cancelled")) {
+    updateRetryMission(runtime, mission, "failed", "failed");
+    return;
+  }
+  if (!tasks.every((task) => task.status === "completed")) return;
+
+  // Mirror the normal Mission terminal handoff: successful execution becomes
+  // verifying before completion instead of jumping straight from working to done.
+  updateRetryMission(runtime, mission, "verifying");
+  updateRetryMission(runtime, mission, "completed", "completed");
+}
+
+function watchRetryMission(
+  runtime: ChefRuntime,
+  taskId: string,
+  mission: RetryMissionContext,
+): { started: () => void; cancel: () => void } {
+  let active = false;
+  let terminalEvent: RetryTerminalEvent | null = null;
+  let settled = false;
+
+  const settle = (): void => {
+    if (!active || !terminalEvent || settled) return;
+    settled = true;
+    unsubscribe();
+    reconcileRetryMission(runtime, mission);
+  };
+
+  const onEvent = (event: RuntimeEvent): void => {
+    if (event.taskId !== taskId) return;
+    if (event.type !== "task.completed" && event.type !== "task.failed" && event.type !== "task.cancelled") return;
+    terminalEvent = event.type;
+    settle();
+  };
+  const unsubscribe = runtime.subscribeEvents(onEvent);
+
+  return {
+    started() {
+      if (active) return;
+      active = true;
+      updateRetryMission(runtime, mission, "active", "executing");
+      settle();
+    },
+    cancel() {
+      if (settled) return;
+      settled = true;
+      unsubscribe();
+    },
+  };
+}
+
 /**
  * Adds the normal user-facing recovery mutation for failed/blocked work.
  *
- * Retry remains owned by the runtime scheduler. This HTTP layer only validates
- * active-workspace ownership and retryable state before delegating, so Simple
- * Mode never needs Workbench/runtime internals to recover ordinary failures.
- * Mission-terminal work stays immutable because its orchestrator/verification
- * loop has already ended; recovery continues as new work in the same Thread.
+ * Retry remains owned by the runtime scheduler. This HTTP layer validates the
+ * active workspace and retryable state before delegating. When a terminally
+ * failed Mission owns the Task, recovery also reconnects the new worker attempt
+ * to that Mission/Plan lifecycle so Simple Mode cannot show failed history while
+ * Chef is actively retrying underneath it.
  */
 export function createRecoveryServer(runtime: ChefRuntime, baseServer: Server): Server {
   const baseHandler = baseServer.listeners("request")[0] as RequestHandler | undefined;
@@ -55,12 +134,18 @@ export function createRecoveryServer(runtime: ChefRuntime, baseServer: Server): 
           sendJson(res, 409, { error: `task is not retryable from status ${task.status}` });
           return;
         }
+
+        let retryMission: RetryMissionContext | null = null;
         if (task.missionId) {
           const mission = runtime.repository.getMission(task.missionId);
-          if (mission && mission.workspaceId === runtime.workspaceId
-            && (mission.status === "failed" || mission.status === "cancelled" || mission.status === "completed")) {
-            sendJson(res, 409, { error: terminalMissionRecoveryMessage(mission.status) });
-            return;
+          if (mission && mission.workspaceId === runtime.workspaceId) {
+            if (mission.status === "cancelled" || mission.status === "completed") {
+              sendJson(res, 409, { error: terminalMissionRecoveryMessage(mission.status) });
+              return;
+            }
+            if (mission.status === "failed") {
+              retryMission = { id: mission.id, planId: mission.planId, taskIds: [...mission.taskIds] };
+            }
           }
         }
         if (task.status === "blocked" && task.approvalId) {
@@ -71,19 +156,23 @@ export function createRecoveryServer(runtime: ChefRuntime, baseServer: Server): 
           }
         }
 
+        const missionWatch = retryMission ? watchRetryMission(runtime, taskId, retryMission) : null;
         try {
           await runtime.retryTask(taskId);
         } catch (error) {
+          missionWatch?.cancel();
           sendJson(res, 409, { error: retryErrorMessage(error) });
           return;
         }
 
         let updated = runtime.repository.getTask(taskId);
         if (!updated || updated.workspaceId !== runtime.workspaceId) {
+          missionWatch?.cancel();
           sendJson(res, 500, { error: `task disappeared after retry: ${taskId}` });
           return;
         }
         if (updated.status === "failed" || updated.status === "blocked") {
+          missionWatch?.cancel();
           sendJson(res, 409, { error: "retry could not start yet; the task remains blocked" });
           return;
         }
@@ -94,6 +183,7 @@ export function createRecoveryServer(runtime: ChefRuntime, baseServer: Server): 
         if (updated.error !== undefined) {
           updated = runtime.repository.updateTask(taskId, { error: null as never });
         }
+        missionWatch?.started();
 
         sendJson(res, 200, { ok: true, data: updated });
         return;
