@@ -121,10 +121,12 @@ function artifactCompletionSummary(
     ? fileUriLocation(inner.uri)
     : fileUriLocation(explicitLocation) ?? explicitLocation;
   const runCommand = firstText(["run", "runCommand", "command"]);
+  const verification = firstText(["verification"]);
   return [
     `artifact: ${(inner.name as string) || artifactType}`,
     location ? `result: ${location}` : undefined,
     runCommand ? `run: ${runCommand}` : undefined,
+    verification ? `verification: ${verification}` : undefined,
   ].filter((value): value is string => value !== undefined).join(" | ");
 }
 
