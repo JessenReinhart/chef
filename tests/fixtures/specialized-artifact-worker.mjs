@@ -13,9 +13,8 @@ const envelope = {
   payload: {
     type: "result",
     name: "specialized-result",
-    uri: `sideband://${sessionId}/specialized-result`,
+    uri: "file:///C:/Work/Chef%20Projects/todo-app",
     metadata: {
-      resultLocation: "generated/todo-app",
       runCommand: "npm run dev",
     },
   },
