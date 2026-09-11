@@ -161,11 +161,36 @@ function negativeStatusHasFailureDetail(normalized: string, status: string): boo
   return NON_SUCCESS_DETAIL_WORDS.has(nextWord);
 }
 
+function precedingPhraseIsZeroCount(normalized: string, index: number): boolean {
+  const before = normalized.slice(0, index).trimEnd();
+  const clause = before.split(/[;,.()[\]{}:]/).at(-1)?.trim() ?? "";
+  return /(?:^|\s)(?:0|zero|no)(?:\s+[a-z0-9_-]+){0,2}$/.test(clause);
+}
+
+function startsWithZeroFailureCount(normalized: string): boolean {
+  return /^(?:0|zero|no)(?:\s+[a-z0-9_-]+){0,2}\s+failed(?:\s|$)/.test(normalized);
+}
+
 function positiveVerificationText(value: string): string | null {
   const normalized = value.toLowerCase();
   if (NON_SUCCESS_VERIFICATION_VALUES.has(normalized)) return null;
   for (const status of NON_SUCCESS_VERIFICATION_VALUES) {
-    if (negativeStatusHasFailureDetail(normalized, status)) return null;
+    const leadingZeroFailureCount = status === "no" && startsWithZeroFailureCount(normalized);
+    if (!leadingZeroFailureCount && negativeStatusHasFailureDetail(normalized, status)) return null;
+
+    const marker = ` ${status}`;
+    let searchFrom = 0;
+    while (searchFrom < normalized.length) {
+      const index = normalized.indexOf(marker, searchFrom);
+      if (index < 0) break;
+      const statusIndex = index + 1;
+      const candidate = normalized.slice(statusIndex);
+      if (
+        !precedingPhraseIsZeroCount(normalized, index)
+        && (candidate.trim() === status || negativeStatusHasFailureDetail(candidate, status))
+      ) return null;
+      searchFrom = statusIndex + status.length;
+    }
   }
   return value;
 }
