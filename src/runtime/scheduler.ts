@@ -87,6 +87,23 @@ function runtimeDebug(event: string, details: Record<string, unknown>): void {
   console.error(`[chef:runtime] ${event} ${JSON.stringify(details)}`);
 }
 
+function fileUriLocation(value: unknown): string | undefined {
+  if (typeof value !== "string" || !/^file:/i.test(value)) return undefined;
+  try {
+    const url = new URL(value);
+    let pathname = decodeURIComponent(url.pathname);
+    const hasRemoteAuthority = Boolean(url.host && url.hostname.toLowerCase() !== "localhost");
+    if (!hasRemoteAuthority && /^\/[A-Za-z]:\//.test(pathname)) pathname = pathname.slice(1);
+    if (hasRemoteAuthority) {
+      if (!pathname || pathname === "/") return undefined;
+      return `//${url.host}${pathname.startsWith("/") ? pathname : `/${pathname}`}`;
+    }
+    return pathname || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function artifactCompletionSummary(
   inner: Record<string, unknown>,
   artifactType: Artifact["type"],
@@ -99,7 +116,7 @@ function artifactCompletionSummary(
     }
     return undefined;
   };
-  const location = firstText(["resultLocation", "path", "location"]);
+  const location = firstText(["resultLocation", "path", "location"]) ?? fileUriLocation(inner.uri);
   const runCommand = firstText(["run", "runCommand", "command"]);
   return [
     `artifact: ${(inner.name as string) || artifactType}`,
