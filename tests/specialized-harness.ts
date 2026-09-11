@@ -195,6 +195,16 @@ try {
   await chef.start();
   const result = await chef.sendUserMessage("run through the specialized adapter");
   assert.equal(result.ok, true, result.report);
+  assert.match(
+    result.report,
+    /result: generated\/todo-app/,
+    "the final assistant completion report surfaces the durable result location",
+  );
+  assert.match(
+    result.report,
+    /run: npm run dev/,
+    "the final assistant completion report surfaces the durable run command",
+  );
   const snapshot = await chef.inspectState();
   assert.ok(
     snapshot.sessions.some((session) => session.harnessId === "test-cli" && session.status === "completed"),
