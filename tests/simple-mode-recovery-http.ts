@@ -139,6 +139,19 @@ repo.insertTask({
 repo.updateMission("orphaned-mission", { status: "failed" });
 
 repo.insertTask({
+  id: "missing-mission-task",
+  workspaceId: "workspace-a",
+  title: "Do not dispatch orphaned Mission work",
+  description: "failed Task still points at a Mission record that no longer exists",
+  status: "failed",
+  missionId: "missing-mission",
+  dependencies: [],
+  contextRefs: [],
+  retryCount: 0,
+  error: "previous Mission attempt failed",
+});
+
+repo.insertTask({
   id: "standalone-failed-task",
   workspaceId: "workspace-a",
   title: "Retry standalone work",
@@ -304,6 +317,17 @@ try {
     retryCalls,
     ["failed-mission-task", "failed-mission-task", "partial-retry-task"],
     "broken Mission lineage must not dispatch hidden retry work underneath an error response",
+  );
+
+  const missingMission = await post("/api/nodes/missing-mission-task/retry");
+  assert.equal(missingMission.status, 409);
+  assert.match(missingMission.json.error ?? "", /complete recovery path/i);
+  assert.match(missingMission.json.error ?? "", /Start it as new work/i);
+  assert.equal(repo.getTask("missing-mission-task")?.status, "failed", "a Task that claims a missing Mission owner must remain failed instead of becoming hidden standalone work");
+  assert.deepEqual(
+    retryCalls,
+    ["failed-mission-task", "failed-mission-task", "partial-retry-task"],
+    "a missing Mission owner must be rejected before retry dispatch",
   );
 
   const success = await post("/api/nodes/standalone-failed-task/retry");
