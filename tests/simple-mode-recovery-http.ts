@@ -67,6 +67,52 @@ createTerminalMission({
   taskError: "worker failed before cancellation",
 });
 
+repo.insertMission({
+  id: "partial-mission",
+  workspaceId: "workspace-a",
+  goal: "Build a multi-step todo app",
+  status: "planning",
+  taskIds: [],
+});
+repo.insertPlan({
+  id: "partial-plan",
+  workspaceId: "workspace-a",
+  goal: "Build a multi-step todo app",
+  missionId: "partial-mission",
+  status: "failed",
+  tasks: [],
+  taskIds: ["partial-retry-task", "partial-pending-task"],
+});
+repo.updateMission("partial-mission", {
+  status: "active",
+  planId: "partial-plan",
+  taskIds: ["partial-retry-task", "partial-pending-task"],
+});
+repo.insertTask({
+  id: "partial-retry-task",
+  workspaceId: "workspace-a",
+  title: "Recover first step",
+  description: "retryable failed step",
+  status: "failed",
+  missionId: "partial-mission",
+  dependencies: [],
+  contextRefs: [],
+  retryCount: 0,
+  error: "first step failed",
+});
+repo.insertTask({
+  id: "partial-pending-task",
+  workspaceId: "workspace-a",
+  title: "Unfinished dependent step",
+  description: "the original plan dispatcher has already stopped",
+  status: "pending",
+  missionId: "partial-mission",
+  dependencies: ["partial-retry-task"],
+  contextRefs: [],
+  retryCount: 0,
+});
+repo.updateMission("partial-mission", { status: "failed" });
+
 repo.insertTask({
   id: "standalone-failed-task",
   workspaceId: "workspace-a",
@@ -208,11 +254,30 @@ try {
     "Mission recovery must expose working, repeated failure, and verifying/completed transitions in order",
   );
 
+  const partialRetry = await post("/api/nodes/partial-retry-task/retry");
+  assert.equal(partialRetry.status, 200);
+  assert.equal(partialRetry.json.data?.status, "running");
+  assert.equal(repo.getMission("partial-mission")?.status, "active");
+  assert.equal(repo.getPlan("partial-plan")?.status, "executing");
+  repo.updateTask("partial-retry-task", { status: "completed", resultSummary: "first step recovered" });
+  emitTaskTerminal("partial-retry-task", "task.completed");
+  assert.equal(
+    repo.getMission("partial-mission")?.status,
+    "failed",
+    "a same-task retry must not leave a multi-step Mission permanently active when other plan work never restarted",
+  );
+  assert.equal(repo.getPlan("partial-plan")?.status, "failed");
+  assert.equal(repo.getTask("partial-pending-task")?.status, "pending", "recovery must not pretend the stopped plan dispatcher ran unfinished work");
+
   const success = await post("/api/nodes/standalone-failed-task/retry");
   assert.equal(success.status, 200);
   assert.equal(success.json.ok, true);
   assert.equal(success.json.data?.status, "running");
-  assert.deepEqual(retryCalls, ["failed-mission-task", "failed-mission-task", "standalone-failed-task"], "ordinary non-Mission failed work must remain retryable");
+  assert.deepEqual(
+    retryCalls,
+    ["failed-mission-task", "failed-mission-task", "partial-retry-task", "standalone-failed-task"],
+    "ordinary non-Mission failed work must remain retryable",
+  );
 
   const terminalMission = await post("/api/nodes/terminal-mission-task/retry");
   assert.equal(terminalMission.status, 409);
@@ -241,7 +306,7 @@ try {
   assert.equal(fallbackResult.status, 418);
   assert.equal(fallbackResult.json.fallback, true);
 
-  console.log("simple-mode-recovery-http: ok — bounded Retry reconnects Task, Mission, and Plan through repeated failure to verifying/completed");
+  console.log("simple-mode-recovery-http: ok — bounded Retry reconnects Task, Mission, and Plan without leaving partial Mission work falsely active");
 } finally {
   if (server.listening) await new Promise<void>((resolve) => server.close(() => resolve()));
   repo.close();
