@@ -185,7 +185,7 @@ chef.specializedHarnesses.register("test-cli", "Test CLI", () => new Specialized
   name: "Test CLI",
   binary: process.execPath,
   flags: [artifactWorker],
-  taskArgs: () => [artifactWorker],
+  taskArgs: (prompt) => [artifactWorker, prompt],
   workspaceId: chef.workspaceId,
   cwd: runtimeRoot,
   pollIntervalMs: 10,
@@ -195,6 +195,35 @@ try {
   await chef.start();
   const result = await chef.sendUserMessage("run through the specialized adapter");
   assert.equal(result.ok, true, result.report);
+  assert.match(
+    result.report,
+    /result: C:\/Work\/Chef Projects\/todo-app/,
+    "the final assistant completion report falls back to the durable file artifact URI when explicit location metadata is absent",
+  );
+  assert.match(
+    result.report,
+    /run: npm run dev/,
+    "the final assistant completion report surfaces the durable run command",
+  );
+
+  const explicitResult = await chef.sendUserMessage("run through the specialized adapter with explicit result location");
+  assert.equal(explicitResult.ok, true, explicitResult.report);
+  assert.match(
+    explicitResult.report,
+    /result: D:\/Chef Output\/todo-explicit/,
+    "the final assistant completion report decodes an explicit file result location consistently with Simple Mode",
+  );
+  assert.doesNotMatch(
+    explicitResult.report,
+    /file:\/\/\/D:\/Chef%20Output\/todo-explicit/,
+    "the final assistant completion report does not expose the raw encoded file URI",
+  );
+  assert.match(
+    explicitResult.report,
+    /run: npm run dev/,
+    "an explicit result location preserves the durable run command",
+  );
+
   const snapshot = await chef.inspectState();
   assert.ok(
     snapshot.sessions.some((session) => session.harnessId === "test-cli" && session.status === "completed"),

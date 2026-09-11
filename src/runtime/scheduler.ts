@@ -87,6 +87,47 @@ function runtimeDebug(event: string, details: Record<string, unknown>): void {
   console.error(`[chef:runtime] ${event} ${JSON.stringify(details)}`);
 }
 
+function fileUriLocation(value: unknown): string | undefined {
+  if (typeof value !== "string" || !/^file:/i.test(value)) return undefined;
+  try {
+    const url = new URL(value);
+    let pathname = decodeURIComponent(url.pathname);
+    const hasRemoteAuthority = Boolean(url.host && url.hostname.toLowerCase() !== "localhost");
+    if (!hasRemoteAuthority && /^\/[A-Za-z]:\//.test(pathname)) pathname = pathname.slice(1);
+    if (hasRemoteAuthority) {
+      if (!pathname || pathname === "/") return undefined;
+      return `//${url.host}${pathname.startsWith("/") ? pathname : `/${pathname}`}`;
+    }
+    return pathname || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function artifactCompletionSummary(
+  inner: Record<string, unknown>,
+  artifactType: Artifact["type"],
+): string {
+  const metadata = (inner.metadata as Record<string, unknown>) ?? {};
+  const firstText = (keys: readonly string[]): string | undefined => {
+    for (const key of keys) {
+      const value = metadata[key];
+      if (typeof value === "string" && value.trim()) return value.trim();
+    }
+    return undefined;
+  };
+  const explicitLocation = firstText(["resultLocation", "path", "location"]);
+  const location = explicitLocation === undefined
+    ? fileUriLocation(inner.uri)
+    : fileUriLocation(explicitLocation) ?? explicitLocation;
+  const runCommand = firstText(["run", "runCommand", "command"]);
+  return [
+    `artifact: ${(inner.name as string) || artifactType}`,
+    location ? `result: ${location}` : undefined,
+    runCommand ? `run: ${runCommand}` : undefined,
+  ].filter((value): value is string => value !== undefined).join(" | ");
+}
+
 function missionTaskPrompt(task: Task): string {
   return [
     "You are a Chef worker executing one bounded Mission task in the current project.",
@@ -492,6 +533,7 @@ export class Scheduler {
     this.#repo.transaction(() => {
       const artifactId = (inner.id as string) || envelope.id;
       const artifactType = (inner.type as Artifact["type"]) || "result";
+      const resultSummary = artifactCompletionSummary(inner, artifactType);
 
       this.#repo.insertArtifact({
         workspaceId,
@@ -509,11 +551,11 @@ export class Scheduler {
       if (task.status !== "running") return;
       TaskMachine.validateTransition(task.status, "completed");
       const { event: doneEvt } = TaskMachine.transition(task, "completed", {
-        resultSummary: `artifact: ${(inner.name as string) || artifactType}`,
+        resultSummary,
       });
       this.#repo.updateTask(taskId, {
         status: "completed",
-        resultSummary: `artifact: ${(inner.name as string) || artifactType}`,
+        resultSummary,
       });
       this.#appendEvent(workspaceId, doneEvt);
     });
