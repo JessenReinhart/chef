@@ -101,6 +101,46 @@ assert.equal(
   "output from another Mission Task must not clear the approval recovery boundary",
 );
 
+const rejectedTaskApproval: UiRuntimeEvent[] = [
+  runtimeEvent({ id: "active-before-rejection", seq: 1, timestamp: 1_000, type: "mission.status", sourceType: "mission", sourceId: missionId, payload: { status: "active" } }),
+  runtimeEvent({ id: "running-before-rejection", seq: 2, timestamp: 2_000, type: "task.running", taskId }),
+  runtimeEvent({ id: "approval-requested-before-rejection", seq: 3, timestamp: 3_000, type: "approval.requested", sourceType: "approval", sourceId: approvalId, missionId, taskId }),
+  runtimeEvent({ id: "approval-rejected", seq: 4, timestamp: 4_000, type: "approval.resolved", sourceType: "approval", sourceId: approvalId, missionId, taskId, payload: { decision: "rejected" } }),
+];
+assert.equal(
+  deriveMissionHeartbeat(rejectedTaskApproval, missionId, [taskId], 20_000, 10_000),
+  null,
+  "a denied task approval alone must not pretend Chef has already resumed",
+);
+const replanningAfterRejection = runtimeEvent({
+  id: "planning-after-rejection",
+  seq: 5,
+  timestamp: 5_000,
+  type: "mission.status",
+  sourceType: "mission",
+  sourceId: missionId,
+  payload: { status: "planning" },
+});
+assert.equal(
+  deriveMissionHeartbeat([...rejectedTaskApproval, replanningAfterRejection], missionId, [taskId], 15_000, 10_000)?.text,
+  "Chef is still planning. Last runtime activity was 10 seconds ago.",
+  "durable Mission replanning after a denied task approval must restore meaningful long-running feedback",
+);
+const activeAfterRejection = runtimeEvent({
+  id: "active-after-rejection",
+  seq: 5,
+  timestamp: 5_000,
+  type: "mission.status",
+  sourceType: "mission",
+  sourceId: missionId,
+  payload: { status: "active" },
+});
+assert.equal(
+  deriveMissionHeartbeat([...rejectedTaskApproval, activeAfterRejection], missionId, [taskId], 20_000, 10_000),
+  null,
+  "a generic active projection after denial must not weaken the task ownership boundary",
+);
+
 const missionApprovalId = "approval-mission";
 const missionLevelApproval: UiRuntimeEvent[] = [
   runtimeEvent({ id: "mission-active-before", seq: 1, timestamp: 1_000, type: "mission.status", sourceType: "mission", sourceId: missionId, payload: { status: "active" } }),
@@ -115,4 +155,4 @@ assert.equal(
   "Mission-level approvals without a Task id may use a later active Mission status as their recovery signal",
 );
 
-console.log("mission-approval-heartbeat-resume: ok — task approval recovery requires real same-Task execution while Mission-level approvals can resume from Mission status");
+console.log("mission-approval-heartbeat-resume: ok — accepted approvals require same-Task execution while denied approvals may recover through durable replanning");
