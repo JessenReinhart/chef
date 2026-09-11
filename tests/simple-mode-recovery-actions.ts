@@ -11,7 +11,7 @@ assert.equal(canRetryMissionTask({
   retryCount: 1,
   blockedByApproval: false,
   readOnly: false,
-}), true, "failed Mission work below the retry budget must remain retryable");
+}), false, "failed Mission history must continue as new work instead of advertising an orphan Task retry");
 
 assert.equal(canRetryMissionTask({
   missionStatus: "failed",
@@ -34,7 +34,7 @@ assert.equal(canRetryMissionTask({
   taskStatus: "failed",
   blockedByApproval: false,
   readOnly: false,
-}), true, "missing retry metadata should remain backward-compatible with retryable projected work");
+}), false, "failed Mission history stays final even when old projections lack retry metadata");
 
 assert.equal(canRetryMissionTask({
   missionStatus: "blocked",
@@ -219,4 +219,4 @@ assert.ok(
 );
 repo.close();
 
-console.log("simple-mode-recovery-actions: ok — Retry follows Mission lifecycle, per-Task ownership, retry budget, approvals, read-only state, and clears stale Task failure state durably");
+console.log("simple-mode-recovery-actions: ok — Retry respects terminal Mission history, per-Task ownership, retry budget, approvals, read-only state, and clears stale standalone Task failure state durably");
