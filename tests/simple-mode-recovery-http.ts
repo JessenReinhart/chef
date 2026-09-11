@@ -138,18 +138,27 @@ repo.insertTask({
 });
 repo.updateMission("orphaned-mission", { status: "failed" });
 
+repo.insertMission({
+  id: "foreign-mission",
+  workspaceId: "workspace-b",
+  goal: "Other workspace Mission",
+  status: "planning",
+  taskIds: [],
+});
+repo.updateMission("foreign-mission", { status: "active" });
 repo.insertTask({
-  id: "missing-mission-task",
+  id: "foreign-mission-task",
   workspaceId: "workspace-a",
-  title: "Do not dispatch orphaned Mission work",
-  description: "failed Task still points at a Mission record that no longer exists",
+  title: "Do not cross workspace ownership",
+  description: "failed Task points at a Mission owned by another workspace",
   status: "failed",
-  missionId: "missing-mission",
+  missionId: "foreign-mission",
   dependencies: [],
   contextRefs: [],
   retryCount: 0,
   error: "previous Mission attempt failed",
 });
+repo.updateMission("foreign-mission", { status: "failed" });
 
 repo.insertTask({
   id: "standalone-failed-task",
@@ -319,15 +328,15 @@ try {
     "broken Mission lineage must not dispatch hidden retry work underneath an error response",
   );
 
-  const missingMission = await post("/api/nodes/missing-mission-task/retry");
-  assert.equal(missingMission.status, 409);
-  assert.match(missingMission.json.error ?? "", /complete recovery path/i);
-  assert.match(missingMission.json.error ?? "", /Start it as new work/i);
-  assert.equal(repo.getTask("missing-mission-task")?.status, "failed", "a Task that claims a missing Mission owner must remain failed instead of becoming hidden standalone work");
+  const foreignMission = await post("/api/nodes/foreign-mission-task/retry");
+  assert.equal(foreignMission.status, 409);
+  assert.match(foreignMission.json.error ?? "", /complete recovery path/i);
+  assert.match(foreignMission.json.error ?? "", /Start it as new work/i);
+  assert.equal(repo.getTask("foreign-mission-task")?.status, "failed", "cross-workspace Mission ownership must remain failed instead of becoming hidden standalone work");
   assert.deepEqual(
     retryCalls,
     ["failed-mission-task", "failed-mission-task", "partial-retry-task"],
-    "a missing Mission owner must be rejected before retry dispatch",
+    "cross-workspace Mission ownership must be rejected before retry dispatch",
   );
 
   const success = await post("/api/nodes/standalone-failed-task/retry");
