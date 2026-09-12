@@ -24,7 +24,7 @@ function seedMission(
     planId: string;
     taskId: string;
     sessionId?: string;
-    missionStatus: "active" | "completed";
+    missionStatus: "active" | "verifying" | "completed";
     planStatus: "executing" | "completed";
     taskStatus?: "running" | "completed";
   },
@@ -75,7 +75,9 @@ function seedMission(
       cwd: dir,
     });
   }
-  if (input.missionStatus === "completed") {
+  if (input.missionStatus === "verifying") {
+    repo.updateMission(input.missionId, { status: "verifying" });
+  } else if (input.missionStatus === "completed") {
     repo.updateMission(input.missionId, { status: "completed" });
   }
 }
@@ -91,6 +93,15 @@ try {
     sessionId: "orphan-session",
     missionStatus: "active",
     planStatus: "executing",
+  });
+
+  seedMission(seed, {
+    missionId: "verifying-mission",
+    planId: "verifying-plan",
+    taskId: "verified-task",
+    missionStatus: "verifying",
+    planStatus: "executing",
+    taskStatus: "completed",
   });
 
   seedMission(seed, {
@@ -166,6 +177,22 @@ try {
   );
 
   assert.equal(
+    reopened.getMission("verifying-mission")?.status,
+    "failed",
+    "verification cannot remain live after the in-memory verifier disappears on restart",
+  );
+  assert.equal(
+    reopened.getPlan("verifying-plan")?.status,
+    "failed",
+    "an interrupted verification must not leave its Plan looking live",
+  );
+  assert.equal(
+    reopened.getTask("verified-task")?.status,
+    "completed",
+    "recovering interrupted verification must preserve the worker result that already completed",
+  );
+
+  assert.equal(
     reopened.getMission("terminal-mission")?.status,
     "completed",
     "startup recovery must never rewrite terminal Mission history even if inconsistent orphan task residue exists",
@@ -174,22 +201,39 @@ try {
   assert.equal(
     reopened.getMission("unrelated-mission")?.status,
     "active",
-    "a Mission without an orphaned running Task must remain untouched",
+    "an active Mission without orphaned work or interrupted verification must remain untouched",
   );
   assert.equal(reopened.getPlan("unrelated-plan")?.status, "executing");
 
   const startupMissionEvents = reopened.getWorkspaceSnapshot(workspaceId).events.filter(
     (event) => event.type === "mission.status" && event.source.type === "runtime" && event.source.id === "startup-recovery",
   );
-  assert.equal(startupMissionEvents.length, 1, "startup recovery must announce the failed Mission exactly once");
-  assert.equal(startupMissionEvents[0]?.taskId, "orphan-task");
-  assert.deepEqual(startupMissionEvents[0]?.payload, {
+  assert.equal(startupMissionEvents.length, 2, "startup recovery must announce each interrupted Mission exactly once");
+
+  const workerRecovery = startupMissionEvents.find(
+    (event) => (event.payload as { missionId?: string }).missionId === "orphan-mission",
+  );
+  assert.ok(workerRecovery);
+  assert.equal(workerRecovery.taskId, "orphan-task");
+  assert.deepEqual(workerRecovery.payload, {
+    missionId: "orphan-mission",
     status: "failed",
     reason: "worker interrupted before restart",
   });
 
+  const verificationRecovery = startupMissionEvents.find(
+    (event) => (event.payload as { missionId?: string }).missionId === "verifying-mission",
+  );
+  assert.ok(verificationRecovery);
+  assert.equal(verificationRecovery.taskId, undefined);
+  assert.deepEqual(verificationRecovery.payload, {
+    missionId: "verifying-mission",
+    status: "failed",
+    reason: "verification interrupted before restart",
+  });
+
   reopened.close();
-  console.log("startup-recovery: ok — orphaned workers make their in-flight Mission/Plan truthfully failed without rewriting terminal or unrelated history");
+  console.log("startup-recovery: ok — restart makes orphaned workers and interrupted verification truthful without rewriting terminal or unrelated history");
 } finally {
   await rm(dir, { recursive: true, force: true });
 }
