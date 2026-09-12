@@ -1,8 +1,13 @@
-import type { WorkspaceId } from "../core/types.ts";
+import type { MissionStatus, PlanStatus, WorkspaceId } from "../core/types.ts";
 import type { Repository } from "../persistence/database.ts";
 
-const TERMINAL_MISSION_STATUSES = new Set(["completed", "cancelled", "failed"] as const);
-const TERMINAL_PLAN_STATUSES = new Set(["completed", "failed"] as const);
+function terminalMission(status: MissionStatus): boolean {
+  return status === "completed" || status === "cancelled" || status === "failed";
+}
+
+function terminalPlan(status: PlanStatus): boolean {
+  return status === "completed" || status === "failed";
+}
 
 /**
  * A fresh process cannot still own PTYs persisted as running by the previous
@@ -18,11 +23,11 @@ export function reconcileInterruptedMissions(repository: Repository, workspaceId
       if (task.status !== "running" || !task.missionId || recoveredMissionIds.has(task.missionId)) continue;
 
       const mission = repository.getMission(task.missionId);
-      if (!mission || mission.workspaceId !== workspaceId || TERMINAL_MISSION_STATUSES.has(mission.status as never)) continue;
+      if (!mission || mission.workspaceId !== workspaceId || terminalMission(mission.status)) continue;
 
       if (mission.planId) {
         const plan = repository.getPlan(mission.planId);
-        if (plan && plan.workspaceId === workspaceId && !TERMINAL_PLAN_STATUSES.has(plan.status as never)) {
+        if (plan && plan.workspaceId === workspaceId && !terminalPlan(plan.status)) {
           repository.updatePlanStatus(plan.id, "failed");
         }
       }
