@@ -42,16 +42,26 @@ export function reconcileInterruptedMissions(repository: Repository, workspaceId
     });
   }
 
-  // There is a narrow handoff after all worker Tasks have completed but before
-  // the in-memory Mission execution advances to verification. If Chef exits in
-  // that window, no live worker or orchestration promise remains to move an
-  // `active` Mission forward after restart. Preserve the completed results, but
-  // recover the owning Mission/Plan instead of showing stale working progress.
+  // Worker completion/failure can be durable before the in-memory Mission
+  // execution consumes that terminal outcome. A fresh process cannot finish
+  // that handoff, so preserve the Task outcome but recover the owning
+  // Mission/Plan instead of showing stale working progress.
   const tasksById = new Map(snapshot.tasks.map((task) => [task.id, task]));
   for (const mission of snapshot.missions) {
     if (mission.status !== "active" || interruptedMissions.has(mission.id) || mission.taskIds.length === 0) continue;
     const ownedTasks = mission.taskIds.map((taskId) => tasksById.get(taskId));
-    if (ownedTasks.some((task) => task === undefined) || !ownedTasks.every((task) => task?.status === "completed")) continue;
+    if (ownedTasks.some((task) => task === undefined)) continue;
+
+    const failedTask = ownedTasks.find((task) => task?.status === "failed");
+    if (failedTask) {
+      interruptedMissions.set(mission.id, {
+        taskId: failedTask.id,
+        reason: "worker failed before restart handoff",
+      });
+      continue;
+    }
+
+    if (!ownedTasks.every((task) => task?.status === "completed")) continue;
     interruptedMissions.set(mission.id, {
       reason: "worker completed before restart handoff",
     });
