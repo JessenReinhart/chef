@@ -140,9 +140,9 @@ try {
   });
 
   seedMission(seed, {
-    missionId: "resumable-mission",
-    planId: "resumable-plan",
-    taskId: "resumable-task",
+    missionId: "pending-mission",
+    planId: "pending-plan",
+    taskId: "pending-task",
     missionStatus: "active",
     planStatus: "executing",
     taskStatus: "pending",
@@ -263,17 +263,21 @@ try {
   );
   assert.equal(reopened.getPlan("terminal-plan")?.status, "completed");
   assert.equal(
-    reopened.getMission("resumable-mission")?.status,
-    "active",
-    "an active Mission with pending work must remain available for normal dispatch after restart",
+    reopened.getMission("pending-mission")?.status,
+    "failed",
+    "pending Tasks cannot make an active Mission resumable after its in-memory Orchestrator execution disappears",
   );
-  assert.equal(reopened.getPlan("resumable-plan")?.status, "executing");
-  assert.equal(reopened.getTask("resumable-task")?.status, "pending");
+  assert.equal(reopened.getPlan("pending-plan")?.status, "failed");
+  assert.equal(
+    reopened.getTask("pending-task")?.status,
+    "pending",
+    "recovering the abandoned Mission must preserve pending work for an explicit retry/recovery action",
+  );
 
   const startupMissionEvents = reopened.getWorkspaceSnapshot(workspaceId).events.filter(
     (event) => event.type === "mission.status" && event.source.type === "runtime" && event.source.id === "startup-recovery",
   );
-  assert.equal(startupMissionEvents.length, 5, "startup recovery must announce each interrupted Mission exactly once");
+  assert.equal(startupMissionEvents.length, 6, "startup recovery must announce each interrupted Mission exactly once");
 
   const planningRecovery = startupMissionEvents.find(
     (event) => (event.payload as { missionId?: string }).missionId === "planning-mission",
@@ -319,6 +323,17 @@ try {
     reason: "worker failed before restart handoff",
   });
 
+  const pendingRecovery = startupMissionEvents.find(
+    (event) => (event.payload as { missionId?: string }).missionId === "pending-mission",
+  );
+  assert.ok(pendingRecovery);
+  assert.equal(pendingRecovery.taskId, undefined);
+  assert.deepEqual(pendingRecovery.payload, {
+    missionId: "pending-mission",
+    status: "failed",
+    reason: "mission execution interrupted before restart",
+  });
+
   const verificationRecovery = startupMissionEvents.find(
     (event) => (event.payload as { missionId?: string }).missionId === "verifying-mission",
   );
@@ -331,7 +346,7 @@ try {
   });
 
   reopened.close();
-  console.log("startup-recovery: ok — restart makes interrupted planning, live workers, terminal worker handoffs, and verification truthful without rewriting terminal or resumable history");
+  console.log("startup-recovery: ok — restart makes interrupted planning, active execution, live workers, terminal worker handoffs, and verification truthful without rewriting terminal history");
 } finally {
   await rm(dir, { recursive: true, force: true });
 }
