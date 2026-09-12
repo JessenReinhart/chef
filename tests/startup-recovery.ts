@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 
 import { Repository } from "../src/persistence/database.ts";
 import { Scheduler, type HarnessRegistry } from "../src/runtime/scheduler.ts";
+import { reconcileInterruptedMissions } from "../src/runtime/startup-recovery.ts";
 
 const dir = await mkdtemp(join(tmpdir(), "chef-startup-recovery-"));
 const dbPath = join(dir, "chef.sqlite");
@@ -135,6 +136,7 @@ try {
   seed.close();
 
   const reopened = new Repository(dbPath);
+  reconcileInterruptedMissions(reopened, workspaceId);
   const scheduler = new Scheduler(reopened, emptyRegistry);
   await scheduler.recoverOnStartup(workspaceId);
 
