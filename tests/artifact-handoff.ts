@@ -79,7 +79,7 @@ const directoryDownload = await downloadArtifact("todo-directory", async () => (
 }));
 assert.deepEqual(
   directoryDownload,
-  { ok: false, error: "This result is a folder. Use Show result to open it." },
+  { ok: false, error: "This result is a folder. Use Show location to open it." },
   "directory-backed apps should remain recoverable from the Simple Mode result shelf instead of navigating to a raw 409 response",
 );
 
@@ -133,11 +133,11 @@ const versionOwnedReveal = createSingleFlightArtifactRevealer(async (artifactId)
 const versionOneReveal = versionOwnedReveal("todo-app", firstVersionActionKey);
 const duplicateVersionOneReveal = versionOwnedReveal("todo-app", firstVersionActionKey);
 await Promise.resolve();
-assert.equal(revealCalls, 1, "duplicate Show result actions for the same version should coalesce");
+assert.equal(revealCalls, 1, "duplicate Show location actions for the same version should coalesce");
 assert.equal(versionOneReveal, duplicateVersionOneReveal);
 const versionTwoReveal = versionOwnedReveal("todo-app", secondVersionActionKey);
 await Promise.resolve();
-assert.equal(revealCalls, 2, "a newer artifact version must get its own Show result side effect");
+assert.equal(revealCalls, 2, "a newer artifact version must get its own Show location side effect");
 assert.notEqual(versionOneReveal, versionTwoReveal);
 for (const release of revealReleases) release();
 await Promise.all([versionOneReveal, versionTwoReveal]);
