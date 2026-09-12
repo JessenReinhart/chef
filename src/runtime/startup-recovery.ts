@@ -11,6 +11,7 @@ function terminalPlan(status: PlanStatus): boolean {
 
 type InterruptedMission = {
   taskId?: string;
+  taskIdsToBlock?: string[];
   reason: string;
 };
 
@@ -70,10 +71,14 @@ export function reconcileInterruptedMissions(repository: Repository, workspaceId
   // An active Mission is owned by the in-memory Orchestrator execution, not by
   // the Scheduler alone. Pending Tasks can stay durable for a later retry, but
   // after process restart there is no execution promise left to advance the
-  // Plan or move the Mission through verification/completion.
+  // Plan or move the Mission through verification/completion. Move pending
+  // owned work to `blocked` so the existing Simple Mode Retry contract can
+  // recover it explicitly instead of leaving an unreachable pending Task.
   for (const mission of snapshot.missions) {
     if (mission.status !== "active" || interruptedMissions.has(mission.id)) continue;
+    const pendingTaskIds = mission.taskIds.filter((taskId) => tasksById.get(taskId)?.status === "pending");
     interruptedMissions.set(mission.id, {
+      taskIdsToBlock: pendingTaskIds,
       reason: "mission execution interrupted before restart",
     });
   }
@@ -92,6 +97,23 @@ export function reconcileInterruptedMissions(repository: Repository, workspaceId
     for (const [missionId, interruption] of interruptedMissions) {
       const mission = repository.getMission(missionId);
       if (!mission || mission.workspaceId !== workspaceId || terminalMission(mission.status)) continue;
+
+      for (const taskId of interruption.taskIdsToBlock ?? []) {
+        const task = repository.getTask(taskId);
+        if (!task || task.workspaceId !== workspaceId || task.missionId !== mission.id || task.status !== "pending") continue;
+        repository.updateTaskStatus(task.id, "blocked", "pending");
+        repository.appendEvent({
+          workspaceId,
+          source: { type: "runtime", id: "startup-recovery" },
+          type: "task.blocked",
+          payload: {
+            from: "pending",
+            to: "blocked",
+            reason: "mission execution interrupted before restart",
+          },
+          taskId: task.id,
+        });
+      }
 
       if (mission.planId) {
         const plan = repository.getPlan(mission.planId);
