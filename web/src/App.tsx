@@ -5,6 +5,7 @@ import { ChatPanel } from "./ChatPanel";
 import { MissionPanel } from "./MissionPanel";
 import { api } from "./api";
 import { dismissVisibleAppError, stateRefreshErrorMessage, visibleAppError } from "./appErrorProjection";
+import { canRetryMissionTask } from "./missionRecovery";
 import { NODE_LIBRARY, registerHarnesses, subscribeLibrary } from "./nodeCatalog";
 import { TerminalView } from "./TerminalView";
 import { BrowserSurface } from "./BrowserSurface";
@@ -411,6 +412,14 @@ export function App() {
   const pendingCount = tasks.filter((t) => t.status === "pending").length;
   const latestMission = [...missions].sort((a, b) => b.updatedAt - a.updatedAt)[0];
   const missionStatus = latestMission?.status ?? missionStatusFor(tasks, approvals.length);
+  const selectedMission = selectedTask?.missionId ? missions.find((mission) => mission.id === selectedTask.missionId) : undefined;
+  const selectedCanRetry = selectedTask ? canRetryMissionTask({
+    missionStatus: selectedMission?.status,
+    taskStatus: selectedTask.status,
+    retryCount: selectedTask.retryCount,
+    blockedByApproval: approvals.some((approval) => approval.taskId === selectedTask.id),
+    readOnly: false,
+  }) : false;
   const selectedCanvasNode = selectedTask ? canvasNodes.find((node) => node.taskId === selectedTask.id || node.id === selectedTask.id) : undefined;
   const selectedIsSurface = selectedCanvasNode?.kind === "tool";
   const selectedIsAgent = selectedCanvasNode?.kind === "agent";
@@ -582,7 +591,7 @@ export function App() {
                     {selectedIsSurface ? "Open surface" : "Activate agent"}
                   </button>
                 )}
-                {selectedTask.status === "failed" && (
+                {selectedCanRetry && (
                   <button onClick={handleRetrySelected} className="text-[11px] px-2 py-1 rounded bg-amber-500/15 text-amber-400 hover:bg-amber-500/25">
                     Retry
                   </button>

@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { Repository } from "../src/persistence/database.ts";
 import { Scheduler, type HarnessRegistry } from "../src/runtime/scheduler.ts";
 import { reconcileInterruptedMissions } from "../src/runtime/startup-recovery.ts";
+import { canRetryMissionTask } from "../web/src/missionRecovery.ts";
 
 const dir = await mkdtemp(join(tmpdir(), "chef-startup-recovery-"));
 const dbPath = join(dir, "chef.sqlite");
@@ -140,9 +141,9 @@ try {
   });
 
   seedMission(seed, {
-    missionId: "resumable-mission",
-    planId: "resumable-plan",
-    taskId: "resumable-task",
+    missionId: "pending-mission",
+    planId: "pending-plan",
+    taskId: "pending-task",
     missionStatus: "active",
     planStatus: "executing",
     taskStatus: "pending",
@@ -263,17 +264,39 @@ try {
   );
   assert.equal(reopened.getPlan("terminal-plan")?.status, "completed");
   assert.equal(
-    reopened.getMission("resumable-mission")?.status,
-    "active",
-    "an active Mission with pending work must remain available for normal dispatch after restart",
+    reopened.getMission("pending-mission")?.status,
+    "failed",
+    "pending Tasks cannot make an active Mission resumable after its in-memory Orchestrator execution disappears",
   );
-  assert.equal(reopened.getPlan("resumable-plan")?.status, "executing");
-  assert.equal(reopened.getTask("resumable-task")?.status, "pending");
+  assert.equal(reopened.getPlan("pending-plan")?.status, "failed");
+  assert.equal(
+    reopened.getTask("pending-task")?.status,
+    "blocked",
+    "abandoned pending work must enter the existing retryable recovery state instead of becoming unreachable",
+  );
+  assert.equal(canRetryMissionTask({
+    missionStatus: reopened.getMission("pending-mission")?.status,
+    taskStatus: reopened.getTask("pending-task")!.status,
+    retryCount: reopened.getTask("pending-task")?.retryCount,
+    blockedByApproval: false,
+    readOnly: false,
+  }), true, "Simple Mode must expose Retry for abandoned pending work recovered after restart");
 
-  const startupMissionEvents = reopened.getWorkspaceSnapshot(workspaceId).events.filter(
+  const startupEvents = reopened.getWorkspaceSnapshot(workspaceId).events;
+  const startupMissionEvents = startupEvents.filter(
     (event) => event.type === "mission.status" && event.source.type === "runtime" && event.source.id === "startup-recovery",
   );
-  assert.equal(startupMissionEvents.length, 5, "startup recovery must announce each interrupted Mission exactly once");
+  assert.equal(startupMissionEvents.length, 6, "startup recovery must announce each interrupted Mission exactly once");
+
+  const pendingTaskRecovery = startupEvents.find(
+    (event) => event.type === "task.blocked" && event.taskId === "pending-task" && event.source.id === "startup-recovery",
+  );
+  assert.ok(pendingTaskRecovery, "startup recovery must durably explain why abandoned pending work became retryable");
+  assert.deepEqual(pendingTaskRecovery.payload, {
+    from: "pending",
+    to: "blocked",
+    reason: "mission execution interrupted before restart",
+  });
 
   const planningRecovery = startupMissionEvents.find(
     (event) => (event.payload as { missionId?: string }).missionId === "planning-mission",
@@ -319,6 +342,17 @@ try {
     reason: "worker failed before restart handoff",
   });
 
+  const pendingRecovery = startupMissionEvents.find(
+    (event) => (event.payload as { missionId?: string }).missionId === "pending-mission",
+  );
+  assert.ok(pendingRecovery);
+  assert.equal(pendingRecovery.taskId, undefined);
+  assert.deepEqual(pendingRecovery.payload, {
+    missionId: "pending-mission",
+    status: "failed",
+    reason: "mission execution interrupted before restart",
+  });
+
   const verificationRecovery = startupMissionEvents.find(
     (event) => (event.payload as { missionId?: string }).missionId === "verifying-mission",
   );
@@ -331,7 +365,7 @@ try {
   });
 
   reopened.close();
-  console.log("startup-recovery: ok — restart makes interrupted planning, live workers, terminal worker handoffs, and verification truthful without rewriting terminal or resumable history");
+  console.log("startup-recovery: ok — restart makes interrupted planning, active execution, live workers, terminal worker handoffs, and verification truthful while preserving an explicit Simple Mode recovery path");
 } finally {
   await rm(dir, { recursive: true, force: true });
 }
