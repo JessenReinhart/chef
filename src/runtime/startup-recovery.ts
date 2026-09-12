@@ -15,9 +15,10 @@ type InterruptedMission = {
 };
 
 /**
- * A fresh process cannot still own worker PTYs or in-memory verification from
- * the previous process. Reconcile those higher-level Mission/Plan states before
- * Scheduler startup turns orphaned Tasks/Sessions into durable recovery states.
+ * A fresh process cannot still own in-memory planning/verification or worker
+ * PTYs from the previous process. Reconcile those higher-level Mission/Plan
+ * states before Scheduler startup turns orphaned Tasks/Sessions into durable
+ * recovery states.
  */
 export function reconcileInterruptedMissions(repository: Repository, workspaceId: WorkspaceId): void {
   const snapshot = repository.getWorkspaceSnapshot(workspaceId);
@@ -28,6 +29,16 @@ export function reconcileInterruptedMissions(repository: Repository, workspaceId
     interruptedMissions.set(task.missionId, {
       taskId: task.id,
       reason: "worker interrupted before restart",
+    });
+  }
+
+  // Planning is also process-owned. A Mission persisted as `planning` has no
+  // resumable planner promise after restart, even when no Plan/Task was created
+  // yet, so leaving it untouched would make Simple Mode look busy forever.
+  for (const mission of snapshot.missions) {
+    if (mission.status !== "planning" || interruptedMissions.has(mission.id)) continue;
+    interruptedMissions.set(mission.id, {
+      reason: "planning interrupted before restart",
     });
   }
 
