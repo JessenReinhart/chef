@@ -67,6 +67,7 @@ assert.equal(
 async function assertCanonicalThreadSubmissionAcknowledgesBeforePlanningFinishes(): Promise<void> {
   const projectDir = await mkdtemp(join(tmpdir(), "chef-canonical-ack-"));
   let releasePlanner!: () => void;
+  let acknowledgedMissionId: string | undefined;
   const plannerGate = new Promise<void>((resolve) => { releasePlanner = resolve; });
   const heldPlanner: DecisionProvider = {
     name: "canonical-ack-held-planner",
@@ -139,6 +140,7 @@ async function assertCanonicalThreadSubmissionAcknowledgesBeforePlanningFinishes
     assert.equal(body.ok, true, "canonical Thread submission response must be successful");
     assert.equal(body.data?.accepted, true, "canonical Thread submission must explicitly report accepted work");
     assert.ok(body.data?.missionId, "canonical acknowledgement must retain durable Mission identity");
+    acknowledgedMissionId = body.data.missionId;
     assert.equal(body.data?.threadId, threadBody.data.id, "canonical acknowledgement must retain its originating Thread identity");
 
     const userFacingAcknowledgement = chatSubmissionFallback({
@@ -152,7 +154,7 @@ async function assertCanonicalThreadSubmissionAcknowledgesBeforePlanningFinishes
       "the real canonical Thread 202 response must project to an immediate human-readable Simple Mode acknowledgement",
     );
 
-    const mission = chef.repository.getMission(body.data.missionId!);
+    const mission = chef.repository.getMission(acknowledgedMissionId);
     assert.equal(
       mission?.status,
       "planning",
@@ -161,6 +163,17 @@ async function assertCanonicalThreadSubmissionAcknowledgesBeforePlanningFinishes
     assert.ok(elapsedMs < 1_000, `canonical Simple Mode acknowledgement exceeded its 1s test budget (${elapsedMs}ms)`);
   } finally {
     releasePlanner();
+    if (acknowledgedMissionId) {
+      const deadline = Date.now() + 1_000;
+      while (Date.now() < deadline && chef.repository.getMission(acknowledgedMissionId)?.status === "planning") {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      assert.notEqual(
+        chef.repository.getMission(acknowledgedMissionId)?.status,
+        "planning",
+        "released held planning must settle before the runtime is closed",
+      );
+    }
     await new Promise<void>((resolve) => server.close(() => resolve()));
     await chef.close();
     await rm(projectDir, { recursive: true, force: true });
