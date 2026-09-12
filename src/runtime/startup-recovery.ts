@@ -9,20 +9,41 @@ function terminalPlan(status: PlanStatus): boolean {
   return status === "completed" || status === "failed";
 }
 
+type InterruptedMission = {
+  taskId?: string;
+  reason: string;
+};
+
 /**
- * A fresh process cannot still own PTYs persisted as running by the previous
- * process. Reconcile the higher-level Mission/Plan before Scheduler startup
- * turns those orphaned Tasks/Sessions into their durable recovery states.
+ * A fresh process cannot still own worker PTYs or in-memory verification from
+ * the previous process. Reconcile those higher-level Mission/Plan states before
+ * Scheduler startup turns orphaned Tasks/Sessions into durable recovery states.
  */
 export function reconcileInterruptedMissions(repository: Repository, workspaceId: WorkspaceId): void {
   const snapshot = repository.getWorkspaceSnapshot(workspaceId);
-  const recoveredMissionIds = new Set<string>();
+  const interruptedMissions = new Map<string, InterruptedMission>();
+
+  for (const task of snapshot.tasks) {
+    if (task.status !== "running" || !task.missionId) continue;
+    interruptedMissions.set(task.missionId, {
+      taskId: task.id,
+      reason: "worker interrupted before restart",
+    });
+  }
+
+  // Verification is owned by the in-memory Mission execution after its worker
+  // has already completed. A fresh process cannot resume that promise, so a
+  // persisted `verifying` Mission must not reopen as if verification were live.
+  for (const mission of snapshot.missions) {
+    if (mission.status !== "verifying" || interruptedMissions.has(mission.id)) continue;
+    interruptedMissions.set(mission.id, {
+      reason: "verification interrupted before restart",
+    });
+  }
 
   repository.transaction(() => {
-    for (const task of snapshot.tasks) {
-      if (task.status !== "running" || !task.missionId || recoveredMissionIds.has(task.missionId)) continue;
-
-      const mission = repository.getMission(task.missionId);
+    for (const [missionId, interruption] of interruptedMissions) {
+      const mission = repository.getMission(missionId);
       if (!mission || mission.workspaceId !== workspaceId || terminalMission(mission.status)) continue;
 
       if (mission.planId) {
@@ -43,10 +64,13 @@ export function reconcileInterruptedMissions(repository: Repository, workspaceId
         workspaceId,
         source: { type: "runtime", id: "startup-recovery" },
         type: "mission.status",
-        payload: { status: "failed", reason: "worker interrupted before restart" },
-        taskId: task.id,
+        payload: {
+          missionId: mission.id,
+          status: "failed",
+          reason: interruption.reason,
+        },
+        taskId: interruption.taskId,
       });
-      recoveredMissionIds.add(mission.id);
     }
   });
 }
