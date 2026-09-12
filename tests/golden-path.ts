@@ -41,7 +41,7 @@ const page = () => [
   "const form=document.querySelector('#todo-form');",
   "const input=document.querySelector('#todo-input');",
   "const list=document.querySelector('#todo-list');",
-  "form.addEventListener('submit',(event)=>{event.preventDefault();const text=input.value.trim();if(!text)return;const item=document.createElement('li');item.textContent=text;list.append(item);input.value='';});",
+  "form.addEventListener('submit',async(event)=>{event.preventDefault();const text=input.value.trim();if(!text)return;const response=await fetch('/api/todos',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text})});if(!response.ok)return;const todo=await response.json();const item=document.createElement('li');item.textContent=todo.text;list.append(item);input.value='';});",
   "</script>",
   "</body></html>",
 ].join("");
@@ -52,7 +52,30 @@ const server = createServer((req, res) => {
     res.end(JSON.stringify({ ok: true }));
     return;
   }
-  if (req.url === "/api/todos") {
+  if (req.url === "/api/todos" && req.method === "POST") {
+    let body = "";
+    req.setEncoding("utf8");
+    req.on("data", (chunk) => { body += chunk; });
+    req.on("end", () => {
+      try {
+        const text = JSON.parse(body).text?.trim();
+        if (!text) {
+          res.writeHead(400, { "content-type": "application/json" });
+          res.end(JSON.stringify({ error: "Todo text is required" }));
+          return;
+        }
+        const todo = { text };
+        todos.push(todo);
+        res.writeHead(201, { "content-type": "application/json" });
+        res.end(JSON.stringify(todo));
+      } catch {
+        res.writeHead(400, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: "Invalid JSON" }));
+      }
+    });
+    return;
+  }
+  if (req.url === "/api/todos" && req.method === "GET") {
     res.writeHead(200, { "content-type": "application/json" });
     res.end(JSON.stringify(todos));
     return;
@@ -197,11 +220,32 @@ async function assertGeneratedAppRuns(appPath: string): Promise<void> {
       await new Promise((resolve) => setTimeout(resolve, 25));
     }
     assert.ok(port, `generated todo app did not start; stdout=${stdout} stderr=${stderr}`);
-    const response = await fetch(`http://127.0.0.1:${port}/`);
+    const baseUrl = `http://127.0.0.1:${port}`;
+    const response = await fetch(`${baseUrl}/`);
     assert.equal(response.status, 200, "generated todo app must answer HTTP requests");
     const html = await response.text();
     assert.match(html, /Chef Todo/, "generated app must render its todo UI");
     assert.match(html, /todo-form/, "generated app must expose the todo interaction");
+
+    const createResponse = await fetch(`${baseUrl}/api/todos`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "Verify Chef result" }),
+    });
+    assert.equal(createResponse.status, 201, "generated todo app must accept a new todo");
+    assert.deepEqual(
+      await createResponse.json(),
+      { text: "Verify Chef result" },
+      "generated todo app must return the created todo",
+    );
+
+    const listResponse = await fetch(`${baseUrl}/api/todos`);
+    assert.equal(listResponse.status, 200, "generated todo app must expose current todo state");
+    assert.deepEqual(
+      await listResponse.json(),
+      [{ text: "Verify Chef result" }],
+      "generated todo app must preserve the todo state change through its running app boundary",
+    );
   } finally {
     if (child.exitCode === null) child.kill();
     await Promise.race([
