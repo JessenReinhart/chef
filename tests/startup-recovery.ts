@@ -86,6 +86,14 @@ try {
   const seed = new Repository(dbPath);
   seed.createWorkspace({ id: workspaceId, name: "Startup recovery" });
 
+  seed.insertMission({
+    id: "planning-mission",
+    workspaceId,
+    goal: "Create a simple todo app",
+    status: "planning",
+    taskIds: [],
+  });
+
   seedMission(seed, {
     missionId: "orphan-mission",
     planId: "orphan-plan",
@@ -151,6 +159,12 @@ try {
   const scheduler = new Scheduler(reopened, emptyRegistry);
   await scheduler.recoverOnStartup(workspaceId);
 
+  assert.equal(
+    reopened.getMission("planning-mission")?.status,
+    "failed",
+    "planning cannot remain live after the in-memory planner disappears on restart",
+  );
+
   const sessions = reopened.listSessions(workspaceId);
   assert.equal(
     sessions.find((session) => session.id === "orphan-session")?.status,
@@ -208,7 +222,18 @@ try {
   const startupMissionEvents = reopened.getWorkspaceSnapshot(workspaceId).events.filter(
     (event) => event.type === "mission.status" && event.source.type === "runtime" && event.source.id === "startup-recovery",
   );
-  assert.equal(startupMissionEvents.length, 2, "startup recovery must announce each interrupted Mission exactly once");
+  assert.equal(startupMissionEvents.length, 3, "startup recovery must announce each interrupted Mission exactly once");
+
+  const planningRecovery = startupMissionEvents.find(
+    (event) => (event.payload as { missionId?: string }).missionId === "planning-mission",
+  );
+  assert.ok(planningRecovery);
+  assert.equal(planningRecovery.taskId, undefined);
+  assert.deepEqual(planningRecovery.payload, {
+    missionId: "planning-mission",
+    status: "failed",
+    reason: "planning interrupted before restart",
+  });
 
   const workerRecovery = startupMissionEvents.find(
     (event) => (event.payload as { missionId?: string }).missionId === "orphan-mission",
@@ -233,7 +258,7 @@ try {
   });
 
   reopened.close();
-  console.log("startup-recovery: ok — restart makes orphaned workers and interrupted verification truthful without rewriting terminal or unrelated history");
+  console.log("startup-recovery: ok — restart makes interrupted planning, workers, and verification truthful without rewriting terminal or unrelated history");
 } finally {
   await rm(dir, { recursive: true, force: true });
 }
