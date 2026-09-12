@@ -67,6 +67,17 @@ export function reconcileInterruptedMissions(repository: Repository, workspaceId
     });
   }
 
+  // An active Mission is owned by the in-memory Orchestrator execution, not by
+  // the Scheduler alone. Pending Tasks can stay durable for a later retry, but
+  // after process restart there is no execution promise left to advance the
+  // Plan or move the Mission through verification/completion.
+  for (const mission of snapshot.missions) {
+    if (mission.status !== "active" || interruptedMissions.has(mission.id)) continue;
+    interruptedMissions.set(mission.id, {
+      reason: "mission execution interrupted before restart",
+    });
+  }
+
   // Verification is owned by the in-memory Mission execution after its worker
   // has already completed. A fresh process cannot resume that promise, so a
   // persisted `verifying` Mission must not reopen as if verification were live.
