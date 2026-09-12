@@ -17,6 +17,7 @@ import { createWebUiServer } from "./web-ui-http.ts";
 import { applyOrchestratorProviderEnv } from "./orchestrator-config.ts";
 import { createMissionDecisionProvider } from "../orchestrator/fast-path-decision-provider.ts";
 import { createChef } from "../main.ts";
+import { reconcileInterruptedMissions } from "../runtime/startup-recovery.ts";
 import { mkdirSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
@@ -60,6 +61,10 @@ if (!Number.isInteger(port) || port < 0 || port > 65_535) {
   throw new Error(`CHEF_PORT must be an integer between 0 and 65535 (received ${process.env.CHEF_PORT})`);
 }
 
+// A new process cannot still own worker PTYs recorded as running by the prior
+// process. Reconcile their Mission/Plan truth before Scheduler.startup recovery
+// turns the lower-level Task/Session records into blocked/crashed states.
+reconcileInterruptedMissions(chef.repository, chef.workspaceId);
 await chef.start();
 const baseServer = createHttpServer(chef);
 const immediateChatServer = createImmediateChatServer(chef, baseServer);
