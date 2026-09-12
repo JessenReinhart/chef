@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { GenericTerminalHarness } from "../src/harness/generic.ts";
 import { createChef } from "../src/main.ts";
 import { createRecoveryServer } from "../src/server/recovery-http.ts";
-import { summarizeMissionProgressEvent } from "../web/src/missionProgress.ts";
+import { deriveMissionHeartbeat, summarizeMissionProgressEvent } from "../web/src/missionProgress.ts";
 import type {
   AgentId,
   Decision,
@@ -134,6 +134,32 @@ async function assertLiveWorkerProgress(): Promise<void> {
       projectedProgress.text,
       "A worker started a work step.",
       "live worker progress must become human-readable feedback instead of raw runtime jargon",
+    );
+
+    const runningTask = chef.repository.getTask(runningEvent.taskId);
+    assert.ok(runningTask?.missionId, "canonical slow worker must remain owned by its Mission");
+    const workerOutput = await waitForEvent(
+      liveEvents,
+      (event) => event.taskId === runningEvent.taskId && event.type === "session.data",
+      2_000,
+      "initial worker output",
+    );
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    assert.equal(sendSettled, false, "heartbeat must be observable while the slow canonical worker is still running");
+    const heartbeat = deriveMissionHeartbeat(
+      liveEvents,
+      runningTask.missionId,
+      [runningTask.id],
+      Date.now(),
+      100,
+    );
+    assert.ok(heartbeat, "quiet canonical work must synthesize a Simple Mode heartbeat before completion");
+    assert.equal(heartbeat.eventType, "mission.heartbeat", "quiet-work feedback must use the Mission heartbeat contract");
+    assert.equal(heartbeat.tone, "active", "healthy quiet work must remain visibly active rather than looking stuck");
+    assert.match(heartbeat.text, /Chef is still working/i, "heartbeat must explain in human language that Chef is still working");
+    assert.ok(
+      heartbeat.timestamp >= workerOutput.timestamp,
+      "heartbeat must be newer than the last observed runtime activity it is summarizing",
     );
 
     const result = await sendPromise;
@@ -292,4 +318,4 @@ async function assertFailedWorkerCanRecover(): Promise<void> {
 
 await assertLiveWorkerProgress();
 await assertFailedWorkerCanRecover();
-console.log("golden-path-live-worker-progress: ok — live work and both configured Simple Mode retries stay observable through durable completion");
+console.log("golden-path-live-worker-progress: ok — slow canonical work stays human-readable with a heartbeat, and both configured Simple Mode retries reach durable completion");
