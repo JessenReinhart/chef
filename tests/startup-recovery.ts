@@ -1,11 +1,15 @@
 import { strict as assert } from "node:assert";
+import { createServer } from "node:http";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
+import type { RuntimeEvent } from "../src/core/types.ts";
+import type { ChefRuntime } from "../src/main.ts";
 import { Repository } from "../src/persistence/database.ts";
 import { Scheduler, type HarnessRegistry } from "../src/runtime/scheduler.ts";
 import { reconcileInterruptedMissions } from "../src/runtime/startup-recovery.ts";
+import { createRecoveryServer } from "../src/server/recovery-http.ts";
 import { canRetryMissionTask } from "../web/src/missionRecovery.ts";
 
 const dir = await mkdtemp(join(tmpdir(), "chef-startup-recovery-"));
@@ -364,8 +368,67 @@ try {
     reason: "verification interrupted before restart",
   });
 
+  const listeners = new Set<(event: RuntimeEvent) => void>();
+  const recoveryRuntime = {
+    workspaceId,
+    repository: reopened,
+    async retryTask(taskId: string) {
+      const task = reopened.getTask(taskId);
+      if (!task) throw new Error(`Task ${taskId} not found`);
+      if (task.status !== "blocked") throw new Error(`Expected recovered blocked Task, got ${task.status}`);
+      reopened.updateTask(taskId, {
+        status: "running",
+        retryCount: task.retryCount + 1,
+        error: null as never,
+        resultSummary: null as never,
+      });
+    },
+    subscribeEvents(listener: (event: RuntimeEvent) => void) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  } as unknown as ChefRuntime;
+
+  const fallback = createServer((_req, res) => {
+    res.writeHead(404);
+    res.end("not found");
+  });
+  const recoveryServer = createRecoveryServer(recoveryRuntime, fallback);
+  await new Promise<void>((resolve) => recoveryServer.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = recoveryServer.address();
+    assert.ok(address && typeof address === "object");
+    const retryResponse = await fetch(`http://127.0.0.1:${address.port}/api/nodes/pending-task/retry`, { method: "POST" });
+    assert.equal(retryResponse.status, 200, "restart-recovered work must start through the ordinary recovery HTTP mutation");
+    const retryBody = await retryResponse.json() as { ok?: boolean; data?: { status?: string; retryCount?: number; error?: string } };
+    assert.equal(retryBody.ok, true);
+    assert.equal(retryBody.data?.status, "running");
+    assert.equal(retryBody.data?.retryCount, 1);
+    assert.equal(retryBody.data?.error, undefined, "a genuine restart retry must not retain stale recovery error state");
+    assert.equal(reopened.getMission("pending-mission")?.status, "active", "Retry must reconnect the recovered Mission to visible work");
+    assert.equal(reopened.getPlan("pending-plan")?.status, "executing", "Retry must reconnect the recovered Plan to execution");
+
+    reopened.updateTask("pending-task", { status: "completed", resultSummary: "todo app recovered after restart" });
+    const completedEvent = { taskId: "pending-task", type: "task.completed" } as RuntimeEvent;
+    for (const listener of [...listeners]) listener(completedEvent);
+
+    assert.equal(reopened.getMission("pending-mission")?.status, "completed", "successful retry after restart must complete the same Mission");
+    assert.equal(reopened.getPlan("pending-plan")?.status, "completed", "successful retry after restart must complete the same Plan");
+    const retryMissionStatuses = reopened.getWorkspaceSnapshot(workspaceId).events
+      .filter((event) => event.type === "mission.status" && event.source.type === "runtime" && event.source.id === "recovery")
+      .filter((event) => (event.payload as { missionId?: string }).missionId === "pending-mission")
+      .map((event) => (event.payload as { status?: string }).status);
+    assert.deepEqual(
+      retryMissionStatuses,
+      ["active", "verifying", "completed"],
+      "restart recovery Retry must expose working, verifying, and completed transitions in order",
+    );
+  } finally {
+    await new Promise<void>((resolve) => recoveryServer.close(() => resolve()));
+  }
+
   reopened.close();
-  console.log("startup-recovery: ok — restart makes interrupted planning, active execution, live workers, terminal worker handoffs, and verification truthful while preserving an explicit Simple Mode recovery path");
+  console.log("startup-recovery: ok — restart makes interrupted work truthful and recovered pending work resumes through the ordinary Simple Mode Retry lifecycle");
 } finally {
   await rm(dir, { recursive: true, force: true });
 }
