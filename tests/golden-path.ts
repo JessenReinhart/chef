@@ -179,7 +179,7 @@ const envelope = {
     uri: pathToFileURL(appPath).href,
     metadata: {
       content: "Created runnable todo app at " + appPath,
-      run: process.execPath + " " + appPath,
+      run: '"' + process.execPath + '" "' + appPath + '"',
       verifiedBy: "golden-path"
     }
   },
@@ -194,10 +194,11 @@ console.log("todo-builder: created " + appPath);
   return workerScript;
 }
 
-async function assertGeneratedAppRuns(appPath: string): Promise<void> {
-  const child = spawn(process.execPath, [appPath], {
+async function assertGeneratedAppRuns(runCommand: string, appPath: string): Promise<void> {
+  const child = spawn(runCommand, {
     cwd: dirname(appPath),
     env: { ...process.env, PORT: "0" },
+    shell: true,
     stdio: ["ignore", "pipe", "pipe"],
   });
   let stdout = "";
@@ -219,7 +220,7 @@ async function assertGeneratedAppRuns(appPath: string): Promise<void> {
       if (child.exitCode !== null) break;
       await new Promise((resolve) => setTimeout(resolve, 25));
     }
-    assert.ok(port, `generated todo app did not start; stdout=${stdout} stderr=${stderr}`);
+    assert.ok(port, `generated todo app did not start from the published run command; command=${runCommand} stdout=${stdout} stderr=${stderr}`);
     const baseUrl = `http://127.0.0.1:${port}`;
     const response = await fetch(`${baseUrl}/`);
     assert.equal(response.status, 200, "generated todo app must answer HTTP requests");
@@ -260,7 +261,7 @@ async function assertCanonicalResultReveal(
   artifact: LivingArtifact,
   appPath: string,
 ): Promise<void> {
-  assert.equal(canRevealArtifact(artifact), true, "canonical todo result must advertise Show result in Simple Mode");
+  assert.equal(canRevealArtifact(artifact), true, "canonical todo result must advertise Show location in Simple Mode");
   const expectedPath = await realpath(appPath);
   const revealed: Array<{ path: string; isDirectory: boolean }> = [];
   const base = createHttpServer((_req, res) => {
@@ -281,11 +282,11 @@ async function assertCanonicalResultReveal(
         "x-chef-expected-artifact-version": String(artifact.version),
       },
     });
-    assert.equal(response.status, 200, "Show result must succeed for the actual canonical todo artifact");
+    assert.equal(response.status, 200, "Show location must succeed for the actual canonical todo artifact");
     const body = await response.json() as { ok?: boolean; data?: { location?: string } };
     assert.equal(body.ok, true, "canonical reveal must report success");
     assert.equal(body.data?.location, expectedPath, "canonical reveal must resolve the generated app inside the selected project");
-    assert.deepEqual(revealed, [{ path: expectedPath, isDirectory: false }], "Show result must reveal the exact generated todo app once");
+    assert.deepEqual(revealed, [{ path: expectedPath, isDirectory: false }], "Show location must reveal the exact generated todo app once");
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
@@ -449,7 +450,7 @@ function resultHandoff(artifact: LivingArtifact, appPath: string): ReturnType<ty
   const handoff = artifactHandoff(artifact);
   assert.equal(handoff.summary, `Created runnable todo app at ${appPath}`, "Simple Mode handoff must explain what changed");
   assert.equal(handoff.location, appPath.replace(/\\/g, "/"), "Simple Mode handoff must expose the generated result location");
-  assert.equal(handoff.runCommand, `${process.execPath} ${appPath}`, "Simple Mode handoff must explain how to run the generated result");
+  assert.equal(handoff.runCommand, `"${process.execPath}" "${appPath}"`, "Simple Mode handoff must explain how to run the generated result with a shell-safe command");
   assert.equal(handoff.verification, "Verified by golden-path", "Simple Mode handoff must expose the worker-supplied verification evidence");
   return handoff;
 }
@@ -457,11 +458,13 @@ function resultHandoff(artifact: LivingArtifact, appPath: string): ReturnType<ty
 /**
  * P0 golden path: the permanent boring acceptance task traverses the real
  * project selection -> Thread HTTP -> Mission -> Plan -> Task -> PTY lifecycle,
- * produces a discoverable result in the selected project, runs successfully,
- * and survives close/reopen.
+ * produces a discoverable result in the selected project, runs successfully
+ * through the exact published handoff command, and survives close/reopen.
  */
 async function main(): Promise<void> {
-  const projectDir = await mkdtemp(join(tmpdir(), "chef-golden-project-"));
+  // Keep a space in the project path so Windows/Linux acceptance catches an
+  // unquoted run command that would fail when a user's real project has spaces.
+  const projectDir = await mkdtemp(join(tmpdir(), "chef golden project-"));
   const dbPath = join(projectDir, "chef.sqlite");
   const appPath = join(projectDir, TODO_APP);
   let journeyServer: ReturnType<typeof createProjectServer> | null = null;
@@ -572,7 +575,8 @@ async function main(): Promise<void> {
 
     const generatedSource = await readFile(appPath, "utf8");
     assert.equal(generatedSource, TODO_APP_SOURCE, "todo app must be written inside the selected project");
-    await assertGeneratedAppRuns(appPath);
+    assert.ok(handoff.runCommand, "canonical result must publish the run command shown to the user");
+    await assertGeneratedAppRuns(handoff.runCommand, appPath);
 
     const messagesBeforeClose = chef.repository.listMessages(workspaceId);
     assert.ok(messagesBeforeClose.length > 0, "structured agent/message history must be persisted");
