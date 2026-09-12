@@ -90,6 +90,7 @@ export interface UiTask {
   description: string;
   status: NodeStatus;
   assignedTo?: string;
+  missionId?: string;
   workflowNodeId?: string;
   startedAt?: number;
   completedAt?: number;
