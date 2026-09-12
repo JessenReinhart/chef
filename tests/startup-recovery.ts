@@ -26,7 +26,7 @@ function seedMission(
     sessionId?: string;
     missionStatus: "active" | "verifying" | "completed";
     planStatus: "executing" | "completed";
-    taskStatus?: "running" | "completed";
+    taskStatus?: "pending" | "running" | "completed";
   },
 ): void {
   repo.insertMission({
@@ -104,6 +104,15 @@ try {
   });
 
   seedMission(seed, {
+    missionId: "post-worker-mission",
+    planId: "post-worker-plan",
+    taskId: "post-worker-task",
+    missionStatus: "active",
+    planStatus: "executing",
+    taskStatus: "completed",
+  });
+
+  seedMission(seed, {
     missionId: "verifying-mission",
     planId: "verifying-plan",
     taskId: "verified-task",
@@ -122,12 +131,12 @@ try {
   });
 
   seedMission(seed, {
-    missionId: "unrelated-mission",
-    planId: "unrelated-plan",
-    taskId: "unrelated-task",
+    missionId: "resumable-mission",
+    planId: "resumable-plan",
+    taskId: "resumable-task",
     missionStatus: "active",
     planStatus: "executing",
-    taskStatus: "completed",
+    taskStatus: "pending",
   });
 
   seed.insertTask({
@@ -191,6 +200,22 @@ try {
   );
 
   assert.equal(
+    reopened.getMission("post-worker-mission")?.status,
+    "failed",
+    "a Mission cannot remain working after all worker Tasks completed and the in-memory handoff disappeared",
+  );
+  assert.equal(
+    reopened.getPlan("post-worker-plan")?.status,
+    "failed",
+    "the owning Plan cannot remain executing after the completed worker lost its Mission handoff",
+  );
+  assert.equal(
+    reopened.getTask("post-worker-task")?.status,
+    "completed",
+    "recovering the post-worker handoff must preserve the durable completed result",
+  );
+
+  assert.equal(
     reopened.getMission("verifying-mission")?.status,
     "failed",
     "verification cannot remain live after the in-memory verifier disappears on restart",
@@ -213,16 +238,17 @@ try {
   );
   assert.equal(reopened.getPlan("terminal-plan")?.status, "completed");
   assert.equal(
-    reopened.getMission("unrelated-mission")?.status,
+    reopened.getMission("resumable-mission")?.status,
     "active",
-    "an active Mission without orphaned work or interrupted verification must remain untouched",
+    "an active Mission with pending work must remain available for normal dispatch after restart",
   );
-  assert.equal(reopened.getPlan("unrelated-plan")?.status, "executing");
+  assert.equal(reopened.getPlan("resumable-plan")?.status, "executing");
+  assert.equal(reopened.getTask("resumable-task")?.status, "pending");
 
   const startupMissionEvents = reopened.getWorkspaceSnapshot(workspaceId).events.filter(
     (event) => event.type === "mission.status" && event.source.type === "runtime" && event.source.id === "startup-recovery",
   );
-  assert.equal(startupMissionEvents.length, 3, "startup recovery must announce each interrupted Mission exactly once");
+  assert.equal(startupMissionEvents.length, 4, "startup recovery must announce each interrupted Mission exactly once");
 
   const planningRecovery = startupMissionEvents.find(
     (event) => (event.payload as { missionId?: string }).missionId === "planning-mission",
@@ -246,6 +272,17 @@ try {
     reason: "worker interrupted before restart",
   });
 
+  const postWorkerRecovery = startupMissionEvents.find(
+    (event) => (event.payload as { missionId?: string }).missionId === "post-worker-mission",
+  );
+  assert.ok(postWorkerRecovery);
+  assert.equal(postWorkerRecovery.taskId, undefined);
+  assert.deepEqual(postWorkerRecovery.payload, {
+    missionId: "post-worker-mission",
+    status: "failed",
+    reason: "worker completed before restart handoff",
+  });
+
   const verificationRecovery = startupMissionEvents.find(
     (event) => (event.payload as { missionId?: string }).missionId === "verifying-mission",
   );
@@ -258,7 +295,7 @@ try {
   });
 
   reopened.close();
-  console.log("startup-recovery: ok — restart makes interrupted planning, workers, and verification truthful without rewriting terminal or unrelated history");
+  console.log("startup-recovery: ok — restart makes interrupted planning, workers, post-worker handoff, and verification truthful without rewriting terminal or resumable history");
 } finally {
   await rm(dir, { recursive: true, force: true });
 }
