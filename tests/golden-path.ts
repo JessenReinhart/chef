@@ -78,6 +78,7 @@ const server = createServer((req, res) => {
   if (req.url === "/api/todos" && req.method === "GET") {
     res.writeHead(200, { "content-type": "application/json" });
     res.end(JSON.stringify(todos));
+    if (process.env.CHEF_GOLDEN_ONESHOT === "1") setImmediate(() => server.close());
     return;
   }
   res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
@@ -154,6 +155,11 @@ class TodoAcceptanceDecisionProvider implements DecisionProvider {
   }
 }
 
+function quoteRunArgument(value: string): string {
+  assert.doesNotMatch(value, /[\r\n\"]/, "golden run-command paths must remain single-line filesystem arguments");
+  return /\s/.test(value) ? `"${value}"` : value;
+}
+
 async function writeTodoWorker(projectDir: string): Promise<string> {
   const workerScript = join(projectDir, "golden-todo-worker.cjs");
   const source = String.raw`
@@ -165,6 +171,7 @@ const crypto = require("crypto");
 
 const appPath = path.join(process.cwd(), ${JSON.stringify(TODO_APP)});
 fs.writeFileSync(appPath, ${JSON.stringify(TODO_APP_SOURCE)}, "utf8");
+const quoteArg = (value) => /\\s/.test(value) ? '"' + value + '"' : value;
 
 const sid = process.env.CHEF_SESSION_ID;
 if (!sid) throw new Error("CHEF_SESSION_ID is required for the golden acceptance worker");
@@ -179,7 +186,7 @@ const envelope = {
     uri: pathToFileURL(appPath).href,
     metadata: {
       content: "Created runnable todo app at " + appPath,
-      run: process.execPath + " " + appPath,
+      run: quoteArg(process.execPath) + " " + quoteArg(appPath),
       verifiedBy: "golden-path"
     }
   },
@@ -194,11 +201,12 @@ console.log("todo-builder: created " + appPath);
   return workerScript;
 }
 
-async function assertGeneratedAppRuns(appPath: string): Promise<void> {
-  const child = spawn(process.execPath, [appPath], {
+async function assertGeneratedAppRuns(appPath: string, runCommand: string): Promise<void> {
+  const child = spawn(runCommand, {
     cwd: dirname(appPath),
-    env: { ...process.env, PORT: "0" },
+    env: { ...process.env, PORT: "0", CHEF_GOLDEN_ONESHOT: "1" },
     stdio: ["ignore", "pipe", "pipe"],
+    shell: true,
   });
   let stdout = "";
   let stderr = "";
@@ -219,7 +227,7 @@ async function assertGeneratedAppRuns(appPath: string): Promise<void> {
       if (child.exitCode !== null) break;
       await new Promise((resolve) => setTimeout(resolve, 25));
     }
-    assert.ok(port, `generated todo app did not start; stdout=${stdout} stderr=${stderr}`);
+    assert.ok(port, `published run command did not start the generated todo app; command=${runCommand} stdout=${stdout} stderr=${stderr}`);
     const baseUrl = `http://127.0.0.1:${port}`;
     const response = await fetch(`${baseUrl}/`);
     assert.equal(response.status, 200, "generated todo app must answer HTTP requests");
@@ -246,12 +254,19 @@ async function assertGeneratedAppRuns(appPath: string): Promise<void> {
       [{ text: "Verify Chef result" }],
       "generated todo app must preserve the todo state change through its running app boundary",
     );
+    const [exitCode] = await Promise.race([
+      once(child, "exit"),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("published run command did not exit after acceptance shutdown")), 2_000)),
+    ]);
+    assert.equal(exitCode, 0, `published run command must exit cleanly; command=${runCommand} stderr=${stderr}`);
   } finally {
     if (child.exitCode === null) child.kill();
-    await Promise.race([
-      once(child, "exit"),
-      new Promise((resolve) => setTimeout(resolve, 1_000)),
-    ]);
+    if (child.exitCode === null) {
+      await Promise.race([
+        once(child, "exit"),
+        new Promise((resolve) => setTimeout(resolve, 1_000)),
+      ]);
+    }
   }
 }
 
@@ -449,7 +464,9 @@ function resultHandoff(artifact: LivingArtifact, appPath: string): ReturnType<ty
   const handoff = artifactHandoff(artifact);
   assert.equal(handoff.summary, `Created runnable todo app at ${appPath}`, "Simple Mode handoff must explain what changed");
   assert.equal(handoff.location, appPath.replace(/\\/g, "/"), "Simple Mode handoff must expose the generated result location");
-  assert.equal(handoff.runCommand, `${process.execPath} ${appPath}`, "Simple Mode handoff must explain how to run the generated result");
+  const expectedRunCommand = `${quoteRunArgument(process.execPath)} ${quoteRunArgument(appPath)}`;
+  assert.equal(handoff.runCommand, expectedRunCommand, "Simple Mode handoff must expose a copyable command for the generated result even when its path contains spaces");
+  assert.match(handoff.runCommand ?? "", /"[^"]*\s[^"]*"/, "canonical run command must visibly quote its whitespace-containing filesystem argument");
   assert.equal(handoff.verification, "Verified by golden-path", "Simple Mode handoff must expose the worker-supplied verification evidence");
   return handoff;
 }
@@ -461,7 +478,7 @@ function resultHandoff(artifact: LivingArtifact, appPath: string): ReturnType<ty
  * and survives close/reopen.
  */
 async function main(): Promise<void> {
-  const projectDir = await mkdtemp(join(tmpdir(), "chef-golden-project-"));
+  const projectDir = await mkdtemp(join(tmpdir(), "chef golden project-"));
   const dbPath = join(projectDir, "chef.sqlite");
   const appPath = join(projectDir, TODO_APP);
   let journeyServer: ReturnType<typeof createProjectServer> | null = null;
@@ -572,7 +589,8 @@ async function main(): Promise<void> {
 
     const generatedSource = await readFile(appPath, "utf8");
     assert.equal(generatedSource, TODO_APP_SOURCE, "todo app must be written inside the selected project");
-    await assertGeneratedAppRuns(appPath);
+    assert.ok(handoff.runCommand, "canonical handoff must expose the command it tells the user to run");
+    await assertGeneratedAppRuns(appPath, handoff.runCommand);
 
     const messagesBeforeClose = chef.repository.listMessages(workspaceId);
     assert.ok(messagesBeforeClose.length > 0, "structured agent/message history must be persisted");
