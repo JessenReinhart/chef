@@ -19,6 +19,12 @@ function firstText(metadata: Record<string, unknown>, keys: string[]): string | 
   return null;
 }
 
+function copySafeRunCommand(metadata: Record<string, unknown>): string | null {
+  const command = firstText(metadata, ["run", "runCommand", "command"]);
+  if (!command) return null;
+  return /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/.test(command) ? null : command;
+}
+
 function compactSummary(value: string): string {
   const normalized = value.replace(/\s+/g, " ").trim();
   return normalized.length <= 140 ? normalized : `${normalized.slice(0, 137)}…`;
@@ -244,7 +250,7 @@ export function artifactHandoff(artifact: ArtifactHandoffInput): ArtifactHandoff
     : explicitLocation;
   const fileLocation = fileUriLocation(artifact.uri);
   const durableLocation = normalizedExplicitLocation ?? fileLocation;
-  const runCommand = firstText(artifact.metadata, ["run", "runCommand", "command"]);
+  const runCommand = copySafeRunCommand(artifact.metadata);
 
   return {
     summary: summaryText(artifact, durableLocation),

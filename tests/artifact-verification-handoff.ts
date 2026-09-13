@@ -141,4 +141,39 @@ for (const verification of positiveVerificationValues) {
   );
 }
 
-console.log("artifact-verification-handoff: ok — terminal and mixed non-success verification stays out of Verified while positive recovery evidence remains visible");
+const safeRunCommand = artifactHandoff({
+  uri: "file:///tmp/chef-project/todo-app.mjs",
+  metadata: {
+    content: "Created runnable todo app",
+    path: "/tmp/chef-project/todo-app.mjs",
+    run: 'node "/tmp/chef-project/todo-app.mjs"',
+    verifiedBy: "golden-path",
+  },
+});
+assert.equal(safeRunCommand.runCommand, 'node "/tmp/chef-project/todo-app.mjs"', "normal single-line run commands must remain copyable");
+assert.equal(safeRunCommand.summary, "Created runnable todo app", "run-command filtering must not disturb result summary");
+assert.equal(safeRunCommand.location, "/tmp/chef-project/todo-app.mjs", "run-command filtering must not disturb result location");
+assert.equal(safeRunCommand.verification, "Verified by golden-path", "run-command filtering must not disturb verification evidence");
+
+for (const unsafeRunCommand of [
+  "node todo-app.mjs\necho unexpected",
+  "node todo-app.mjs\r\necho unexpected",
+  "node\ttodo-app.mjs",
+  "node todo-app.mjs\u0000ignored",
+  "node todo-app.mjs\u007f",
+  "node todo-app.mjs\u0085echo unexpected",
+  "node todo-app.mjs\u2028echo unexpected",
+  "node todo-app.mjs\u2029echo unexpected",
+]) {
+  const handoff = artifactHandoff({
+    uri: "file:///tmp/chef-project/todo-app.mjs",
+    metadata: { run: unsafeRunCommand },
+  });
+  assert.equal(
+    handoff.runCommand,
+    null,
+    `control/multiline run metadata ${JSON.stringify(unsafeRunCommand)} must not be presented as a copyable command`,
+  );
+}
+
+console.log("artifact-verification-handoff: ok — terminal and mixed non-success verification stays out of Verified, positive recovery evidence remains visible, and run instructions stay single-line/copy-safe");
