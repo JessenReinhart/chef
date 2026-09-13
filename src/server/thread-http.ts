@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 
 import type { ChefRuntime } from "../main.ts";
+import { completionHandoffReport } from "../core/completion-handoff.ts";
 import type { ThreadMessageContext } from "../core/types.ts";
 import { createChatRepository } from "../persistence/chat.ts";
 import { createThreadRepository, type ThreadPatch } from "../persistence/threads.ts";
@@ -211,10 +212,15 @@ export function createThreadServer(runtime: ChefRuntime, baseServer: Server): Se
         const missionId = mission.id;
         void execution.then(
           (result) => {
+            const artifacts = result.ok
+              ? runtime.repository.listArtifacts(runtime.workspaceId).filter(
+                (artifact) => artifact.taskId !== undefined && result.taskIds.includes(artifact.taskId),
+              )
+              : [];
             persistAssistantTurn({
               threadId: thread.id,
               missionId,
-              content: result.report,
+              content: result.ok ? completionHandoffReport(result.report, artifacts) : result.report,
               taskIds: result.taskIds,
               ok: result.ok,
             });
