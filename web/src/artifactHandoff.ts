@@ -22,7 +22,7 @@ function firstText(metadata: Record<string, unknown>, keys: string[]): string | 
 function copySafeRunCommand(metadata: Record<string, unknown>): string | null {
   const command = firstText(metadata, ["run", "runCommand", "command"]);
   if (!command) return null;
-  return /[\u0000-\u001f\u007f]/.test(command) ? null : command;
+  return /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/.test(command) ? null : command;
 }
 
 function compactSummary(value: string): string {
