@@ -1,5 +1,6 @@
 import { strict as assert } from "node:assert";
 import { artifactHandoff, canRevealArtifact } from "../web/src/artifactHandoff.ts";
+import { missionResultHandoffProjection, type LivingArtifact } from "../web/src/artifactProjection.ts";
 
 const revealable = (uri: string, metadata: Record<string, unknown> = {}) => canRevealArtifact({ uri, metadata });
 
@@ -65,6 +66,37 @@ assert.equal(
   "https://example.com/result",
   "non-file explicit locations must remain unchanged instead of being reinterpreted as local paths",
 );
+
+const completedLocationNotice = "Work is marked complete, but Chef did not publish a durable result location for this Mission.";
+const missionScope = { missionId: "mission-current", taskIds: ["task-current"], threadId: "thread-current" };
+const locatedMissionResult: LivingArtifact = {
+  id: "todo-result",
+  workspaceId: "workspace-current",
+  type: "result",
+  name: "todo-app",
+  uri: "sideband://result",
+  version: 1,
+  createdBy: "todo-builder",
+  taskId: "task-current",
+  metadata: { missionId: "mission-current", resultLocation: "dist/todo-app" },
+};
+assert.equal(
+  missionResultHandoffProjection([locatedMissionResult], missionScope, "thread-current", "completed").notice,
+  null,
+  "a completed Mission with an ordinary project-local revealable result must remain a complete handoff",
+);
+for (const resultLocation of ["../outside/todo-app", "dist/../../outside/todo-app", "file:///tmp/bad%ZZ/result"] as const) {
+  const unusableResult: LivingArtifact = {
+    ...locatedMissionResult,
+    id: `unusable-${resultLocation}`,
+    metadata: { ...locatedMissionResult.metadata, resultLocation },
+  };
+  assert.equal(
+    missionResultHandoffProjection([unusableResult], missionScope, "thread-current", "completed").notice,
+    completedLocationNotice,
+    `completed handoff must stay visibly incomplete when resultLocation=${JSON.stringify(resultLocation)} cannot support Chef's ordinary Show location action`,
+  );
+}
 
 for (const verification of ["Failed. npm test exited 1", "Pending, Windows acceptance"] as const) {
   assert.equal(
