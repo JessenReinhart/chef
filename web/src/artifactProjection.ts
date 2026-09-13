@@ -1,4 +1,4 @@
-import { artifactHandoff, type ArtifactHandoff } from "./artifactHandoff.ts";
+import { artifactHandoff, canRevealArtifact, type ArtifactHandoff } from "./artifactHandoff.ts";
 
 export { artifactHandoff, type ArtifactHandoff };
 
@@ -25,6 +25,7 @@ export type MissionArtifactScope = {
 
 type MissionLinkedArtifact = {
   taskId?: string;
+  uri?: unknown;
   metadata: Record<string, unknown>;
 };
 
@@ -50,12 +51,8 @@ function hasRunInstruction(artifact: MissionLinkedArtifact): boolean {
 }
 
 function hasPublishedResultLocation(artifact: MissionLinkedArtifact): boolean {
-  for (const key of ["resultLocation", "path", "location"]) {
-    const value = artifact.metadata[key];
-    if (typeof value === "string" && value.trim().length > 0) return true;
-  }
-  const uri = (artifact as MissionLinkedArtifact & { uri?: unknown }).uri;
-  return typeof uri === "string" && /^file:/i.test(uri.trim());
+  const uri = typeof artifact.uri === "string" ? artifact.uri : "";
+  return canRevealArtifact({ uri, metadata: artifact.metadata });
 }
 
 function keepRunnableHandoffVisible<T extends MissionLinkedArtifact>(
