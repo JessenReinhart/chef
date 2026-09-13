@@ -5,7 +5,6 @@ import {
   acceptedMissionSubmissionIsPending,
   clearAcceptedMissionSubmission,
   missionSubmissionAccepted,
-  rememberAcceptedMissionSubmission,
 } from "../web/src/missionSubmissionFeedback.ts";
 
 const originalSessionStorage = Object.getOwnPropertyDescriptor(globalThis, "sessionStorage");
@@ -27,7 +26,6 @@ try {
     "Create a simple todo app",
     acceptedAt,
   );
-  rememberAcceptedMissionSubmission(accepted);
 
   assert.equal(
     acceptedMissionSubmissionIsPending(accepted, "thread-slow-start", [], acceptedAt + 45_000),
@@ -36,14 +34,20 @@ try {
   );
 
   assert.equal(
+    acceptedMissionSubmissionIsPending(null, "thread-slow-start", [], acceptedAt + 45_000),
+    true,
+    "a Simple Mode remount must recover accepted Mission ownership instead of unlocking duplicate submission",
+  );
+
+  assert.equal(
     acceptedMissionSubmissionIsPending(
-      accepted,
+      null,
       "thread-slow-start",
       [{ id: "mission-slow-start" }],
       acceptedAt + 45_001,
     ),
     false,
-    "the guard must retire immediately when the exact accepted Mission becomes authoritative",
+    "the recovered guard must retire immediately when the exact accepted Mission becomes authoritative",
   );
 
   const bounded = missionSubmissionAccepted(
@@ -52,9 +56,8 @@ try {
     "Create a simple todo app",
     acceptedAt,
   );
-  rememberAcceptedMissionSubmission(bounded);
   assert.equal(
-    acceptedMissionSubmissionIsPending(bounded, "thread-bounded", [], acceptedAt + ACCEPTED_MISSION_PROJECTION_GRACE_MS),
+    acceptedMissionSubmissionIsPending(null, "thread-bounded", [], acceptedAt + ACCEPTED_MISSION_PROJECTION_GRACE_MS),
     false,
     "a never-projected acknowledgement must still fail open at the bounded grace limit",
   );
