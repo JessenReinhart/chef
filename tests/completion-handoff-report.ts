@@ -87,6 +87,32 @@ const preferred = completionHandoffReport("Plan completed.", [
 assert.match(preferred, /Run: npm run dev/, "the actionable result should win over a newer non-result artifact");
 assert.match(preferred, /Verification: verified/);
 
+const locatedSideband = completionHandoffReport("Plan completed.", [
+  artifact({
+    id: "sparse-result",
+    name: "build-summary",
+    uri: "sideband://result",
+    metadata: {},
+  }),
+  artifact({
+    id: "located-note",
+    type: "note",
+    name: "generated-app-location",
+    uri: "sideband://location",
+    metadata: { resultLocation: "/projects/demo/generated-todo" },
+  }),
+]);
+assert.match(
+  locatedSideband,
+  /Location: \/projects\/demo\/generated-todo/,
+  "the only usable result location must outrank a sparse result artifact",
+);
+assert.doesNotMatch(
+  locatedSideband,
+  /Result: build-summary/,
+  "a nominal result must not hide a more actionable handoff artifact",
+);
+
 const dir = await mkdtemp(join(tmpdir(), "chef-completion-handoff-"));
 const repository = new Repository(join(dir, "chef.sqlite"));
 repository.createWorkspace({ id: "workspace-a", name: "Workspace A" });
