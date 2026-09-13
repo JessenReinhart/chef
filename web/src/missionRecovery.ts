@@ -8,6 +8,11 @@ export type TaskRetryOwnership = {
   snapshot: () => Set<string>;
 };
 
+export type InterruptedMissionRecovery = {
+  description: string;
+  prompt: string;
+};
+
 export function createTaskRetryOwnership(): TaskRetryOwnership {
   const pendingTaskIds = new Set<string>();
   return {
@@ -23,6 +28,27 @@ export function createTaskRetryOwnership(): TaskRetryOwnership {
       return new Set(pendingTaskIds);
     },
   };
+}
+
+export function interruptedMissionRecovery(input: {
+  missionStatus?: UiMission["status"] | null;
+  goal: string;
+  readOnly: boolean;
+}): InterruptedMissionRecovery | null {
+  if (input.readOnly) return null;
+  if (input.missionStatus === "paused") {
+    return {
+      description: "This Mission is paused. Keep its history intact and continue as fresh work in this Thread when you are ready.",
+      prompt: `Continue this work: ${input.goal}`,
+    };
+  }
+  if (input.missionStatus === "cancelled") {
+    return {
+      description: "This Mission was cancelled. Keep its history intact and continue as fresh work in this Thread.",
+      prompt: `Continue this work: ${input.goal}`,
+    };
+  }
+  return null;
 }
 
 export function canRetryMissionTask(input: {
