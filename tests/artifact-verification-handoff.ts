@@ -161,6 +161,9 @@ for (const unsafeRunCommand of [
   "node\ttodo-app.mjs",
   "node todo-app.mjs\u0000ignored",
   "node todo-app.mjs\u007f",
+  "node todo-app.mjs\u0085echo unexpected",
+  "node todo-app.mjs\u2028echo unexpected",
+  "node todo-app.mjs\u2029echo unexpected",
 ]) {
   const handoff = artifactHandoff({
     uri: "file:///tmp/chef-project/todo-app.mjs",
