@@ -55,6 +55,12 @@ function projectNameFromPath(path: string): string | null {
   return name || null;
 }
 
+function projectLoadFailureDetail(cause: unknown): string | null {
+  if (cause instanceof Error) return cause.message.trim() || null;
+  if (typeof cause === "string") return cause.trim() || null;
+  return null;
+}
+
 export function createSingleFlightProjectSelection() {
   let inFlight = false;
   return async function run<T>(action: () => Promise<T>): Promise<SingleFlightProjectSelectionResult<T>> {
@@ -92,14 +98,22 @@ export async function waitForSelectedProject<T extends ProjectSelectionInfo>(
   delay: () => Promise<void>,
   attempts = 40,
 ): Promise<T> {
+  let lastLoadFailure: string | null = null;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     if (attempt > 0) await delay();
     try {
       const project = await loadProject();
+      lastLoadFailure = null;
       if (sameSelectedProjectPath(project.path, expectedPath)) return project;
-    } catch {
+    } catch (cause) {
       // Runtime restarts can briefly make the project endpoint unavailable.
+      // Preserve only the latest unresolved failure so a recovered transient
+      // error cannot later mask a genuine wrong-project response.
+      lastLoadFailure = projectLoadFailureDetail(cause);
     }
+  }
+  if (lastLoadFailure) {
+    throw new Error(`Chef could not finish opening ${expectedPath}: ${lastLoadFailure}`);
   }
   throw new Error(`Chef reopened, but the selected project did not become active: ${expectedPath}`);
 }
