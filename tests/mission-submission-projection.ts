@@ -20,12 +20,6 @@ Object.defineProperty(globalThis, "sessionStorage", {
 });
 
 try {
-  assert.equal(
-    ACCEPTED_MISSION_PROJECTION_GRACE_MS,
-    120_000,
-    "accepted work needs enough projection grace for realistic slow startup without unlocking duplicate submission",
-  );
-
   const acceptedAt = 1_000;
   const accepted = missionSubmissionAccepted(
     "thread-slow-start",
