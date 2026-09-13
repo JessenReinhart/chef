@@ -1,7 +1,15 @@
 import { strict as assert } from "node:assert";
+import { mkdtemp, rm } from "node:fs/promises";
+import { createServer } from "node:http";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 import { completionHandoffReport } from "../src/core/completion-handoff.ts";
 import type { Artifact } from "../src/core/types.ts";
+import { createChatRepository } from "../src/persistence/chat.ts";
+import { Repository } from "../src/persistence/database.ts";
+import { createThreadRepository } from "../src/persistence/threads.ts";
+import { createThreadServer } from "../src/server/thread-http.ts";
 
 function artifact(overrides: Partial<Artifact> = {}): Artifact {
   return {
@@ -78,5 +86,65 @@ const preferred = completionHandoffReport("Plan completed.", [
 ]);
 assert.match(preferred, /Run: npm run dev/, "the actionable result should win over a newer non-result artifact");
 assert.match(preferred, /Verification: verified/);
+
+const dir = await mkdtemp(join(tmpdir(), "chef-completion-handoff-"));
+const repository = new Repository(join(dir, "chef.sqlite"));
+repository.createWorkspace({ id: "workspace-a", name: "Workspace A" });
+const threads = createThreadRepository(repository);
+const chat = createChatRepository(repository);
+const thread = threads.create({ workspaceId: "workspace-a", title: "Todo app" });
+const taskId = "task-build";
+const runtime = {
+  workspaceId: "workspace-a",
+  repository,
+  sendUserMessage(message: string) {
+    repository.insertMission({ workspaceId: "workspace-a", goal: message, status: "planning", createdBy: "user" });
+    repository.insertArtifact({
+      workspaceId: "workspace-a",
+      type: "result",
+      name: "todo-app",
+      uri: "file:///projects/demo/todo-app.mjs",
+      createdBy: "todo-builder",
+      taskId,
+      metadata: {
+        content: "Created runnable todo app at /projects/demo/todo-app.mjs",
+        run: "node /projects/demo/todo-app.mjs",
+        verifiedBy: "golden-path",
+      },
+    });
+    return Promise.resolve({ workspaceId: "workspace-a", taskIds: [taskId], report: "Plan completed.", ok: true });
+  },
+} as never;
+const baseServer = createServer((_req, res) => { res.writeHead(404); res.end(); });
+const server = createThreadServer(runtime, baseServer);
+
+try {
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const response = await fetch(`http://127.0.0.1:${address.port}/api/threads/${thread.id}/chat`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ message: "Create a simple todo app" }),
+  });
+  assert.equal(response.status, 202, "canonical Thread submission must acknowledge before completion");
+
+  const deadline = Date.now() + 1_000;
+  let completion = chat.list("workspace-a", thread.id).find((message) => message.role === "assistant");
+  while (!completion && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    completion = chat.list("workspace-a", thread.id).find((message) => message.role === "assistant");
+  }
+  assert.ok(completion, "successful Thread work must persist a terminal assistant handoff");
+  assert.match(completion.content, /Result: Created runnable todo app/);
+  assert.match(completion.content, /Location: \/projects\/demo\/todo-app\.mjs/);
+  assert.match(completion.content, /Run: node \/projects\/demo\/todo-app\.mjs/);
+  assert.match(completion.content, /Verification: verified by golden-path/);
+} finally {
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  baseServer.close();
+  repository.close();
+  await rm(dir, { recursive: true, force: true });
+}
 
 console.log("completion-handoff-report: ok — terminal completion notes expose truthful bounded result handoffs");
