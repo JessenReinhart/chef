@@ -47,7 +47,7 @@ import {
   type MissionHomeState,
 } from "./missionProgress";
 import { createMissionProgressRefreshQueue } from "./missionProgressStream";
-import { canRetryMissionTask, createTaskRetryOwnership } from "./missionRecovery";
+import { canRetryMissionTask, createTaskRetryOwnership, interruptedMissionRecovery } from "./missionRecovery";
 import { partitionMissionTasksForSimpleMode } from "./missionTaskVisibility";
 import type { ChatMessage, UiMission, UiRuntimeEvent, UiTask } from "./types";
 
@@ -383,6 +383,13 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
     directReport: Boolean(lastReport) && acceptedSubmission === null,
     starting: showingStartingState,
   });
+  const interruptedRecovery = latestMission
+    ? interruptedMissionRecovery({
+        missionStatus: latestMission.status,
+        goal: latestMission.goal,
+        readOnly: archivedThreadSelected,
+      })
+    : null;
 
   function dismissError() {
     const next = dismissVisibleAppError(actionError, stateRefreshError);
@@ -576,9 +583,9 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
     setActionError(null);
   }
 
-  function prepareCancelledMissionFollowup() {
-    if (!latestMission || archivedThreadSelected || latestMission.status !== "cancelled" || !selectedThreadId) return;
-    setGoal(`Continue this work: ${latestMission.goal}`);
+  function prepareInterruptedMissionFollowup() {
+    if (!interruptedRecovery || !selectedThreadId) return;
+    setGoal(interruptedRecovery.prompt);
     setActionError(null);
   }
 
@@ -943,14 +950,14 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
                 </div>
               )}
 
-              {!archivedThreadSelected && latestMission?.status === "cancelled" && selectedThreadId && (
-                <div className="mt-4 rounded-xl border border-amber-300/15 bg-amber-300/[0.04] px-4 py-3 text-left" aria-label="Cancelled Mission recovery">
+              {interruptedRecovery && selectedThreadId && (
+                <div className="mt-4 rounded-xl border border-amber-300/15 bg-amber-300/[0.04] px-4 py-3 text-left" aria-label="Interrupted Mission recovery">
                   <p className="text-xs leading-5 text-zinc-400">
-                    This Mission was cancelled. Keep its history intact and continue as fresh work in this Thread.
+                    {interruptedRecovery.description}
                   </p>
                   <button
                     type="button"
-                    onClick={prepareCancelledMissionFollowup}
+                    onClick={prepareInterruptedMissionFollowup}
                     className="mt-3 rounded-lg border border-amber-200/20 bg-amber-200/[0.06] px-3 py-1.5 text-[10px] font-semibold text-amber-200 transition hover:bg-amber-200/[0.1]"
                   >
                     Continue this work
