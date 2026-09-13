@@ -99,4 +99,17 @@ for (const verifiedBy of ["failure-analysis-agent", "failure analysis agent", "e
   );
 }
 
+for (const run of ["npm install\nnpm start", "npm run dev\u001b[2J", "npm run dev\u2028echo hidden"] as const) {
+  assert.equal(
+    artifactHandoff({ uri: "file:///tmp/chef-project/todo-app.mjs", metadata: { run } }).runCommand,
+    null,
+    `control-bearing run instruction=${JSON.stringify(run)} must not be exposed as a copyable Simple Mode command`,
+  );
+}
+assert.equal(
+  artifactHandoff({ uri: "file:///tmp/chef-project/todo-app.mjs", metadata: { run: "npm run dev" } }).runCommand,
+  "npm run dev",
+  "a normal one-line run instruction must remain available after malformed-command filtering",
+);
+
 console.log("artifact reveal eligibility and handoff truthfulness behavior passed");

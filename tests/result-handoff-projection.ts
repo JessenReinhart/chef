@@ -161,6 +161,26 @@ assert.equal(
   "the preserved runnable handoff must retain the exact durable run instruction instead of synthesizing one",
 );
 
+const malformedRunnableResult: LivingArtifact = {
+  ...result,
+  id: "malformed-run-result",
+  metadata: {
+    ...result.metadata,
+    run: "npm install\nnpm start",
+  },
+};
+const malformedOverflowProjection = missionResultHandoffProjection(
+  [malformedRunnableResult, ...overflowLeafArtifacts],
+  scope,
+  "thread-current",
+  "completed",
+);
+assert.deepEqual(
+  malformedOverflowProjection.artifacts.map((artifact) => artifact.id),
+  ["leaf-5", "leaf-4", "leaf-3", "leaf-2"],
+  "a run instruction that Simple Mode cannot display or copy must not displace a newer visible result",
+);
+
 const hiddenLocatedArtifact: LivingArtifact = {
   ...opaqueResult,
   id: "hidden-located-result",
@@ -387,4 +407,4 @@ assert.equal(
   "an empty workspace must not render an empty artifact shelf affordance",
 );
 
-console.log("result-handoff-projection: ok — runnable overflow stays visible, completed results require a durable location across the full Mission artifact set, incomplete handoffs stay truthful, result absence stays unknown during artifact outages, refresh failures retain cards only for the same selected Mission, and durable workspace artifacts remain rediscoverable whenever results are hidden");
+console.log("result-handoff-projection: ok — only usable runnable overflow stays visible, completed results require a durable location across the full Mission artifact set, incomplete handoffs stay truthful, result absence stays unknown during artifact outages, refresh failures retain cards only for the same selected Mission, and durable workspace artifacts remain rediscoverable whenever results are hidden");
