@@ -85,6 +85,18 @@ assert.equal(
   null,
   "a completed Mission with an ordinary project-local revealable result must remain a complete handoff",
 );
+for (const resultLocation of ["C:\\Work\\chef\\todo-app", "file:///C:/Work/chef/todo-app"] as const) {
+  const windowsResult: LivingArtifact = {
+    ...locatedMissionResult,
+    id: `windows-${resultLocation}`,
+    metadata: { ...locatedMissionResult.metadata, resultLocation },
+  };
+  assert.equal(
+    missionResultHandoffProjection([windowsResult], missionScope, "thread-current", "completed").notice,
+    null,
+    `completed handoff must stay complete for revealable Windows resultLocation=${JSON.stringify(resultLocation)}`,
+  );
+}
 for (const resultLocation of ["../outside/todo-app", "dist/../../outside/todo-app", "file:///tmp/bad%ZZ/result"] as const) {
   const unusableResult: LivingArtifact = {
     ...locatedMissionResult,
