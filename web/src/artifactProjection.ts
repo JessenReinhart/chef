@@ -1,4 +1,6 @@
-export { artifactHandoff, type ArtifactHandoff } from "./artifactHandoff.ts";
+import { artifactHandoff, type ArtifactHandoff } from "./artifactHandoff.ts";
+
+export { artifactHandoff, type ArtifactHandoff };
 
 export type ArtifactType = "file" | "document" | "code" | "image" | "research" | "result";
 
@@ -44,10 +46,7 @@ export function recentArtifacts<T>(artifacts: T[], limit: number): T[] {
 }
 
 function hasRunInstruction(artifact: MissionLinkedArtifact): boolean {
-  return ["run", "runCommand", "command"].some((key) => {
-    const value = artifact.metadata[key];
-    return typeof value === "string" && value.trim().length > 0;
-  });
+  return artifactHandoff({ uri: "", metadata: artifact.metadata }).runCommand !== null;
 }
 
 function hasPublishedResultLocation(artifact: MissionLinkedArtifact): boolean {
