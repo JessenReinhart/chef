@@ -49,10 +49,16 @@ globalThis.fetch = async (input) => {
   }), { status: 202, headers: { "content-type": "application/json" } });
 };
 
+function resetRequestGate() {
+  requestGate = deferredResponse();
+  started = new Promise<void>((resolve) => { requestStarted = resolve; });
+}
+
 try {
   clearAcceptedMissionSubmission("thread-a");
 
   storage.set("chef:view-mode", "simple");
+  storage.set("chef:selected-thread", "thread-a");
   const simpleStartedRequest = sendThreadMessage("thread-a", "Create a simple todo app");
   await started;
   storage.set("chef:view-mode", "power");
@@ -66,10 +72,10 @@ try {
   );
 
   clearAcceptedMissionSubmission("thread-a");
-  requestGate = deferredResponse();
-  started = new Promise<void>((resolve) => { requestStarted = resolve; });
+  resetRequestGate();
 
   storage.set("chef:view-mode", "power");
+  storage.set("chef:selected-thread", "thread-a");
   const powerStartedRequest = sendThreadMessage("thread-a", "Create a simple todo app");
   await started;
   storage.set("chef:view-mode", "simple");
@@ -80,6 +86,23 @@ try {
     acceptedMissionSubmissionForThread("thread-a"),
     null,
     "a request that starts in Power Mode must not acquire Simple Mode duplicate-submission semantics merely because the UI mode changes before settlement",
+  );
+
+  clearAcceptedMissionSubmission("thread-a");
+  resetRequestGate();
+
+  storage.set("chef:view-mode", "simple");
+  storage.set("chef:selected-thread", "thread-a");
+  const switchedThreadRequest = sendThreadMessage("thread-a", "Create a simple todo app");
+  await started;
+  storage.set("chef:selected-thread", "thread-b");
+  requestGate.release();
+  await switchedThreadRequest;
+
+  assert.equal(
+    acceptedMissionSubmissionForThread("thread-a")?.missionId,
+    "mission-mode-race",
+    "accepted work must stay guarded by its originating Thread even when the user switches Threads before the acknowledgement settles",
   );
 } finally {
   clearAcceptedMissionSubmission("thread-a");
