@@ -104,9 +104,9 @@ export function createSingleFlightRunCommandCopier(
 }
 
 export function artifactRevealLabel(state: ArtifactRevealDisplayState): string {
-  if (state === "opening") return "Opening…";
-  if (state === "opened") return "Result shown";
-  return "Show result";
+  if (state === "opening") return "Opening location…";
+  if (state === "opened") return "Location shown";
+  return "Show location";
 }
 
 async function revealArtifactVersion(
@@ -189,7 +189,7 @@ async function downloadArtifactVersion(
         const body = await response.json() as { error?: unknown };
         if (typeof body.error === "string" && body.error.trim()) {
           message = /does not point to a file/i.test(body.error)
-            ? "This result is a folder. Use Show result to open it."
+            ? "This result is a folder. Use Show location to open it."
             : body.error.trim();
         }
       } catch {

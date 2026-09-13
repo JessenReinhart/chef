@@ -26,10 +26,10 @@ await writeFile(resultPath, "<main>todo</main>");
 await writeFile(internalWorkerPath, "<main>internal worker output</main>");
 await writeFile(outsidePath, "outside");
 
-assert.equal(artifactRevealLabel("idle"), "Show result", "result reveal must describe the user outcome rather than a platform-specific folder action");
-assert.equal(artifactRevealLabel("opening"), "Opening…", "an in-flight reveal must remain visibly acknowledged");
-assert.equal(artifactRevealLabel("opened"), "Result shown", "successful reveal must not falsely claim only a folder was opened");
-assert.equal(artifactRevealLabel("error"), "Show result", "failed reveal should return to a truthful retry action");
+assert.equal(artifactRevealLabel("idle"), "Show location", "result reveal must describe the filesystem-location outcome without implying execution");
+assert.equal(artifactRevealLabel("opening"), "Opening location…", "an in-flight location reveal must remain visibly acknowledged");
+assert.equal(artifactRevealLabel("opened"), "Location shown", "successful reveal must truthfully confirm that Chef showed the result location");
+assert.equal(artifactRevealLabel("error"), "Show location", "failed reveal should return to a truthful retry action");
 
 let copyAttempts = 0;
 const copyResolvers: Array<(result: CopyRunCommandResult) => void> = [];
@@ -238,7 +238,7 @@ try {
     metadata: { resultLocation: outsidePath },
   });
 
-  assert.equal(canRevealArtifact(canonicalTodo), true, "the canonical todo result must advertise Show result in Simple Mode");
+  assert.equal(canRevealArtifact(canonicalTodo), true, "the canonical todo result must advertise a location reveal in Simple Mode");
   assert.equal(canRevealArtifact(canonicalTodoDirectory), true, "the canonical todo app root must remain revealable even though it is not a downloadable file");
   assert.equal(canRevealArtifact(local), true, "Simple Mode should keep reveal available for an explicit durable local result path");
   assert.equal(canRevealArtifact(explicitLocationOverFileUri), true, "a file-backed result with explicit durable output metadata must remain revealable");
@@ -263,12 +263,12 @@ try {
   assert.equal(revealed.length, 0, "download capability checks must never invoke the desktop opener");
 
   const canonicalTodoReveal = await requestReveal(canonicalTodo.id);
-  assert.equal(canonicalTodoReveal.status, 200, "the canonical generated todo result must cross the production Show result endpoint");
-  assert.deepEqual(revealed, [{ path: resultPath, isDirectory: false }], "Show result must resolve the canonical todo artifact to its generated file inside the selected project");
+  assert.equal(canonicalTodoReveal.status, 200, "the canonical generated todo result must cross the production location-reveal endpoint");
+  assert.deepEqual(revealed, [{ path: resultPath, isDirectory: false }], "Show location must resolve the canonical todo artifact to its generated file inside the selected project");
 
   const directoryReveal = await requestReveal(canonicalTodoDirectory.id);
-  assert.equal(directoryReveal.status, 200, "directory results must remain available through Show result");
-  assert.deepEqual(revealed.at(-1), { path: resultDir, isDirectory: true }, "Show result must continue to open the runnable app root without treating it as a file download");
+  assert.equal(directoryReveal.status, 200, "directory results must remain available through Show location");
+  assert.deepEqual(revealed.at(-1), { path: resultDir, isDirectory: true }, "Show location must continue to open the runnable app root without treating it as a file download");
 
   const localReveal = await requestReveal(local.id);
   assert.equal(localReveal.status, 200);
@@ -283,11 +283,11 @@ try {
   assert.deepEqual(revealed.at(-1), { path: resultPath, isDirectory: false }, "server must accept equivalent mixed-case artifact file URI schemes");
 
   const explicitLocationReveal = await requestReveal(explicitLocationOverFileUri.id);
-  assert.equal(explicitLocationReveal.status, 200, "Show result must accept the artifact whose visible result location differs from its file URI");
+  assert.equal(explicitLocationReveal.status, 200, "Show location must accept the artifact whose visible result location differs from its file URI");
   assert.deepEqual(
     revealed.at(-1),
     { path: resultPath, isDirectory: false },
-    "Show result must open the explicit resultLocation that Simple Mode displays, not the internal file URI fallback",
+    "Show location must open the explicit resultLocation that Simple Mode displays, not the internal file URI fallback",
   );
   const explicitLocationDownload = await requestDownload(explicitLocationOverFileUri.id);
   assert.equal(explicitLocationDownload.status, 200, "Save copy must remain available for the displayed explicit result file");
@@ -336,21 +336,21 @@ try {
         },
       },
     );
-    assert.equal(reopenedResponse.status, 200, "Show result must still work from the restored Simple Mode result after reopening Chef");
+    assert.equal(reopenedResponse.status, 200, "Show location must still work from the restored Simple Mode result after reopening Chef");
     const reopenedBody = await reopenedResponse.json() as { ok?: boolean; data?: { location?: string } };
     assert.equal(reopenedBody.ok, true, "reopened canonical reveal must report success");
-    assert.equal(reopenedBody.data?.location, resultPath, "reopened Show result must resolve the same generated todo result inside the selected project");
+    assert.equal(reopenedBody.data?.location, resultPath, "reopened Show location must resolve the same generated todo result inside the selected project");
     assert.deepEqual(
       reopenedRevealed,
       [{ path: resultPath, isDirectory: false }],
-      "reopened Show result must invoke the desktop reveal exactly once for the persisted canonical result",
+      "reopened Show location must invoke the desktop reveal exactly once for the persisted canonical result",
     );
   } finally {
     if (reopenedServer.listening) await new Promise<void>((resolve) => reopenedServer.close(() => resolve()));
     await reopened.close();
   }
 
-  console.log("artifact-local-result-reveal: ok — Simple Mode keeps result reveal/save/copy actions version-owned, project-scoped, and durable across reopen");
+  console.log("artifact-local-result-reveal: ok — Simple Mode keeps result location/save/copy actions truthful, version-owned, project-scoped, and durable across reopen");
 } finally {
   if (server.listening) await new Promise<void>((resolve) => server.close(() => resolve()));
   if (!runtimeClosed) await runtime.close();
