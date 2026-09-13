@@ -244,6 +244,41 @@ assert.equal(confirmed?.path, "C:\\Dev\\Todo-App\\");
 
 await assert.rejects(
   () => waitForSelectedProject(
+    "/home/alice/todo-app",
+    async () => { throw new Error("runtime failed to reopen selected project"); },
+    async () => {},
+    2,
+  ),
+  (cause: unknown) => {
+    assert.ok(cause instanceof Error);
+    assert.match(cause.message, /\/home\/alice\/todo-app/, "failed reopen feedback must retain which project the user chose");
+    assert.match(cause.message, /runtime failed to reopen selected project/, "failed reopen feedback must preserve the final actionable runtime reason");
+    return true;
+  },
+);
+
+let recoveredAfterFailureCalls = 0;
+await assert.rejects(
+  () => waitForSelectedProject(
+    "/home/alice/todo-app",
+    async () => {
+      recoveredAfterFailureCalls += 1;
+      if (recoveredAfterFailureCalls === 1) throw new Error("transient restart error");
+      return { name: "old-project", path: "/home/alice/old-project" };
+    },
+    async () => {},
+    2,
+  ),
+  (cause: unknown) => {
+    assert.ok(cause instanceof Error);
+    assert.match(cause.message, /selected project did not become active/);
+    assert.doesNotMatch(cause.message, /transient restart error/, "a recovered transient error must not mask a later authoritative wrong-project response");
+    return true;
+  },
+);
+
+await assert.rejects(
+  () => waitForSelectedProject(
     "C:\\dev\\new-project",
     async () => ({ name: "old-project", path: "C:\\dev\\old-project" }),
     async () => {},
@@ -300,4 +335,4 @@ const afterCancellationRetry = await singleFlight(async () => {
 });
 assert.deepEqual(afterCancellationRetry, { accepted: true, value: "after-cancel" });
 
-console.log("simple-mode-project-access: ok — project selection stays truthful through Linux/Windows handoffs, dot/repeated-separator canonical paths, Recent aliases, and serialized reopen ownership");
+console.log("simple-mode-project-access: ok — project selection stays truthful through Linux/Windows handoffs, dot/repeated-separator canonical paths, restart failures, Recent aliases, and serialized reopen ownership");
