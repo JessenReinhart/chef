@@ -203,13 +203,13 @@ const hiddenLocationProjection = missionResultHandoffProjection(
 assert.equal(hiddenLocationProjection.artifacts.length, 4, "visible result cards must stay bounded independently from handoff completeness");
 assert.equal(
   hiddenLocationProjection.artifacts.some((artifact) => artifact.id === hiddenLocatedArtifact.id),
-  false,
-  "the regression requires the located artifact to sit outside the visible-card cap",
+  true,
+  "a usable result location must remain visible even when newer intermediate outputs exceed the visible-card cap",
 );
 assert.equal(
   hiddenLocationProjection.notice,
   null,
-  "a valid foreground-Mission location outside the visible-card cap must still satisfy completion",
+  "a visible valid foreground-Mission location must satisfy completion",
 );
 
 const newerRunnableResult: LivingArtifact = {

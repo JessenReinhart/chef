@@ -110,6 +110,42 @@ for (const resultLocation of ["../outside/todo-app", "dist/../../outside/todo-ap
   );
 }
 
+const overflowLocatedResult: LivingArtifact = {
+  ...locatedMissionResult,
+  id: "overflow-location",
+  metadata: { missionId: "mission-current", resultLocation: "dist/todo-app" },
+};
+const overflowRunnableResult: LivingArtifact = {
+  ...locatedMissionResult,
+  id: "overflow-run",
+  uri: "sideband://run",
+  metadata: { missionId: "mission-current", run: "npm run dev" },
+};
+const overflowRecentResults: LivingArtifact[] = Array.from({ length: 4 }, (_, index) => ({
+  ...locatedMissionResult,
+  id: `overflow-recent-${index}`,
+  uri: `sideband://recent-${index}`,
+  metadata: { missionId: "mission-current", summary: `Intermediate output ${index}` },
+}));
+const overflowProjection = missionResultHandoffProjection(
+  [overflowLocatedResult, overflowRunnableResult, ...overflowRecentResults],
+  missionScope,
+  "thread-current",
+  "completed",
+  4,
+);
+assert.equal(overflowProjection.artifacts.length, 4, "overflow handoff projection must stay within the Simple Mode visible result limit");
+assert.equal(new Set(overflowProjection.artifacts.map((artifact) => artifact.id)).size, 4, "overflow handoff projection must not duplicate artifacts");
+assert.ok(
+  overflowProjection.artifacts.some((artifact) => artifact.id === overflowLocatedResult.id),
+  "an older revealable result location must stay visible when newer intermediate outputs fill the Simple Mode result limit",
+);
+assert.ok(
+  overflowProjection.artifacts.some((artifact) => artifact.id === overflowRunnableResult.id),
+  "preserving an older result location must not displace the existing runnable handoff guarantee",
+);
+assert.equal(overflowProjection.notice, null, "a visible revealable location must remain a complete completed-Mission handoff");
+
 for (const verification of ["Failed. npm test exited 1", "Pending, Windows acceptance"] as const) {
   assert.equal(
     artifactHandoff({ uri: "file:///tmp/chef-project/todo-app.mjs", metadata: { verification } }).verification,

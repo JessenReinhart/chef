@@ -55,18 +55,34 @@ function hasPublishedResultLocation(artifact: MissionLinkedArtifact): boolean {
   return canRevealArtifact({ uri, metadata: artifact.metadata });
 }
 
-function keepRunnableHandoffVisible<T extends MissionLinkedArtifact>(
+function keepActionableHandoffsVisible<T extends MissionLinkedArtifact>(
   missionArtifacts: T[],
   visibleArtifacts: T[],
   limit: number,
 ): T[] {
-  if (limit <= 0 || visibleArtifacts.some(hasRunInstruction)) return visibleArtifacts;
+  if (limit <= 0) return [];
 
+  const requiredArtifacts: T[] = [];
   const runnableHandoff = [...missionArtifacts].reverse().find(hasRunInstruction);
-  if (!runnableHandoff) return visibleArtifacts;
-  if (visibleArtifacts.length < limit) return [...visibleArtifacts, runnableHandoff];
+  if (runnableHandoff) requiredArtifacts.push(runnableHandoff);
 
-  return [...visibleArtifacts.slice(0, Math.max(0, limit - 1)), runnableHandoff];
+  const locatedHandoff = [...missionArtifacts].reverse().find(hasPublishedResultLocation);
+  if (locatedHandoff && !requiredArtifacts.includes(locatedHandoff)) requiredArtifacts.push(locatedHandoff);
+
+  const next = [...visibleArtifacts];
+  for (const requiredArtifact of requiredArtifacts) {
+    if (next.includes(requiredArtifact)) continue;
+    if (next.length < limit) {
+      next.push(requiredArtifact);
+      continue;
+    }
+
+    const replaceIndex = next.findLastIndex((artifact) => !requiredArtifacts.includes(artifact));
+    if (replaceIndex < 0) continue;
+    next.splice(replaceIndex, 1);
+    next.push(requiredArtifact);
+  }
+  return next;
 }
 
 export function artifactsForMission<T extends MissionLinkedArtifact>(
@@ -96,7 +112,7 @@ export function visibleArtifactsForCurrentMission<T extends MissionLinkedArtifac
 ): T[] {
   const missionArtifacts = artifactsForCurrentMission(artifacts, scope);
   const recent = recentArtifacts(missionArtifacts, limit);
-  return keepRunnableHandoffVisible(missionArtifacts, recent, limit);
+  return keepActionableHandoffsVisible(missionArtifacts, recent, limit);
 }
 
 export function visibleArtifactsForSelectedThreadMission<T extends MissionLinkedArtifact>(
@@ -190,7 +206,7 @@ export function missionResultHandoffProjection<T extends MissionLinkedArtifact>(
     return { artifacts: [], notice: null };
   }
   const missionArtifacts = artifactsForCurrentMission(artifacts, scope);
-  const visibleArtifacts = keepRunnableHandoffVisible(
+  const visibleArtifacts = keepActionableHandoffsVisible(
     missionArtifacts,
     recentArtifacts(missionArtifacts, limit),
     limit,
