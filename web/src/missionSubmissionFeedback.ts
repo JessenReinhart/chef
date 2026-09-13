@@ -20,7 +20,7 @@ export type MissionSubmissionComposerState = {
 };
 
 export const MISSION_SUBMISSION_FAILURE_EVENT = "chef:mission-submission-failure";
-export const ACCEPTED_MISSION_PROJECTION_GRACE_MS = 30_000;
+export const ACCEPTED_MISSION_PROJECTION_GRACE_MS = 120_000;
 
 const SELECTED_THREAD_KEY = "chef:selected-thread";
 const NEW_THREAD_SUBMISSION_KEY = "__chef-new-thread-submission__";
