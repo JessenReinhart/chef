@@ -171,7 +171,7 @@ const crypto = require("crypto");
 
 const appPath = path.join(process.cwd(), ${JSON.stringify(TODO_APP)});
 fs.writeFileSync(appPath, ${JSON.stringify(TODO_APP_SOURCE)}, "utf8");
-const quoteArg = (value) => /\\s/.test(value) ? '"' + value + '"' : value;
+const quoteArg = (value) => /\s/.test(value) ? '"' + value + '"' : value;
 
 const sid = process.env.CHEF_SESSION_ID;
 if (!sid) throw new Error("CHEF_SESSION_ID is required for the golden acceptance worker");
