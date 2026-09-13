@@ -184,7 +184,6 @@ export function missionSubmissionAccepted(
 ): AcceptedMissionSubmission {
   const accepted = { threadId, missionId, goal: submittedText };
   acceptedMissionSubmissionTimes.set(accepted, acceptedAt);
-  rememberAcceptedMissionSubmission(accepted);
   return accepted;
 }
 
