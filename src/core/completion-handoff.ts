@@ -1,6 +1,7 @@
 import type { Artifact } from "./types.ts";
 
 const CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/u;
+const NON_SUCCESS_VERIFICATION = /\b(?:aborted|blocked|cancelled|canceled|error|errored|fail|failed|failure|pending|skipped|timeout|timed out|unchecked|unknown|unverified|not checked|not run|not verified)\b/iu;
 const MAX_SUMMARY_LENGTH = 240;
 
 function metadataText(artifact: Artifact, keys: readonly string[]): string | undefined {
@@ -25,20 +26,41 @@ function compactSummary(value: string | undefined): string | undefined {
   return compact.length > MAX_SUMMARY_LENGTH ? `${compact.slice(0, MAX_SUMMARY_LENGTH - 1)}…` : compact;
 }
 
+function fileUriLocation(uri: string): string | undefined {
+  if (!/^file:/iu.test(uri)) return undefined;
+  try {
+    const url = new URL(uri);
+    let pathname = decodeURIComponent(url.pathname);
+    if (!url.host || url.hostname.toLowerCase() === "localhost") {
+      if (/^\/[A-Za-z]:\//u.test(pathname)) pathname = pathname.slice(1);
+      return singleLine(pathname);
+    }
+    return singleLine(`//${url.host}${pathname.startsWith("/") ? pathname : `/${pathname}`}`);
+  } catch {
+    return undefined;
+  }
+}
+
 function artifactLocation(artifact: Artifact): string | undefined {
   const explicit = singleLine(metadataText(artifact, ["resultLocation", "path", "location"]));
-  if (explicit) return explicit;
-  return artifact.uri.startsWith("file:") ? singleLine(artifact.uri) : undefined;
+  if (explicit) return /^file:/iu.test(explicit) ? fileUriLocation(explicit) : explicit;
+  return fileUriLocation(artifact.uri);
 }
 
 function artifactRunCommand(artifact: Artifact): string | undefined {
   return singleLine(metadataText(artifact, ["run", "runCommand", "command"]));
 }
 
+function positiveVerification(value: string | undefined): string | undefined {
+  const compact = compactSummary(value);
+  if (!compact || NON_SUCCESS_VERIFICATION.test(compact)) return undefined;
+  return compact;
+}
+
 function artifactVerification(artifact: Artifact): string | undefined {
-  const explicit = compactSummary(metadataText(artifact, ["verification"]));
+  const explicit = positiveVerification(metadataText(artifact, ["verification"]));
   if (explicit) return explicit;
-  const verifiedBy = compactSummary(metadataText(artifact, ["verifiedBy"]));
+  const verifiedBy = positiveVerification(metadataText(artifact, ["verifiedBy"]));
   if (verifiedBy) return `verified by ${verifiedBy}`;
   return artifact.metadata.verified === true ? "verified" : undefined;
 }
@@ -54,7 +76,7 @@ function handoffScore(artifact: Artifact): number {
 /**
  * Enrich a terminal Mission report with one bounded, truthful result handoff.
  * Only explicit artifact metadata is surfaced; unsafe multiline/control-bearing
- * run commands are deliberately ignored instead of being presented as runnable.
+ * run commands and negative verification claims are deliberately ignored.
  */
 export function completionHandoffReport(report: string, artifacts: readonly Artifact[]): string {
   const primary = artifacts
