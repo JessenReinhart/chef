@@ -66,7 +66,7 @@ function artifactVerification(artifact: Artifact): string | undefined {
 }
 
 function handoffScore(artifact: Artifact): number {
-  let score = artifact.type === "result" ? 4 : 0;
+  let score = artifact.type === "result" ? 1 : 0;
   if (artifactLocation(artifact)) score += 3;
   if (artifactRunCommand(artifact)) score += 2;
   if (artifactVerification(artifact)) score += 1;
