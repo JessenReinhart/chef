@@ -113,6 +113,39 @@ assert.doesNotMatch(
   "a nominal result must not hide a more actionable handoff artifact",
 );
 
+for (const resultLocation of [
+  "../outside/todo-app",
+  "dist/../../outside/todo-app",
+  "dist\\..\\..\\outside\\todo-app",
+  "file:///tmp/bad%ZZ/result",
+  "file://server/share/todo-app",
+  "https://example.com/todo-app",
+  "//example.com/todo-app",
+  "\\\\fileserver\\share\\todo-app",
+] as const) {
+  const unusableLocation = completionHandoffReport("Plan completed.", [artifact({
+    uri: "sideband://result",
+    metadata: { resultLocation },
+  })]);
+  assert.doesNotMatch(
+    unusableLocation,
+    /Location:/,
+    `terminal completion must not advertise resultLocation=${JSON.stringify(resultLocation)} when Simple Mode cannot reveal it`,
+  );
+}
+
+for (const resultLocation of ["C:\\Work\\chef\\todo-app", "file:///C:/Work/chef/todo-app", "dist/../todo-app"] as const) {
+  const revealableLocation = completionHandoffReport("Plan completed.", [artifact({
+    uri: "sideband://result",
+    metadata: { resultLocation },
+  })]);
+  assert.match(
+    revealableLocation,
+    /Location:/,
+    `terminal completion must preserve revealable Windows/project-local resultLocation=${JSON.stringify(resultLocation)}`,
+  );
+}
+
 const dir = await mkdtemp(join(tmpdir(), "chef-completion-handoff-"));
 const repository = new Repository(join(dir, "chef.sqlite"));
 repository.createWorkspace({ id: "workspace-a", name: "Workspace A" });
