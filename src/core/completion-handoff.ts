@@ -68,7 +68,8 @@ function isRevealableLocation(location: string): boolean {
 
 function artifactLocation(artifact: Artifact): string | undefined {
   const explicit = singleLine(metadataText(artifact, ["resultLocation", "path", "location"]));
-  if (explicit && isRevealableLocation(explicit)) {
+  if (explicit !== undefined) {
+    if (!isRevealableLocation(explicit)) return undefined;
     return hasFileScheme(explicit) ? fileUriLocation(explicit) : explicit;
   }
   return fileUriLocation(artifact.uri);
@@ -102,9 +103,10 @@ function handoffScore(artifact: Artifact): number {
 
 /**
  * Enrich a terminal Mission report with one bounded, truthful result handoff.
- * Only explicit artifact metadata is surfaced; locations must support Chef's
- * ordinary local result reveal behavior, while unsafe run commands and negative
- * verification claims are deliberately ignored.
+ * Explicit result-location metadata follows the same authority rule as Simple
+ * Mode reveal actions: artifact.uri is only a location fallback when no explicit
+ * location was published. Unsafe run commands and negative verification claims
+ * are deliberately ignored.
  */
 export function completionHandoffReport(report: string, artifacts: readonly Artifact[]): string {
   const primary = artifacts
