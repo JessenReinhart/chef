@@ -6,7 +6,7 @@ import { subscribeMissionProgressProjection } from "./missionProgressStream";
 import { assistantContentSeenSinceLastUser, chatSubmissionFallback } from "./chatSubmissionFallback";
 import { subscribeChatHistoryProjection } from "./chatHistoryProjection";
 import { createChatSubmissionOwnership, settleOwnedChatSubmission, type ChatSubmissionOwnership } from "./chatSubmissionOwnership";
-import { shouldFollowChatTail } from "./chatScrollFollow";
+import { shouldFollowChatTail, shouldScrollChatTail } from "./chatScrollFollow";
 
 interface ChatPanelProps {
   onPlanProposed: (taskIds: string[]) => void;
@@ -59,7 +59,7 @@ export function ChatPanel({ onPlanProposed, mode }: ChatPanelProps) {
 
   const scrollToBottom = useCallback(() => {
     const viewport = messagesViewportRef.current;
-    if (!viewport || (!followTailRef.current && !forceTailRef.current)) return;
+    if (!viewport || !shouldScrollChatTail(followTailRef.current, forceTailRef.current)) return;
     forceTailRef.current = false;
     viewport.scrollTop = viewport.scrollHeight;
     followTailRef.current = true;
