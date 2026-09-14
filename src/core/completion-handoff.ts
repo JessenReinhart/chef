@@ -68,8 +68,7 @@ function isRevealableLocation(location: string): boolean {
 
 function artifactLocation(artifact: Artifact): string | undefined {
   const explicit = singleLine(metadataText(artifact, ["resultLocation", "path", "location"]));
-  if (explicit) {
-    if (!isRevealableLocation(explicit)) return undefined;
+  if (explicit && isRevealableLocation(explicit)) {
     return hasFileScheme(explicit) ? fileUriLocation(explicit) : explicit;
   }
   return fileUriLocation(artifact.uri);
