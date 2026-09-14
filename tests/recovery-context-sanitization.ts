@@ -34,6 +34,16 @@ assert.equal(
   "C1 OSC/ST/CSI/control forms must be sanitized just like their 7-bit ESC equivalents",
 );
 
+assert.equal(
+  failedMissionFollowupPrompt({
+    goal: "Create a simple todo app",
+    failureReason: "compile failed \u001bP1;2;3+qterminal query payload\u001b\\after query",
+    lastActivity: "worker output \u009fprivate terminal payload\u009cstill useful",
+  }),
+  "Fix this failed work: Create a simple todo app\n\nWhat happened: compile failed after query\nLast useful activity: worker output still useful",
+  "DCS/APC and equivalent string controls must drop their terminal-only payload instead of leaking it into recovery context",
+);
+
 const duplicateAfterSanitization = failedMissionFollowupPrompt({
   goal: "Create a simple todo app",
   failureReason: "\u001b]8;;https://example.test/error\u0007npm test failed\u001b]8;;\u0007",
@@ -45,4 +55,4 @@ assert.equal(
   "deduplication must compare the readable sanitized context rather than terminal-decorated source strings",
 );
 
-console.log("recovery-context-sanitization: ok — failed-work follow-ups strip 7-bit/C1 OSC, CSI, and control markup while preserving readable labels and deduplication");
+console.log("recovery-context-sanitization: ok — failed-work follow-ups strip OSC, string controls, CSI, and control markup while preserving readable labels and deduplication");
