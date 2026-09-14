@@ -14,6 +14,8 @@ assert.equal(revealable("sideband://result", { resultLocation: "file://server/sh
 assert.equal(revealable("sideband://result", { resultLocation: "dist/todo-app" }), true, "relative project-local result locations remain revealable");
 assert.equal(revealable("sideband://result", { resultLocation: "dist/../todo-app" }), true, "relative paths that normalize within the project remain revealable");
 assert.equal(revealable("sideband://result", { path: "C:\\Work\\chef\\todo-app" }), true, "explicit Windows result paths remain revealable");
+assert.equal(revealable("sideband://result", { path: "\\\\?\\C:\\Work\\chef\\todo-app" }), true, "Win32 extended-length drive results remain revealable as local results");
+assert.equal(revealable("sideband://result", { path: "\\\\?\\UNC\\fileserver\\share\\todo-app" }), false, "Win32 extended-length UNC results must remain network results rather than gaining a local reveal action");
 
 assert.equal(revealable("file:///tmp/bad%ZZ/result"), false, "malformed artifact file URIs must not advertise a dead-end Show result action");
 assert.equal(revealable("sideband://result", { resultLocation: "file:///tmp/bad%ZZ/result" }), false, "malformed explicit file-URI locations must not advertise Show result");
@@ -35,6 +37,11 @@ assert.equal(
   artifactHandoff({ uri: "sideband://result", metadata: { resultLocation: "file:///C:/Work/chef/todo-app.mjs" } }).location,
   "C:/Work/chef/todo-app.mjs",
   "explicit Windows file URI locations should use the same readable drive path as artifact URI fallbacks",
+);
+assert.equal(
+  artifactHandoff({ uri: "sideband://result", metadata: { resultLocation: "\\\\?\\C:\\Work\\chef\\todo-app.mjs" } }).location,
+  "C:\\Work\\chef\\todo-app.mjs",
+  "Win32 extended-length drive locations should be presented as the ordinary readable local drive path",
 );
 assert.equal(
   artifactHandoff({ uri: "sideband://result", metadata: { resultLocation: "file://localhost/tmp/chef-project/todo-app.mjs" } }).location,
@@ -85,7 +92,7 @@ assert.equal(
   null,
   "a completed Mission with an ordinary project-local revealable result must remain a complete handoff",
 );
-for (const resultLocation of ["C:\\Work\\chef\\todo-app", "file:///C:/Work/chef/todo-app"] as const) {
+for (const resultLocation of ["C:\\Work\\chef\\todo-app", "file:///C:/Work/chef/todo-app", "\\\\?\\C:\\Work\\chef\\todo-app"] as const) {
   const windowsResult: LivingArtifact = {
     ...locatedMissionResult,
     id: `windows-${resultLocation}`,
@@ -97,7 +104,7 @@ for (const resultLocation of ["C:\\Work\\chef\\todo-app", "file:///C:/Work/chef/
     `completed handoff must stay complete for revealable Windows resultLocation=${JSON.stringify(resultLocation)}`,
   );
 }
-for (const resultLocation of ["../outside/todo-app", "dist/../../outside/todo-app", "file:///tmp/bad%ZZ/result"] as const) {
+for (const resultLocation of ["../outside/todo-app", "dist/../../outside/todo-app", "file:///tmp/bad%ZZ/result", "\\\\?\\UNC\\fileserver\\share\\todo-app"] as const) {
   const unusableResult: LivingArtifact = {
     ...locatedMissionResult,
     id: `unusable-${resultLocation}`,
