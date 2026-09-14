@@ -1,6 +1,7 @@
 import type { UiMission, UiTask } from "./types";
 
 const NORMAL_MISSION_TASK_RETRY_BUDGET = 2;
+const FAILURE_FOLLOWUP_CONTEXT_LIMIT = 320;
 
 export type TaskRetryOwnership = {
   begin: (taskId: string) => boolean;
@@ -12,6 +13,42 @@ export type InterruptedMissionRecovery = {
   description: string;
   prompt: string;
 };
+
+function normalizedRecoveryContext(value?: string | null): string | null {
+  const normalized = value
+    ?.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "")
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return normalized || null;
+}
+
+function boundedRecoveryContext(value: string | null): string | null {
+  if (!value) return null;
+  return value.length <= FAILURE_FOLLOWUP_CONTEXT_LIMIT
+    ? value
+    : `${value.slice(0, FAILURE_FOLLOWUP_CONTEXT_LIMIT - 1)}…`;
+}
+
+export function failedMissionFollowupPrompt(input: {
+  goal: string;
+  failureReason?: string | null;
+  lastActivity?: string | null;
+}): string {
+  const normalizedFailureReason = normalizedRecoveryContext(input.failureReason);
+  const normalizedLastActivity = normalizedRecoveryContext(input.lastActivity);
+  const failureReason = boundedRecoveryContext(normalizedFailureReason);
+  const lastActivity = normalizedLastActivity && normalizedLastActivity !== normalizedFailureReason
+    ? boundedRecoveryContext(normalizedLastActivity)
+    : null;
+  const context: string[] = [];
+  if (failureReason) context.push(`What happened: ${failureReason}`);
+  if (lastActivity) context.push(`Last useful activity: ${lastActivity}`);
+
+  return context.length > 0
+    ? `Fix this failed work: ${input.goal}\n\n${context.join("\n")}`
+    : `Fix this failed work: ${input.goal}`;
+}
 
 export function createTaskRetryOwnership(): TaskRetryOwnership {
   const pendingTaskIds = new Set<string>();

@@ -3,7 +3,54 @@ import { TaskMachine } from "../src/runtime/task-machine.ts";
 import { Scheduler, type HarnessLike, type HarnessRegistry } from "../src/runtime/scheduler.ts";
 import { Repository } from "../src/persistence/database.ts";
 import type { Task } from "../src/core/types.ts";
-import { canRetryMissionTask, createTaskRetryOwnership } from "../web/src/missionRecovery.ts";
+import { canRetryMissionTask, createTaskRetryOwnership, failedMissionFollowupPrompt } from "../web/src/missionRecovery.ts";
+
+assert.equal(
+  failedMissionFollowupPrompt({
+    goal: "Create a simple todo app",
+    failureReason: "Worker exited with code 1",
+    lastActivity: "3 tests failed in todo.test.ts",
+  }),
+  "Fix this failed work: Create a simple todo app\n\nWhat happened: Worker exited with code 1\nLast useful activity: 3 tests failed in todo.test.ts",
+  "fresh failed-Mission recovery must preserve both the visible failure reason and distinct last useful activity",
+);
+
+assert.equal(
+  failedMissionFollowupPrompt({
+    goal: "Create a simple todo app",
+    failureReason: "  npm test   failed  ",
+    lastActivity: "npm test failed",
+  }),
+  "Fix this failed work: Create a simple todo app\n\nWhat happened: npm test failed",
+  "equivalent normalized recovery context must not be repeated",
+);
+
+assert.equal(
+  failedMissionFollowupPrompt({
+    goal: "Create a simple todo app",
+    failureReason: "\u001b[31mBuild failed\u001b[0m\u0007 after compile",
+    lastActivity: "\u001b[33m3 tests failed\u001b[0m",
+  }),
+  "Fix this failed work: Create a simple todo app\n\nWhat happened: Build failed after compile\nLast useful activity: 3 tests failed",
+  "terminal formatting and control bytes must not leak into the editable recovery prompt",
+);
+
+const longFailureContext = `build failed ${"x".repeat(400)}`;
+const longActivityContext = `test output ${"y".repeat(400)}`;
+const boundedFollowup = failedMissionFollowupPrompt({
+  goal: "Create a simple todo app",
+  failureReason: longFailureContext,
+  lastActivity: longActivityContext,
+});
+assert.match(boundedFollowup, /What happened: .{320}\nLast useful activity: .{320}$/s, "each recovery clue must remain independently bounded");
+assert.ok(!boundedFollowup.includes("x".repeat(330)), "oversized failure context must not leak past the bounded handoff");
+assert.ok(!boundedFollowup.includes("y".repeat(330)), "oversized worker activity must not leak past the bounded handoff");
+
+assert.equal(
+  failedMissionFollowupPrompt({ goal: "Create a simple todo app" }),
+  "Fix this failed work: Create a simple todo app",
+  "missing failure detail must still produce a concise fresh-work prompt",
+);
 
 assert.equal(canRetryMissionTask({
   missionStatus: "failed",
@@ -219,4 +266,4 @@ assert.ok(
 );
 repo.close();
 
-console.log("simple-mode-recovery-actions: ok — Retry follows Mission lifecycle, per-Task ownership, retry budget, approvals, read-only state, and clears stale Task failure state durably");
+console.log("simple-mode-recovery-actions: ok — failed follow-ups preserve bounded readable context; Retry follows Mission lifecycle, per-Task ownership, retry budget, approvals, read-only state, and clears stale Task failure state durably");

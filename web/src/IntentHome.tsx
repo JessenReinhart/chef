@@ -47,7 +47,7 @@ import {
   type MissionHomeState,
 } from "./missionProgress";
 import { createMissionProgressRefreshQueue } from "./missionProgressStream";
-import { canRetryMissionTask, createTaskRetryOwnership, interruptedMissionRecovery } from "./missionRecovery";
+import { canRetryMissionTask, createTaskRetryOwnership, failedMissionFollowupPrompt, interruptedMissionRecovery } from "./missionRecovery";
 import { partitionMissionTasksForSimpleMode } from "./missionTaskVisibility";
 import type { ChatMessage, UiMission, UiRuntimeEvent, UiTask } from "./types";
 
@@ -85,14 +85,6 @@ function missionOutcomePresentation(status: UiMission["status"]): { label: strin
 function titleFromMessage(message: string): string {
   const normalized = message.replace(/\s+/g, " ").trim();
   return normalized.length <= 48 ? normalized : `${normalized.slice(0, 45)}…`;
-}
-
-function failureFollowupPrompt(goal: string, context?: string | null): string {
-  const normalized = context?.replace(/\s+/g, " ").trim();
-  const bounded = normalized ? (normalized.length <= 320 ? normalized : `${normalized.slice(0, 317)}…`) : null;
-  return bounded
-    ? `Fix this failed work: ${goal}\n\nWhat happened: ${bounded}`
-    : `Fix this failed work: ${goal}`;
 }
 
 function activityText(event: UiRuntimeEvent): string | null {
@@ -579,7 +571,11 @@ export function IntentHome({ onOpenWorkbench }: { onOpenWorkbench: () => void })
 
   function prepareFailedMissionFollowup() {
     if (!latestMission || archivedThreadSelected || (latestMission.status !== "failed" && latestMission.status !== "blocked") || !selectedThreadId) return;
-    setGoal(failureFollowupPrompt(latestMission.goal, failureReason ?? lastMissionActivity));
+    setGoal(failedMissionFollowupPrompt({
+      goal: latestMission.goal,
+      failureReason,
+      lastActivity: lastMissionActivity,
+    }));
     setActionError(null);
   }
 
