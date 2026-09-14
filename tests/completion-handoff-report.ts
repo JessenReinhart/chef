@@ -68,6 +68,15 @@ assert.doesNotMatch(
   "negative verification metadata must not be promoted into a successful terminal handoff",
 );
 
+const zeroFailureVerification = completionHandoffReport("Plan completed.", [artifact({
+  metadata: { verification: "12 passed, 0 failed" },
+})]);
+assert.match(
+  zeroFailureVerification,
+  /Verification: 12 passed, 0 failed/,
+  "zero-failure verification evidence must remain visible just as it does in the Simple Mode result card",
+);
+
 const sparse = completionHandoffReport("Plan completed.", [artifact({
   uri: "sideband://session/result",
   metadata: {},
