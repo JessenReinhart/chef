@@ -19,6 +19,9 @@ function normalizedRecoveryContext(value?: string | null): string | null {
     ?.replace(/(?:\u001b\]|\u009d)[^\u0007\u001b\u009c]*(?:\u0007|\u001b\\|\u009c)/g, "")
     .replace(/(?:\u001b[PX^_]|[\u0090\u0098\u009e\u009f])[\s\S]*?(?:\u001b\\|\u009c)/g, "")
     .replace(/(?:\u001b\[|\u009b)[0-?]*[ -/]*[@-~]/g, "")
+    .replace(/(?:\u001b\]|\u009d)[\s\S]*$/g, "")
+    .replace(/(?:\u001b[PX^_]|[\u0090\u0098\u009e\u009f])[\s\S]*$/g, "")
+    .replace(/(?:\u001b\[|\u009b)[0-?]*[ -/]*$/g, "")
     .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
