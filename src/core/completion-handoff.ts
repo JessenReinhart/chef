@@ -26,24 +26,52 @@ function compactSummary(value: string | undefined): string | undefined {
   return compact.length > MAX_SUMMARY_LENGTH ? `${compact.slice(0, MAX_SUMMARY_LENGTH - 1)}…` : compact;
 }
 
+function hasFileScheme(value: string): boolean {
+  return /^file:/iu.test(value);
+}
+
 function fileUriLocation(uri: string): string | undefined {
-  if (!/^file:/iu.test(uri)) return undefined;
+  if (!hasFileScheme(uri)) return undefined;
   try {
     const url = new URL(uri);
+    if (url.host && url.hostname.toLowerCase() !== "localhost") return undefined;
     let pathname = decodeURIComponent(url.pathname);
-    if (!url.host || url.hostname.toLowerCase() === "localhost") {
-      if (/^\/[A-Za-z]:\//u.test(pathname)) pathname = pathname.slice(1);
-      return singleLine(pathname);
-    }
-    return singleLine(`//${url.host}${pathname.startsWith("/") ? pathname : `/${pathname}`}`);
+    if (/^\/[A-Za-z]:\//u.test(pathname)) pathname = pathname.slice(1);
+    return singleLine(pathname);
   } catch {
     return undefined;
   }
 }
 
+function relativeLocationStaysWithinProject(location: string): boolean {
+  let depth = 0;
+  for (const segment of location.replace(/\\/gu, "/").split("/")) {
+    if (!segment || segment === ".") continue;
+    if (segment === "..") {
+      if (depth === 0) return false;
+      depth -= 1;
+      continue;
+    }
+    depth += 1;
+  }
+  return true;
+}
+
+function isRevealableLocation(location: string): boolean {
+  if (hasFileScheme(location)) return fileUriLocation(location) !== undefined;
+  if (/^(?:\/\/|\\\\)/u.test(location)) return false;
+  if (/^[A-Za-z]:[\\/]/u.test(location)) return true;
+  if (/^[A-Za-z][A-Za-z0-9+.-]*:/u.test(location)) return false;
+  if (/^[\\/]/u.test(location)) return true;
+  return relativeLocationStaysWithinProject(location);
+}
+
 function artifactLocation(artifact: Artifact): string | undefined {
   const explicit = singleLine(metadataText(artifact, ["resultLocation", "path", "location"]));
-  if (explicit) return /^file:/iu.test(explicit) ? fileUriLocation(explicit) : explicit;
+  if (explicit) {
+    if (!isRevealableLocation(explicit)) return undefined;
+    return hasFileScheme(explicit) ? fileUriLocation(explicit) : explicit;
+  }
   return fileUriLocation(artifact.uri);
 }
 
@@ -75,8 +103,9 @@ function handoffScore(artifact: Artifact): number {
 
 /**
  * Enrich a terminal Mission report with one bounded, truthful result handoff.
- * Only explicit artifact metadata is surfaced; unsafe multiline/control-bearing
- * run commands and negative verification claims are deliberately ignored.
+ * Only explicit artifact metadata is surfaced; locations must support Chef's
+ * ordinary local result reveal behavior, while unsafe run commands and negative
+ * verification claims are deliberately ignored.
  */
 export function completionHandoffReport(report: string, artifacts: readonly Artifact[]): string {
   const primary = artifacts
