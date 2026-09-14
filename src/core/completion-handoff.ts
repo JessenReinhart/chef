@@ -1,5 +1,5 @@
 import type { Artifact } from "./types.ts";
-import { artifactHandoff } from "../../web/src/artifactHandoff.ts";
+import { artifactHandoff, canRevealArtifact } from "../../web/src/artifactHandoff.ts";
 
 const CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/u;
 const MAX_SUMMARY_LENGTH = 240;
@@ -26,65 +26,25 @@ function compactSummary(value: string | undefined): string | undefined {
   return compact.length > MAX_SUMMARY_LENGTH ? `${compact.slice(0, MAX_SUMMARY_LENGTH - 1)}…` : compact;
 }
 
-function hasFileScheme(value: string): boolean {
-  return /^file:/iu.test(value);
-}
-
-function fileUriLocation(uri: string): string | undefined {
-  if (!hasFileScheme(uri)) return undefined;
-  try {
-    const url = new URL(uri);
-    if (url.host && url.hostname.toLowerCase() !== "localhost") return undefined;
-    let pathname = decodeURIComponent(url.pathname);
-    if (/^\/[A-Za-z]:\//u.test(pathname)) pathname = pathname.slice(1);
-    return singleLine(pathname);
-  } catch {
-    return undefined;
-  }
-}
-
-function relativeLocationStaysWithinProject(location: string): boolean {
-  let depth = 0;
-  for (const segment of location.replace(/\\/gu, "/").split("/")) {
-    if (!segment || segment === ".") continue;
-    if (segment === "..") {
-      if (depth === 0) return false;
-      depth -= 1;
-      continue;
-    }
-    depth += 1;
-  }
-  return true;
-}
-
-function isRevealableLocation(location: string): boolean {
-  if (hasFileScheme(location)) return fileUriLocation(location) !== undefined;
-  if (/^(?:\/\/|\\\\)/u.test(location)) return false;
-  if (/^[A-Za-z]:[\\/]/u.test(location)) return true;
-  if (/^[A-Za-z][A-Za-z0-9+.-]*:/u.test(location)) return false;
-  if (/^[\\/]/u.test(location)) return true;
-  return relativeLocationStaysWithinProject(location);
-}
-
-function artifactLocation(artifact: Artifact): string | undefined {
-  const explicit = singleLine(metadataText(artifact, ["resultLocation", "path", "location"]));
-  if (explicit !== undefined) {
-    if (!isRevealableLocation(explicit)) return undefined;
-    return hasFileScheme(explicit) ? fileUriLocation(explicit) : explicit;
-  }
-  return fileUriLocation(artifact.uri);
-}
-
-function artifactRunCommand(artifact: Artifact): string | undefined {
-  return singleLine(metadataText(artifact, ["run", "runCommand", "command"]));
-}
-
-function artifactVerification(artifact: Artifact): string | undefined {
-  const verification = artifactHandoff({
+function handoffView(artifact: Artifact) {
+  return artifactHandoff({
     name: artifact.name,
     uri: artifact.uri,
     metadata: artifact.metadata,
-  }).verification;
+  });
+}
+
+function artifactLocation(artifact: Artifact): string | undefined {
+  if (!canRevealArtifact({ name: artifact.name, uri: artifact.uri, metadata: artifact.metadata })) return undefined;
+  return handoffView(artifact).location ?? undefined;
+}
+
+function artifactRunCommand(artifact: Artifact): string | undefined {
+  return singleLine(handoffView(artifact).runCommand ?? undefined);
+}
+
+function artifactVerification(artifact: Artifact): string | undefined {
+  const verification = handoffView(artifact).verification;
   if (!verification) return undefined;
   return verification.replace(/^Verified\b/u, "verified");
 }
@@ -99,10 +59,10 @@ function handoffScore(artifact: Artifact): number {
 
 /**
  * Enrich a terminal Mission report with one bounded, truthful result handoff.
- * Explicit result-location metadata follows the same authority rule as Simple
- * Mode reveal actions: artifact.uri is only a location fallback when no explicit
- * location was published. Run instructions are bounded to copy-safe single lines,
- * while verification truthfulness reuses Simple Mode's existing handoff contract.
+ * Location revealability and verification truthfulness intentionally reuse Simple
+ * Mode's existing handoff contract so the terminal note cannot promise actions or
+ * evidence that the ordinary result card rejects. Run instructions remain bounded
+ * to copy-safe single lines.
  */
 export function completionHandoffReport(report: string, artifacts: readonly Artifact[]): string {
   const primary = artifacts
