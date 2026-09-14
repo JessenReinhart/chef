@@ -17,3 +17,8 @@ export function shouldFollowChatTail(
   const distanceFromTail = Math.max(0, viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight);
   return distanceFromTail <= Math.max(0, threshold);
 }
+
+/** A local user submission is authoritative intent to return to the live turn. */
+export function shouldScrollChatTail(followTail: boolean, forceTail: boolean): boolean {
+  return forceTail || followTail;
+}
