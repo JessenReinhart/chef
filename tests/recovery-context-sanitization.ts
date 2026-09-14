@@ -44,6 +44,26 @@ assert.equal(
   "DCS/APC and equivalent string controls must drop their terminal-only payload instead of leaking it into recovery context",
 );
 
+assert.equal(
+  failedMissionFollowupPrompt({
+    goal: "Create a simple todo app",
+    failureReason: "npm test failed then terminal started a link \u001b]8;;https://example.test/truncated",
+    lastActivity: "worker was interrupted during terminal query \u0090private payload without terminator",
+  }),
+  "Fix this failed work: Create a simple todo app\n\nWhat happened: npm test failed then terminal started a link\nLast useful activity: worker was interrupted during terminal query",
+  "unterminated OSC and terminal string controls must drop their truncated protocol tails when worker output ends mid-sequence",
+);
+
+assert.equal(
+  failedMissionFollowupPrompt({
+    goal: "Create a simple todo app",
+    failureReason: "build failed \u001b[31",
+    lastActivity: "test failed \u009b1;4",
+  }),
+  "Fix this failed work: Create a simple todo app\n\nWhat happened: build failed\nLast useful activity: test failed",
+  "unterminated CSI fragments must not survive when worker output ends before the final control byte",
+);
+
 const duplicateAfterSanitization = failedMissionFollowupPrompt({
   goal: "Create a simple todo app",
   failureReason: "\u001b]8;;https://example.test/error\u0007npm test failed\u001b]8;;\u0007",
@@ -55,4 +75,4 @@ assert.equal(
   "deduplication must compare the readable sanitized context rather than terminal-decorated source strings",
 );
 
-console.log("recovery-context-sanitization: ok — failed-work follow-ups strip OSC, string controls, CSI, and control markup while preserving readable labels and deduplication");
+console.log("recovery-context-sanitization: ok — failed-work follow-ups strip complete and truncated terminal controls while preserving readable labels and deduplication");
