@@ -25,8 +25,15 @@ export type SingleFlightProjectSelectionResult<T> =
   | { accepted: true; value: T }
   | { accepted: false };
 
-function collapseRepeatedSeparators(path: string): string {
+function stripWindowsExtendedPathPrefix(path: string): string {
   const slashNormalized = path.replace(/\\/g, "/");
+  if (/^\/\/\?\/UNC\//i.test(slashNormalized)) return `//${slashNormalized.slice(8)}`;
+  if (/^\/\/\?\/[A-Za-z]:\//.test(slashNormalized)) return slashNormalized.slice(4);
+  return slashNormalized;
+}
+
+function collapseRepeatedSeparators(path: string): string {
+  const slashNormalized = stripWindowsExtendedPathPrefix(path);
   const uncRoot = /^\/\/[^/]/.test(slashNormalized);
   const body = slashNormalized.slice(uncRoot ? 2 : 0).replace(/\/{2,}/g, "/");
   return uncRoot ? `//${body}` : body;
