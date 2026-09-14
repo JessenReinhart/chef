@@ -134,6 +134,17 @@ for (const resultLocation of [
   );
 }
 
+const uriFallback = completionHandoffReport("Plan completed.", [artifact({
+  uri: "file:///projects/demo/todo-app.mjs",
+  metadata: { resultLocation: "../outside/todo-app" },
+})]);
+assert.match(
+  uriFallback,
+  /Location: \/projects\/demo\/todo-app\.mjs/,
+  "an unusable explicit location must not hide the artifact's usable local URI",
+);
+assert.doesNotMatch(uriFallback, /\.\.\/outside\/todo-app/);
+
 for (const resultLocation of ["C:\\Work\\chef\\todo-app", "file:///C:/Work/chef/todo-app", "dist/../todo-app"] as const) {
   const revealableLocation = completionHandoffReport("Plan completed.", [artifact({
     uri: "sideband://result",
