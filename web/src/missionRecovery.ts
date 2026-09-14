@@ -15,7 +15,11 @@ export type InterruptedMissionRecovery = {
 };
 
 function normalizedRecoveryContext(value?: string | null): string | null {
-  const normalized = value?.replace(/\s+/g, " ").trim();
+  const normalized = value
+    ?.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "")
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
   return normalized || null;
 }
 
