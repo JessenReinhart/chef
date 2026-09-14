@@ -25,6 +25,16 @@ assert.equal(
   "equivalent normalized recovery context must not be repeated",
 );
 
+assert.equal(
+  failedMissionFollowupPrompt({
+    goal: "Create a simple todo app",
+    failureReason: "\u001b[31mBuild failed\u001b[0m\u0007 after compile",
+    lastActivity: "\u001b[33m3 tests failed\u001b[0m",
+  }),
+  "Fix this failed work: Create a simple todo app\n\nWhat happened: Build failed after compile\nLast useful activity: 3 tests failed",
+  "terminal formatting and control bytes must not leak into the editable recovery prompt",
+);
+
 const longFailureContext = `build failed ${"x".repeat(400)}`;
 const longActivityContext = `test output ${"y".repeat(400)}`;
 const boundedFollowup = failedMissionFollowupPrompt({
@@ -256,4 +266,4 @@ assert.ok(
 );
 repo.close();
 
-console.log("simple-mode-recovery-actions: ok — failed follow-ups preserve bounded visible context; Retry follows Mission lifecycle, per-Task ownership, retry budget, approvals, read-only state, and clears stale Task failure state durably");
+console.log("simple-mode-recovery-actions: ok — failed follow-ups preserve bounded readable context; Retry follows Mission lifecycle, per-Task ownership, retry budget, approvals, read-only state, and clears stale Task failure state durably");
