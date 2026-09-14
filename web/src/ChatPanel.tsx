@@ -6,6 +6,7 @@ import { subscribeMissionProgressProjection } from "./missionProgressStream";
 import { assistantContentSeenSinceLastUser, chatSubmissionFallback } from "./chatSubmissionFallback";
 import { subscribeChatHistoryProjection } from "./chatHistoryProjection";
 import { createChatSubmissionOwnership, settleOwnedChatSubmission, type ChatSubmissionOwnership } from "./chatSubmissionOwnership";
+import { shouldFollowChatTail } from "./chatScrollFollow";
 
 interface ChatPanelProps {
   onPlanProposed: (taskIds: string[]) => void;
@@ -47,7 +48,9 @@ export function ChatPanel({ onPlanProposed, mode }: ChatPanelProps) {
   const [lastEventSeq, setLastEventSeq] = useState<number | undefined>(undefined);
   const [llmStatus, setLlmStatus] = useState<LlmStatus | null>(null);
   const [progress, setProgress] = useState<MissionProgressItem[]>([]);
-  const latestMessageRef = useRef<HTMLDivElement>(null);
+  const messagesViewportRef = useRef<HTMLDivElement>(null);
+  const followTailRef = useRef(true);
+  const forceTailRef = useRef(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const onPlanProposedRef = useRef(onPlanProposed);
   onPlanProposedRef.current = onPlanProposed;
@@ -55,7 +58,11 @@ export function ChatPanel({ onPlanProposed, mode }: ChatPanelProps) {
   const submissionOwnershipRef = useRef<ChatSubmissionOwnership | null>(null);
 
   const scrollToBottom = useCallback(() => {
-    latestMessageRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    const viewport = messagesViewportRef.current;
+    if (!viewport || (!followTailRef.current && !forceTailRef.current)) return;
+    forceTailRef.current = false;
+    viewport.scrollTop = viewport.scrollHeight;
+    followTailRef.current = true;
   }, []);
 
   useEffect(() => {
@@ -90,11 +97,16 @@ export function ChatPanel({ onPlanProposed, mode }: ChatPanelProps) {
   useEffect(() => subscribeChatHistoryProjection(
     () => api.chatMessages(),
     (msgs) => {
+      forceTailRef.current = true;
       setMessages(
         msgs.filter((m) => m.content && m.timestamp > 0).map((m) => ({ ...m, bubbleKind: m.type === "error" ? "error" : undefined }))
       );
     },
-    () => setMessages([]),
+    () => {
+      followTailRef.current = true;
+      forceTailRef.current = true;
+      setMessages([]);
+    },
   ), []);
 
   // Network settlement belongs to the foreground Thread too. A Thread switch
@@ -235,6 +247,7 @@ export function ChatPanel({ onPlanProposed, mode }: ChatPanelProps) {
     const text = input.trim();
     setInput("");
     setStreaming(true);
+    forceTailRef.current = true;
     setMessages((prev) => [...prev, { role: "user", content: text, timestamp: Date.now() }]);
 
     await settleOwnedChatSubmission(
@@ -332,7 +345,14 @@ export function ChatPanel({ onPlanProposed, mode }: ChatPanelProps) {
       )}
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-4">
+      <div
+        ref={messagesViewportRef}
+        onScroll={() => {
+          const viewport = messagesViewportRef.current;
+          if (viewport) followTailRef.current = shouldFollowChatTail(viewport);
+        }}
+        className="flex-1 overflow-y-auto p-3 space-y-4"
+      >
         {messages.length === 0 && (
           <div className="text-center text-[#8b949e] pt-10 px-2 space-y-4">
             <div className="mx-auto h-11 w-11 rounded-xl bg-[#161b22] border border-[#30363d] flex items-center justify-center">
@@ -391,7 +411,6 @@ export function ChatPanel({ onPlanProposed, mode }: ChatPanelProps) {
             </div>
           </div>
         ))}
-        <div ref={latestMessageRef} aria-hidden="true" />
       </div>
 
       {/* LLM provider status — informational only */}
