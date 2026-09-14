@@ -1,7 +1,7 @@
 import type { Artifact } from "./types.ts";
+import { artifactHandoff } from "../../web/src/artifactHandoff.ts";
 
 const CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/u;
-const NON_SUCCESS_VERIFICATION = /\b(?:aborted|blocked|cancelled|canceled|error|errored|fail|failed|failure|pending|skipped|timeout|timed out|unchecked|unknown|unverified|not checked|not run|not verified)\b/iu;
 const MAX_SUMMARY_LENGTH = 240;
 
 function metadataText(artifact: Artifact, keys: readonly string[]): string | undefined {
@@ -79,18 +79,14 @@ function artifactRunCommand(artifact: Artifact): string | undefined {
   return singleLine(metadataText(artifact, ["run", "runCommand", "command"]));
 }
 
-function positiveVerification(value: string | undefined): string | undefined {
-  const compact = compactSummary(value);
-  if (!compact || NON_SUCCESS_VERIFICATION.test(compact)) return undefined;
-  return compact;
-}
-
 function artifactVerification(artifact: Artifact): string | undefined {
-  const explicit = positiveVerification(metadataText(artifact, ["verification"]));
-  if (explicit) return explicit;
-  const verifiedBy = positiveVerification(metadataText(artifact, ["verifiedBy"]));
-  if (verifiedBy) return `verified by ${verifiedBy}`;
-  return artifact.metadata.verified === true ? "verified" : undefined;
+  const verification = artifactHandoff({
+    name: artifact.name,
+    uri: artifact.uri,
+    metadata: artifact.metadata,
+  }).verification;
+  if (!verification) return undefined;
+  return verification.replace(/^Verified\b/u, "verified");
 }
 
 function handoffScore(artifact: Artifact): number {
@@ -105,8 +101,8 @@ function handoffScore(artifact: Artifact): number {
  * Enrich a terminal Mission report with one bounded, truthful result handoff.
  * Explicit result-location metadata follows the same authority rule as Simple
  * Mode reveal actions: artifact.uri is only a location fallback when no explicit
- * location was published. Unsafe run commands and negative verification claims
- * are deliberately ignored.
+ * location was published. Run instructions are bounded to copy-safe single lines,
+ * while verification truthfulness reuses Simple Mode's existing handoff contract.
  */
 export function completionHandoffReport(report: string, artifacts: readonly Artifact[]): string {
   const primary = artifacts
