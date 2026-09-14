@@ -24,6 +24,16 @@ assert.equal(
   "OSC titles, CSI formatting, and stray control bytes must compose into one readable recovery sanitizer",
 );
 
+assert.equal(
+  failedMissionFollowupPrompt({
+    goal: "Create a simple todo app",
+    failureReason: "\u009d8;;https://example.test/c1\u009cC1 link label\u009d8;;\u009c after link",
+    lastActivity: "\u009b31mred failure\u009b0m\u0085next",
+  }),
+  "Fix this failed work: Create a simple todo app\n\nWhat happened: C1 link label after link\nLast useful activity: red failure next",
+  "C1 OSC/ST/CSI/control forms must be sanitized just like their 7-bit ESC equivalents",
+);
+
 const duplicateAfterSanitization = failedMissionFollowupPrompt({
   goal: "Create a simple todo app",
   failureReason: "\u001b]8;;https://example.test/error\u0007npm test failed\u001b]8;;\u0007",
@@ -35,4 +45,4 @@ assert.equal(
   "deduplication must compare the readable sanitized context rather than terminal-decorated source strings",
 );
 
-console.log("recovery-context-sanitization: ok — failed-work follow-ups strip OSC/CSI/control markup while preserving readable labels and deduplication");
+console.log("recovery-context-sanitization: ok — failed-work follow-ups strip 7-bit/C1 OSC, CSI, and control markup while preserving readable labels and deduplication");
