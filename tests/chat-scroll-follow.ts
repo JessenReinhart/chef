@@ -3,6 +3,7 @@ import { strict as assert } from "node:assert";
 import {
   CHAT_TAIL_FOLLOW_THRESHOLD_PX,
   shouldFollowChatTail,
+  shouldScrollChatTail,
 } from "../web/src/chatScrollFollow.ts";
 
 const viewport = (distanceFromTail: number) => ({
@@ -32,5 +33,20 @@ assert.equal(
   false,
   "callers can require an exact-bottom policy when needed",
 );
+assert.equal(
+  shouldScrollChatTail(false, false),
+  false,
+  "passive incoming updates must not auto-scroll after the reader leaves the live tail",
+);
+assert.equal(
+  shouldScrollChatTail(false, true),
+  true,
+  "a new local user submission must force the conversation back to its newest turn",
+);
+assert.equal(
+  shouldScrollChatTail(true, false),
+  true,
+  "passive incoming updates should continue following while the reader remains at the live tail",
+);
 
-console.log("chat-scroll-follow: ok — live chat follows near the tail without stealing an intentionally scrolled-up reading position");
+console.log("chat-scroll-follow: ok — live chat follows near the tail, local submissions force the newest turn into view, and passive updates respect an intentionally scrolled-up reading position");
