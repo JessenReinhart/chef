@@ -134,16 +134,16 @@ for (const resultLocation of [
   );
 }
 
-const uriFallback = completionHandoffReport("Plan completed.", [artifact({
+const explicitLocationRemainsAuthoritative = completionHandoffReport("Plan completed.", [artifact({
   uri: "file:///projects/demo/todo-app.mjs",
   metadata: { resultLocation: "../outside/todo-app" },
 })]);
-assert.match(
-  uriFallback,
-  /Location: \/projects\/demo\/todo-app\.mjs/,
-  "an unusable explicit location must not hide the artifact's usable local URI",
+assert.doesNotMatch(
+  explicitLocationRemainsAuthoritative,
+  /Location:/,
+  "terminal completion must not advertise an artifact URI fallback that Simple Mode will not reveal while explicit result metadata is present",
 );
-assert.doesNotMatch(uriFallback, /\.\.\/outside\/todo-app/);
+assert.doesNotMatch(explicitLocationRemainsAuthoritative, /\.\.\/outside\/todo-app/);
 
 for (const resultLocation of ["C:\\Work\\chef\\todo-app", "file:///C:/Work/chef/todo-app", "dist/../todo-app"] as const) {
   const revealableLocation = completionHandoffReport("Plan completed.", [artifact({
