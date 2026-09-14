@@ -47,7 +47,7 @@ export function ChatPanel({ onPlanProposed, mode }: ChatPanelProps) {
   const [lastEventSeq, setLastEventSeq] = useState<number | undefined>(undefined);
   const [llmStatus, setLlmStatus] = useState<LlmStatus | null>(null);
   const [progress, setProgress] = useState<MissionProgressItem[]>([]);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const latestMessageRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const onPlanProposedRef = useRef(onPlanProposed);
   onPlanProposedRef.current = onPlanProposed;
@@ -55,7 +55,7 @@ export function ChatPanel({ onPlanProposed, mode }: ChatPanelProps) {
   const submissionOwnershipRef = useRef<ChatSubmissionOwnership | null>(null);
 
   const scrollToBottom = useCallback(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    latestMessageRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, []);
 
   useEffect(() => {
@@ -120,7 +120,6 @@ export function ChatPanel({ onPlanProposed, mode }: ChatPanelProps) {
 
         switch (event.type) {
           case "chat.user": {
-            // Echo user message from server (reconnect / catch-up).
             if (event.payload.content && !processedIdsRef.current.has(id)) {
               processedIdsRef.current.add(id);
               setMessages((prev) => {
@@ -242,8 +241,6 @@ export function ChatPanel({ onPlanProposed, mode }: ChatPanelProps) {
       () => api.chat(text),
       {
         onSuccess: (result) => {
-          // SSE is preferred for live chat, but the POST is authoritative fallback
-          // evidence when the stream is delayed or misses this acknowledgement.
           const fallback = chatSubmissionFallback(result);
           if (fallback) {
             setMessages((prev) => assistantContentSeenSinceLastUser(prev, fallback.content)
@@ -283,7 +280,6 @@ export function ChatPanel({ onPlanProposed, mode }: ChatPanelProps) {
 
   return (
     <div className="flex flex-col h-full bg-[#0d1117]">
-      {/* Header */}
       <div className="flex items-center justify-between h-12 px-4 border-b border-[#21262d] bg-[#010409]/80 backdrop-blur shrink-0">
         <div className="flex items-center gap-2">
           <span className="flex items-center justify-center h-6 w-6 rounded-md bg-cyan-500/15 border border-cyan-500/30">
@@ -313,26 +309,16 @@ export function ChatPanel({ onPlanProposed, mode }: ChatPanelProps) {
           <div className="space-y-1.5">
             {progress.map((item) => (
               <div key={item.id} className="flex items-start gap-2 text-[11px] leading-4">
-                <span
-                  className={`mt-1 h-1.5 w-1.5 shrink-0 rounded-full ${
-                    item.tone === "success" ? "bg-green-400"
-                    : item.tone === "attention" ? "bg-amber-400"
-                    : item.tone === "active" ? "bg-cyan-400"
-                    : "bg-[#6e7681]"
-                  }`}
-                />
+                <span className={`mt-1 h-1.5 w-1.5 shrink-0 rounded-full ${item.tone === "success" ? "bg-green-400" : item.tone === "attention" ? "bg-amber-400" : item.tone === "active" ? "bg-cyan-400" : "bg-[#6e7681]"}`} />
                 <span className="min-w-0 flex-1 text-[#c9d1d9]">{item.text}</span>
-                {mode === "power" && (
-                  <code className="max-w-28 shrink-0 truncate text-[9px] text-[#6e7681]" title={item.eventType}>{item.eventType}</code>
-                )}
+                {mode === "power" && <code className="max-w-28 shrink-0 truncate text-[9px] text-[#6e7681]" title={item.eventType}>{item.eventType}</code>}
               </div>
             ))}
           </div>
         </div>
       )}
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-4" ref={messagesEndRef}>
+      <div className="flex-1 overflow-y-auto p-3 space-y-4">
         {messages.length === 0 && (
           <div className="text-center text-[#8b949e] pt-10 px-2 space-y-4">
             <div className="mx-auto h-11 w-11 rounded-xl bg-[#161b22] border border-[#30363d] flex items-center justify-center">
@@ -346,14 +332,7 @@ export function ChatPanel({ onPlanProposed, mode }: ChatPanelProps) {
             </div>
             <div className="flex flex-col items-center gap-2">
               {QUICK_PROMPTS.map((p, i) => (
-                <button
-                  key={i}
-                  onClick={() => {
-                    setInput(p);
-                    inputRef.current?.focus();
-                  }}
-                  className="w-full max-w-xs px-3 py-2 text-left text-xs rounded-lg border border-[#30363d] bg-[#161b22] text-[#8b949e] hover:text-[#e6edf3] hover:border-cyan-500/50 hover:bg-cyan-500/5 transition-colors"
-                >
+                <button key={i} onClick={() => { setInput(p); inputRef.current?.focus(); }} className="w-full max-w-xs px-3 py-2 text-left text-xs rounded-lg border border-[#30363d] bg-[#161b22] text-[#8b949e] hover:text-[#e6edf3] hover:border-cyan-500/50 hover:bg-cyan-500/5 transition-colors">
                   {p}
                 </button>
               ))}
@@ -362,27 +341,11 @@ export function ChatPanel({ onPlanProposed, mode }: ChatPanelProps) {
         )}
         {messages.map((msg, idx) => (
           <div key={idx} className={`flex gap-3 ${msg.role === "user" ? "flex-row-reverse" : ""}`}>
-            <div
-              className={`flex-shrink-0 h-7 w-7 rounded-full flex items-center justify-center text-xs font-semibold ${
-                msg.role === "user"
-                  ? "bg-cyan-500/20 text-cyan-400 border border-cyan-500/30"
-                  : "bg-green-500/20 text-green-400 border border-green-500/30"
-              }`}
-            >
+            <div className={`flex-shrink-0 h-7 w-7 rounded-full flex items-center justify-center text-xs font-semibold ${msg.role === "user" ? "bg-cyan-500/20 text-cyan-400 border border-cyan-500/30" : "bg-green-500/20 text-green-400 border border-green-500/30"}`}>
               {msg.role === "user" ? "U" : "C"}
             </div>
             <div className={`max-w-[80%] ${msg.role === "user" ? "text-right" : "text-left"}`}>
-              <div
-                className={`inline-block px-3 py-2 rounded-2xl text-sm leading-relaxed ${
-                  msg.role === "user"
-                    ? "bg-cyan-500/10 border border-cyan-500/20 text-[#e6edf3] rounded-br-md"
-                    : msg.bubbleKind === "plan.proposed"
-                    ? "bg-amber-500/10 border border-amber-500/20 text-[#e6edf3] rounded-bl-md"
-                    : msg.bubbleKind === "plan.error" || msg.bubbleKind === "error"
-                    ? "bg-red-500/10 border border-red-500/20 text-red-300 rounded-bl-md"
-                    : "bg-green-500/10 border border-green-500/20 text-[#e6edf3] rounded-bl-md"
-                }`}
-              >
+              <div className={`inline-block px-3 py-2 rounded-2xl text-sm leading-relaxed ${msg.role === "user" ? "bg-cyan-500/10 border border-cyan-500/20 text-[#e6edf3] rounded-br-md" : msg.bubbleKind === "plan.proposed" ? "bg-amber-500/10 border border-amber-500/20 text-[#e6edf3] rounded-bl-md" : msg.bubbleKind === "plan.error" || msg.bubbleKind === "error" ? "bg-red-500/10 border border-red-500/20 text-red-300 rounded-bl-md" : "bg-green-500/10 border border-green-500/20 text-[#e6edf3] rounded-bl-md"}`}>
                 {msg.content}
               </div>
               <div className="mt-1 text-[10px] text-[#8b949e]">
@@ -391,9 +354,9 @@ export function ChatPanel({ onPlanProposed, mode }: ChatPanelProps) {
             </div>
           </div>
         ))}
+        <div ref={latestMessageRef} aria-hidden="true" />
       </div>
 
-      {/* LLM provider status — informational only */}
       {mode === "power" && llmStatus !== null && !llmStatus.configured && (
         <div className="mx-3 mt-2 px-3 py-2 rounded-lg border border-amber-500/30 bg-amber-500/10 text-xs text-amber-300 shrink-0">
           <span className="font-semibold">LLM not configured</span> — using scripted planner. Set{" "}
@@ -412,25 +375,10 @@ export function ChatPanel({ onPlanProposed, mode }: ChatPanelProps) {
         </div>
       )}
 
-      {/* Input */}
       <div className="p-3 border-t border-[#21262d] bg-[#010409]/80 backdrop-blur shrink-0">
         <div className="flex gap-2">
-          <input
-            ref={inputRef}
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Describe the outcome you want…"
-            disabled={streaming}
-            className="flex-1 bg-[#161b22] border border-[#30363d] rounded-lg px-3 py-2 text-sm text-[#e6edf3] placeholder-[#8b949e] focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500 disabled:opacity-50 transition-colors"
-            autoFocus
-          />
-          <button
-            onClick={send}
-            disabled={!input.trim() || streaming}
-            className="px-4 py-2 bg-cyan-500 text-[#010409] font-medium rounded-lg hover:bg-cyan-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
+          <input ref={inputRef} type="text" value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={handleKeyDown} placeholder="Describe the outcome you want…" disabled={streaming} className="flex-1 bg-[#161b22] border border-[#30363d] rounded-lg px-3 py-2 text-sm text-[#e6edf3] placeholder-[#8b949e] focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500 disabled:opacity-50 transition-colors" autoFocus />
+          <button onClick={send} disabled={!input.trim() || streaming} className="px-4 py-2 bg-cyan-500 text-[#010409] font-medium rounded-lg hover:bg-cyan-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
             Send
           </button>
         </div>
