@@ -14,12 +14,16 @@ export type InterruptedMissionRecovery = {
   prompt: string;
 };
 
-function boundedRecoveryContext(value?: string | null): string | null {
+function normalizedRecoveryContext(value?: string | null): string | null {
   const normalized = value?.replace(/\s+/g, " ").trim();
-  if (!normalized) return null;
-  return normalized.length <= FAILURE_FOLLOWUP_CONTEXT_LIMIT
-    ? normalized
-    : `${normalized.slice(0, FAILURE_FOLLOWUP_CONTEXT_LIMIT - 3)}…`;
+  return normalized || null;
+}
+
+function boundedRecoveryContext(value: string | null): string | null {
+  if (!value) return null;
+  return value.length <= FAILURE_FOLLOWUP_CONTEXT_LIMIT
+    ? value
+    : `${value.slice(0, FAILURE_FOLLOWUP_CONTEXT_LIMIT - 1)}…`;
 }
 
 export function failedMissionFollowupPrompt(input: {
@@ -27,12 +31,15 @@ export function failedMissionFollowupPrompt(input: {
   failureReason?: string | null;
   lastActivity?: string | null;
 }): string {
-  const failureReason = boundedRecoveryContext(input.failureReason);
-  const lastActivity = boundedRecoveryContext(input.lastActivity);
-  const distinctLastActivity = lastActivity && lastActivity !== failureReason ? lastActivity : null;
+  const normalizedFailureReason = normalizedRecoveryContext(input.failureReason);
+  const normalizedLastActivity = normalizedRecoveryContext(input.lastActivity);
+  const failureReason = boundedRecoveryContext(normalizedFailureReason);
+  const lastActivity = normalizedLastActivity && normalizedLastActivity !== normalizedFailureReason
+    ? boundedRecoveryContext(normalizedLastActivity)
+    : null;
   const context: string[] = [];
   if (failureReason) context.push(`What happened: ${failureReason}`);
-  if (distinctLastActivity) context.push(`Last useful activity: ${distinctLastActivity}`);
+  if (lastActivity) context.push(`Last useful activity: ${lastActivity}`);
 
   return context.length > 0
     ? `Fix this failed work: ${input.goal}\n\n${context.join("\n")}`
