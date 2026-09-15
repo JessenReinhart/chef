@@ -95,13 +95,23 @@ function relativeLocationStaysWithinProject(location: string): boolean {
   return true;
 }
 
+/**
+ * Win32 may surface a local drive path through its extended-length namespace.
+ * Strip only that drive prefix for Simple Mode. Extended UNC paths deliberately
+ * remain untouched so network shares do not inherit the local reveal action.
+ */
+function normalizeWindowsExtendedDrivePath(location: string): string {
+  return /^\\\\\?\\[A-Za-z]:[\\/]/.test(location) ? location.slice(4) : location;
+}
+
 function isLocalLocation(location: string): boolean {
-  if (hasFileScheme(location)) return isLocalFileUri(location);
-  if (/^(?:\/\/|\\\\)/.test(location)) return false;
-  if (/^[A-Za-z]:[\\/]/.test(location)) return true;
-  if (/^[A-Za-z][A-Za-z0-9+.-]*:/.test(location)) return false;
-  if (/^[\\/]/.test(location)) return true;
-  return relativeLocationStaysWithinProject(location);
+  const normalized = normalizeWindowsExtendedDrivePath(location);
+  if (hasFileScheme(normalized)) return isLocalFileUri(normalized);
+  if (/^(?:\/\/|\\\\)/.test(normalized)) return false;
+  if (/^[A-Za-z]:[\\/]/.test(normalized)) return true;
+  if (/^[A-Za-z][A-Za-z0-9+.-]*:/.test(normalized)) return false;
+  if (/^[\\/]/.test(normalized)) return true;
+  return relativeLocationStaysWithinProject(normalized);
 }
 
 export function canRevealArtifact(artifact: ArtifactHandoffInput): boolean {
@@ -245,9 +255,12 @@ function verificationText(metadata: Record<string, unknown>): string | null {
  */
 export function artifactHandoff(artifact: ArtifactHandoffInput): ArtifactHandoff {
   const explicitLocation = firstText(artifact.metadata, ["resultLocation", "path", "location"]);
-  const normalizedExplicitLocation = explicitLocation && hasFileScheme(explicitLocation)
+  const parsedExplicitLocation = explicitLocation && hasFileScheme(explicitLocation)
     ? fileUriLocation(explicitLocation) ?? explicitLocation
     : explicitLocation;
+  const normalizedExplicitLocation = parsedExplicitLocation
+    ? normalizeWindowsExtendedDrivePath(parsedExplicitLocation)
+    : parsedExplicitLocation;
   const fileLocation = fileUriLocation(artifact.uri);
   const durableLocation = normalizedExplicitLocation ?? fileLocation;
   const runCommand = copySafeRunCommand(artifact.metadata);
