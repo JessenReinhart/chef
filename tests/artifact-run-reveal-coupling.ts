@@ -3,6 +3,7 @@ import { artifactHandoff } from "../web/src/artifactHandoff.ts";
 
 for (const [uri, resultLocation] of [
   ["https://example.com/result", undefined],
+  ["file://fileserver/share/todo-app", undefined],
   ["sideband://result", "https://example.com/result"],
   ["sideband://result", "//fileserver/share/todo-app"],
   ["sideband://result", "\\\\fileserver\\share\\todo-app"],
@@ -13,6 +14,7 @@ for (const [uri, resultLocation] of [
 
 for (const [uri, resultLocation] of [
   ["file:///tmp/chef-project/todo-app", undefined],
+  ["file://localhost/tmp/chef-project/todo-app", undefined],
   ["file:///C:/Work/chef/todo-app", undefined],
   ["sideband://result", "dist/todo-app"],
   ["sideband://result", "C:\\Work\\chef\\todo-app"],
