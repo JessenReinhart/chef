@@ -92,7 +92,7 @@ function relativeLocationStaysWithinProject(location: string): boolean {
     }
     depth += 1;
   }
-  return true;
+  return depth > 0;
 }
 
 /**
@@ -121,50 +121,13 @@ export function canRevealArtifact(artifact: ArtifactHandoffInput): boolean {
 }
 
 const NON_SUCCESS_VERIFICATION_VALUES = new Set([
-  "aborted",
-  "blocked",
-  "canceled",
-  "cancelled",
-  "false",
-  "fail",
-  "failed",
-  "failure",
-  "error",
-  "errored",
-  "no",
-  "not checked",
-  "not run",
-  "not verified",
-  "pending",
-  "skipped",
-  "timed out",
-  "timed-out",
-  "timeout",
-  "unchecked",
-  "unknown",
-  "unverified",
+  "aborted", "blocked", "canceled", "cancelled", "false", "fail", "failed", "failure", "error", "errored", "no",
+  "not checked", "not run", "not verified", "pending", "skipped", "timed out", "timed-out", "timeout", "unchecked", "unknown", "unverified",
 ]);
 
 const NON_SUCCESS_DETAIL_SEPARATORS = [":", " - ", " — ", " – ", ";", " (", "\n", "\r\n", "\t", ".", ",", ")", "]", "}"];
 const NON_SUCCESS_DETAIL_WORDS = new Set([
-  "after",
-  "because",
-  "check",
-  "checks",
-  "checking",
-  "due",
-  "during",
-  "on",
-  "test",
-  "tests",
-  "testing",
-  "to",
-  "verification",
-  "verify",
-  "verified",
-  "verifying",
-  "while",
-  "with",
+  "after", "because", "check", "checks", "checking", "due", "during", "on", "test", "tests", "testing", "to", "verification", "verify", "verified", "verifying", "while", "with",
 ]);
 
 function negativeStatusHasFailureDetail(normalized: string, status: string): boolean {
@@ -201,10 +164,7 @@ function positiveVerificationText(value: string): string | null {
       if (index < 0) break;
       const statusIndex = index + 1;
       const candidate = normalized.slice(statusIndex);
-      if (
-        !precedingPhraseIsZeroCount(normalized, index)
-        && (candidate.trim() === status || negativeStatusHasFailureDetail(candidate, status))
-      ) return null;
+      if (!precedingPhraseIsZeroCount(normalized, index) && (candidate.trim() === status || negativeStatusHasFailureDetail(candidate, status))) return null;
       searchFrom = statusIndex + status.length;
     }
   }
