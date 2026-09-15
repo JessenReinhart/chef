@@ -86,6 +86,23 @@ assert.doesNotMatch(sparse, /Location:/, "Chef must not invent a local result lo
 assert.doesNotMatch(sparse, /Run:/, "Chef must not invent a run command");
 assert.doesNotMatch(sparse, /Verification:/, "Chef must not invent verification evidence");
 
+const runWithoutLocation = completionHandoffReport("Plan completed.", [artifact({
+  uri: "sideband://session/result",
+  metadata: {
+    summary: "Built the todo app",
+    run: "npm run dev",
+    verification: "Tests passed",
+  },
+})]);
+assert.match(runWithoutLocation, /Result: Built the todo app/);
+assert.doesNotMatch(runWithoutLocation, /Location:/);
+assert.doesNotMatch(
+  runWithoutLocation,
+  /Run:/,
+  "Chef must not advertise a run instruction when the same result has no revealable location",
+);
+assert.match(runWithoutLocation, /Verification: Tests passed/);
+
 const preferred = completionHandoffReport("Plan completed.", [
   artifact({ id: "newer-note", type: "note", name: "newer-note", uri: "sideband://note", taskId: "task-build" }),
   artifact({

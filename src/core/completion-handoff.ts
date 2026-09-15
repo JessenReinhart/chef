@@ -40,6 +40,7 @@ function artifactLocation(artifact: Artifact): string | undefined {
 }
 
 function artifactRunCommand(artifact: Artifact): string | undefined {
+  if (!artifactLocation(artifact)) return undefined;
   return singleLine(handoffView(artifact).runCommand ?? undefined);
 }
 
@@ -62,7 +63,7 @@ function handoffScore(artifact: Artifact): number {
  * Location revealability and verification truthfulness intentionally reuse Simple
  * Mode's existing handoff contract so the terminal note cannot promise actions or
  * evidence that the ordinary result card rejects. Run instructions remain bounded
- * to copy-safe single lines.
+ * to copy-safe single lines and only accompany results the user can locate/reveal.
  */
 export function completionHandoffReport(report: string, artifacts: readonly Artifact[]): string {
   const primary = artifacts
