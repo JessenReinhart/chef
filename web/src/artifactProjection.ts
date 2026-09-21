@@ -69,20 +69,24 @@ function keepActionableHandoffsVisible<T extends MissionLinkedArtifact>(
   const locatedHandoff = [...missionArtifacts].reverse().find(hasPublishedResultLocation);
   if (locatedHandoff && !requiredArtifacts.includes(locatedHandoff)) requiredArtifacts.push(locatedHandoff);
 
-  const next = [...visibleArtifacts];
+  // Start from the recent projection, then reserve one slot for each distinct
+  // actionable handoff. This makes the retention contract explicit and avoids
+  // relying on replacement order when multiple required artifacts are outside
+  // the visible window.
+  const next: T[] = [];
+  for (const artifact of visibleArtifacts) {
+    if (!next.includes(artifact)) next.push(artifact);
+  }
   for (const requiredArtifact of requiredArtifacts) {
     if (next.includes(requiredArtifact)) continue;
+    const replaceIndex = next.findIndex((artifact) => !requiredArtifacts.includes(artifact));
     if (next.length < limit) {
       next.push(requiredArtifact);
-      continue;
+    } else if (replaceIndex >= 0) {
+      next.splice(replaceIndex, 1, requiredArtifact);
     }
-
-    const replaceIndex = next.findLastIndex((artifact) => !requiredArtifacts.includes(artifact));
-    if (replaceIndex < 0) continue;
-    next.splice(replaceIndex, 1);
-    next.push(requiredArtifact);
   }
-  return next;
+  return next.slice(0, limit);
 }
 
 export function artifactsForMission<T extends MissionLinkedArtifact>(
@@ -258,12 +262,6 @@ export function previewText(artifact: LivingArtifact): string | null {
 export function metadataRows(artifact: LivingArtifact): Array<[string, string]> {
   return Object.entries(artifact.metadata)
     .filter(([key]) => !["preview", "summary", "description", "content"].includes(key))
-    .flatMap(([key, value]) => {
-      if (value === null || value === undefined) return [];
-      if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-        return [[key, String(value)] as [string, string]];
-      }
-      return [];
-    })
-    .slice(0, MAX_METADATA_ROWS);
+    .slice(0, MAX_METADATA_ROWS)
+    .map(([key, value]) => [key, typeof value === "string" ? value : JSON.stringify(value)]);
 }
