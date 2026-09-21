@@ -126,7 +126,7 @@ const overflowRunnableResult: LivingArtifact = {
   ...locatedMissionResult,
   id: "overflow-run",
   uri: "sideband://run",
-  metadata: { missionId: "mission-current", run: "npm run dev" },
+  metadata: { missionId: "mission-current", resultLocation: "dist/run-app", run: "npm run dev" },
 };
 const overflowRecentResults: LivingArtifact[] = Array.from({ length: 4 }, (_, index) => ({
   ...locatedMissionResult,
