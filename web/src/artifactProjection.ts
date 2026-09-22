@@ -66,7 +66,13 @@ function keepActionableHandoffsVisible<T extends MissionLinkedArtifact>(
   const runnableHandoff = [...missionArtifacts].reverse().find(hasRunInstruction);
   if (runnableHandoff) requiredArtifacts.push(runnableHandoff);
 
-  const locatedHandoff = [...missionArtifacts].reverse().find(hasPublishedResultLocation);
+  // Prefer a distinct revealable artifact when one exists. A single artifact
+  // can satisfy both contracts, but when an older result-location artifact is
+  // available we must retain it separately so the user can still discover the
+  // published location after newer intermediate outputs fill the visible limit.
+  const locatedHandoff = [...missionArtifacts].reverse().find((artifact) => (
+    hasPublishedResultLocation(artifact) && artifact !== runnableHandoff
+  )) ?? [...missionArtifacts].reverse().find(hasPublishedResultLocation);
   if (locatedHandoff && !requiredArtifacts.includes(locatedHandoff)) requiredArtifacts.push(locatedHandoff);
 
   // Start from the recent projection, then reserve one slot for each distinct
