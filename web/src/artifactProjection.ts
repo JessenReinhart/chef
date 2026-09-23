@@ -56,6 +56,13 @@ function hasPublishedResultLocation(artifact: MissionLinkedArtifact): boolean {
   return canRevealArtifact({ uri, metadata: artifact.metadata });
 }
 
+function hasExplicitPublishedResultLocation(artifact: MissionLinkedArtifact): boolean {
+  return ["resultLocation", "path", "location"].some((key) => {
+    const value = artifact.metadata[key];
+    return typeof value === "string" && value.trim().length > 0;
+  });
+}
+
 function keepActionableHandoffsVisible<T extends MissionLinkedArtifact>(
   missionArtifacts: T[],
   visibleArtifacts: T[],
@@ -67,19 +74,15 @@ function keepActionableHandoffsVisible<T extends MissionLinkedArtifact>(
   const runnableHandoff = [...missionArtifacts].reverse().find(hasRunInstruction);
   if (runnableHandoff) requiredArtifacts.push(runnableHandoff);
 
-  // Prefer a distinct revealable artifact when one exists. A single artifact
-  // can satisfy both contracts, but when an older result-location artifact is
-  // available we must retain it separately so the user can still discover the
-  // published location after newer intermediate outputs fill the visible limit.
+  // Reserve a second slot only for an explicit published result location. A
+  // plain file URI is enough to make an artifact revealable for handoff
+  // messaging, but generated leaf files must not displace newer outputs from
+  // the bounded recent projection.
   const locatedHandoff = [...missionArtifacts].reverse().find((artifact) => (
-    hasPublishedResultLocation(artifact) && artifact !== runnableHandoff
-  )) ?? [...missionArtifacts].reverse().find(hasPublishedResultLocation);
+    hasExplicitPublishedResultLocation(artifact) && artifact !== runnableHandoff
+  ));
   if (locatedHandoff && !requiredArtifacts.includes(locatedHandoff)) requiredArtifacts.push(locatedHandoff);
 
-  // Start from the recent projection, then reserve one slot for each distinct
-  // actionable handoff. This makes the retention contract explicit and avoids
-  // relying on replacement order when multiple required artifacts are outside
-  // the visible window.
   const next: T[] = [];
   for (const artifact of visibleArtifacts) {
     if (!next.includes(artifact)) next.push(artifact);
