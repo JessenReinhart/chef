@@ -89,11 +89,12 @@ function keepActionableHandoffsVisible<T extends MissionLinkedArtifact>(
   }
   for (const requiredArtifact of requiredArtifacts) {
     if (next.includes(requiredArtifact)) continue;
-    const replaceIndex = next.findIndex((artifact) => !requiredArtifacts.includes(artifact));
+    const replaceIndex = next.findLastIndex((artifact) => !requiredArtifacts.includes(artifact));
     if (next.length < limit) {
       next.push(requiredArtifact);
     } else if (replaceIndex >= 0) {
-      next.splice(replaceIndex, 1, requiredArtifact);
+      next.splice(replaceIndex, 1);
+      next.push(requiredArtifact);
     }
   }
   return next.slice(0, limit);
