@@ -56,13 +56,6 @@ function hasPublishedResultLocation(artifact: MissionLinkedArtifact): boolean {
   return canRevealArtifact({ uri, metadata: artifact.metadata });
 }
 
-function hasExplicitPublishedResultLocation(artifact: MissionLinkedArtifact): boolean {
-  return ["resultLocation", "path", "location"].some((key) => {
-    const value = artifact.metadata[key];
-    return typeof value === "string" && value.trim().length > 0;
-  });
-}
-
 function keepActionableHandoffsVisible<T extends MissionLinkedArtifact>(
   missionArtifacts: T[],
   visibleArtifacts: T[],
@@ -74,30 +67,23 @@ function keepActionableHandoffsVisible<T extends MissionLinkedArtifact>(
   const runnableHandoff = [...missionArtifacts].reverse().find(hasRunInstruction);
   if (runnableHandoff) requiredArtifacts.push(runnableHandoff);
 
-  // Reserve a second slot only for an explicit published result location. A
-  // plain file URI is enough to make an artifact revealable for handoff
-  // messaging, but generated leaf files must not displace newer outputs from
-  // the bounded recent projection.
-  const locatedHandoff = [...missionArtifacts].reverse().find((artifact) => (
-    hasExplicitPublishedResultLocation(artifact) && artifact !== runnableHandoff
-  ));
+  const locatedHandoff = [...missionArtifacts].reverse().find(hasPublishedResultLocation);
   if (locatedHandoff && !requiredArtifacts.includes(locatedHandoff)) requiredArtifacts.push(locatedHandoff);
 
-  const next: T[] = [];
-  for (const artifact of visibleArtifacts) {
-    if (!next.includes(artifact)) next.push(artifact);
-  }
+  const next = [...visibleArtifacts];
   for (const requiredArtifact of requiredArtifacts) {
     if (next.includes(requiredArtifact)) continue;
-    const replaceIndex = next.findLastIndex((artifact) => !requiredArtifacts.includes(artifact));
     if (next.length < limit) {
       next.push(requiredArtifact);
-    } else if (replaceIndex >= 0) {
-      next.splice(replaceIndex, 1);
-      next.push(requiredArtifact);
+      continue;
     }
+
+    const replaceIndex = next.findLastIndex((artifact) => !requiredArtifacts.includes(artifact));
+    if (replaceIndex < 0) continue;
+    next.splice(replaceIndex, 1);
+    next.push(requiredArtifact);
   }
-  return next.slice(0, limit);
+  return next;
 }
 
 export function artifactsForMission<T extends MissionLinkedArtifact>(
@@ -273,6 +259,12 @@ export function previewText(artifact: LivingArtifact): string | null {
 export function metadataRows(artifact: LivingArtifact): Array<[string, string]> {
   return Object.entries(artifact.metadata)
     .filter(([key]) => !["preview", "summary", "description", "content"].includes(key))
-    .slice(0, MAX_METADATA_ROWS)
-    .map(([key, value]) => [key, typeof value === "string" ? value : JSON.stringify(value)]);
+    .flatMap(([key, value]) => {
+      if (value === null || value === undefined) return [];
+      if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+        return [[key, String(value)] as [string, string]];
+      }
+      return [];
+    })
+    .slice(0, MAX_METADATA_ROWS);
 }
