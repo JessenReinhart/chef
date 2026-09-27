@@ -67,7 +67,9 @@ function keepActionableHandoffsVisible<T extends MissionLinkedArtifact>(
   const runnableHandoff = [...missionArtifacts].reverse().find(hasRunInstruction);
   if (runnableHandoff) requiredArtifacts.push(runnableHandoff);
 
-  const locatedHandoff = [...missionArtifacts].reverse().find(hasPublishedResultLocation);
+  const locatedHandoff = [...missionArtifacts].reverse().find((artifact) =>
+    hasPublishedResultLocation(artifact) && artifact !== runnableHandoff,
+  );
   if (locatedHandoff && !requiredArtifacts.includes(locatedHandoff)) requiredArtifacts.push(locatedHandoff);
 
   const next = [...visibleArtifacts];
