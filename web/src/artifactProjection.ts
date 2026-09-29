@@ -47,7 +47,8 @@ export function recentArtifacts<T>(artifacts: T[], limit: number): T[] {
 }
 
 function hasRunInstruction(artifact: MissionLinkedArtifact): boolean {
-  return artifactHandoff({ uri: "", metadata: artifact.metadata }).runCommand !== null;
+  const uri = typeof artifact.uri === "string" ? artifact.uri : "";
+  return artifactHandoff({ uri, metadata: artifact.metadata }).runCommand !== null;
 }
 
 function hasPublishedResultLocation(artifact: MissionLinkedArtifact): boolean {
@@ -66,7 +67,9 @@ function keepActionableHandoffsVisible<T extends MissionLinkedArtifact>(
   const runnableHandoff = [...missionArtifacts].reverse().find(hasRunInstruction);
   if (runnableHandoff) requiredArtifacts.push(runnableHandoff);
 
-  const locatedHandoff = [...missionArtifacts].reverse().find(hasPublishedResultLocation);
+  const locatedHandoff = [...missionArtifacts].reverse().find((artifact) =>
+    hasPublishedResultLocation(artifact) && artifact !== runnableHandoff,
+  );
   if (locatedHandoff && !requiredArtifacts.includes(locatedHandoff)) requiredArtifacts.push(locatedHandoff);
 
   const next = [...visibleArtifacts];

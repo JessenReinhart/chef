@@ -223,7 +223,7 @@ export function artifactHandoff(artifact: ArtifactHandoffInput): ArtifactHandoff
     : parsedExplicitLocation;
   const fileLocation = fileUriLocation(artifact.uri);
   const durableLocation = normalizedExplicitLocation ?? fileLocation;
-  const runCommand = copySafeRunCommand(artifact.metadata);
+  const runCommand = canRevealArtifact(artifact) ? copySafeRunCommand(artifact.metadata) : null;
 
   return {
     summary: summaryText(artifact, durableLocation),

@@ -151,12 +151,12 @@ await Promise.all([firstReveal, duplicateReveal]);
 await singleFlightReveal("golden-todo");
 assert.equal(revealCalls, 2, "after the prior reveal settles, a later user retry must be allowed to open the result again");
 
-assert.deepEqual(artifactHandoff(artifact("legacy-result", 17, "task-legacy", "chef:legacy", { description: "Generated report", runCommand: "npm start", verification: "runtime smoke" })), {
+assert.deepEqual(artifactHandoff(artifact("legacy-result", 17, "task-legacy", "sideband://legacy", { resultLocation: "dist/generated-report", description: "Generated report", runCommand: "npm start", verification: "runtime smoke" })), {
   summary: "Generated report",
-  location: null,
+  location: "dist/generated-report",
   runCommand: "npm start",
   verification: "runtime smoke",
-}, "result handoff should remain useful for older/custom artifact metadata aliases");
+}, "result handoff should remain useful for older/custom artifact metadata aliases when the result is locally revealable");
 
 let requestedLiveResultStream = "";
 let liveResultRefreshCount = 0;
