@@ -107,10 +107,32 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    const startPolling = () => {
+      if (pollingRef.current !== null) return;
+      pollingRef.current = window.setInterval(() => void refresh(), 1500);
+    };
+    const stopPolling = () => {
+      if (pollingRef.current !== null) {
+        window.clearInterval(pollingRef.current);
+        pollingRef.current = null;
+      }
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void refresh();
+        startPolling();
+      } else {
+        stopPolling();
+      }
+    };
+
     void refresh();
-    pollingRef.current = window.setInterval(() => void refresh(), 1500);
+    if (document.visibilityState === "visible") startPolling();
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
     return () => {
-      if (pollingRef.current) window.clearInterval(pollingRef.current);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      stopPolling();
     };
   }, [refresh]);
   // Poll sessions for terminal canvas nodes so each node can resolve its
@@ -126,10 +148,32 @@ export function App() {
     }
   }, []);
   useEffect(() => {
+    const startSessionsPolling = () => {
+      if (sessionsPollRef.current !== null) return;
+      sessionsPollRef.current = window.setInterval(() => void refreshSessions(), 2000);
+    };
+    const stopSessionsPolling = () => {
+      if (sessionsPollRef.current !== null) {
+        window.clearInterval(sessionsPollRef.current);
+        sessionsPollRef.current = null;
+      }
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void refreshSessions();
+        startSessionsPolling();
+      } else {
+        stopSessionsPolling();
+      }
+    };
+
     void refreshSessions();
-    sessionsPollRef.current = window.setInterval(() => void refreshSessions(), 2000);
+    if (document.visibilityState === "visible") startSessionsPolling();
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
     return () => {
-      if (sessionsPollRef.current) window.clearInterval(sessionsPollRef.current);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      stopSessionsPolling();
     };
   }, [refreshSessions]);
 
