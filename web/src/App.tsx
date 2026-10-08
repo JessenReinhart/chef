@@ -10,6 +10,7 @@ import { NODE_LIBRARY, registerHarnesses, subscribeLibrary } from "./nodeCatalog
 import { TerminalView } from "./TerminalView";
 import { BrowserSurface } from "./BrowserSurface";
 import { persistViewModePreference, readViewModePreference } from "./viewModePreference";
+import { startVisibilityAwarePolling } from "./visibilityAwarePolling";
 import type {
   UiTask,
   HarnessInfo,
@@ -107,11 +108,10 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    void refresh();
-    pollingRef.current = window.setInterval(() => void refresh(), 1500);
-    return () => {
-      if (pollingRef.current) window.clearInterval(pollingRef.current);
-    };
+    const stop = startVisibilityAwarePolling(refresh, 1500, (timer) => {
+      pollingRef.current = timer;
+    });
+    return stop;
   }, [refresh]);
   // Poll sessions for terminal canvas nodes so each node can resolve its
   // task id to an active session id. TerminalView consumes session.data SSE
@@ -126,11 +126,10 @@ export function App() {
     }
   }, []);
   useEffect(() => {
-    void refreshSessions();
-    sessionsPollRef.current = window.setInterval(() => void refreshSessions(), 2000);
-    return () => {
-      if (sessionsPollRef.current) window.clearInterval(sessionsPollRef.current);
-    };
+    const stop = startVisibilityAwarePolling(refreshSessions, 2000, (timer) => {
+      sessionsPollRef.current = timer;
+    });
+    return stop;
   }, [refreshSessions]);
 
   // SSE /api/events — canvas.patched events trigger an immediate refresh
