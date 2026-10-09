@@ -33,6 +33,7 @@ import {
   capabilityRegistry,
 } from "./capabilities.ts";
 import type { HarnessRegistry } from "../runtime/scheduler.ts";
+import { appendTerminalOutput, formatTerminalOutput } from "./terminal-output.ts";
 
 export interface ToolCall {
   tool: string;
@@ -162,7 +163,7 @@ export async function executeTerminal(
     rows: 40,
   });
 
-  let stdout = "";
+  let stdout = { text: "", truncated: false };
   let stderr = "";
   let exitCode: number | undefined;
   let timedOut = false;
@@ -174,7 +175,7 @@ export async function executeTerminal(
   try {
     for await (const event of harness.events(session.id)) {
       if (event.type === "data") {
-        stdout += event.data;
+        stdout = appendTerminalOutput(stdout, event.data);
       } else if (event.type === "exit" || event.type === "crash") {
         exitCode = event.exitCode;
         break;
@@ -186,7 +187,7 @@ export async function executeTerminal(
 
   if (exitCode === undefined) exitCode = timedOut ? 124 : 1;
   stderr = ""; // PTY merges stderr; harness contract delivers only `data`.
-  return { stdout, stderr, exitCode, timedOut };
+  return { stdout: formatTerminalOutput(stdout), stderr, exitCode, timedOut };
 }
 
 function selectHarness(registry: HarnessRegistry): HarnessLike {

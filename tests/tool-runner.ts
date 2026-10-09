@@ -15,6 +15,7 @@ import { ToolRunner, PermissionDeniedError, type ToolContext } from "../src/runt
 import { GenericTerminalHarness } from "../src/harness/generic.ts";
 import type { HarnessLike } from "../src/runtime/scheduler.ts";
 import { Repository } from "../src/persistence/database.ts";
+import { MAX_TERMINAL_OUTPUT_CHARS } from "../src/runtime/terminal-output.ts";
 
 const dir = mkdtempSync(join(tmpdir(), "chef-tool-runner-"));
 const projectDir = join(dir, "project");
@@ -104,6 +105,38 @@ await test("bash tool runs a real command through PTY", async () => {
   const stdout = (result.output as { stdout: string }).stdout;
   assert.match(stdout, /v\d+\.\d+\.\d+/);
   await harness.close();
+});
+
+await test("noisy terminal output retains a bounded recent window", async () => {
+  const ctx = makeContext();
+  const noisyHarness = {
+    id: "generic",
+    spawn: async () => ({ id: "noisy-session" }),
+    async *events(_sessionId: string) {
+      yield { type: "data", data: "initial-output\n" };
+      yield { type: "data", data: "x".repeat(MAX_TERMINAL_OUTPUT_CHARS + 128) };
+      yield { type: "data", data: "\nlatest-output-marker" };
+      yield { type: "exit", exitCode: 0 };
+    },
+    terminate: async () => {},
+  } as unknown as HarnessLike;
+  ctx.harnessRegistry = {
+    get: (id: string) => (id === "generic" ? noisyHarness : undefined),
+    set: () => {},
+    values: () => [noisyHarness],
+  };
+
+  const runnerNoisy = new ToolRunner(ctx);
+  const result = await runnerNoisy.execute({
+    tool: "bash",
+    input: { command: process.execPath, cwd: projectDir },
+  });
+  assert.equal(result.ok, true);
+  const stdout = (result.output as { stdout: string }).stdout;
+  assert.ok(stdout.length <= MAX_TERMINAL_OUTPUT_CHARS);
+  assert.ok(stdout.startsWith("[Earlier terminal output omitted;"));
+  assert.ok(stdout.endsWith("latest-output-marker"));
+  assert.ok(!stdout.includes("initial-output"));
 });
 
 await test("bash tool never substitutes a specialized CLI for generic", async () => {

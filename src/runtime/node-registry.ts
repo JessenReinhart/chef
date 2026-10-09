@@ -26,6 +26,7 @@ import type {
   RuntimeEvent,
 } from "../core/nodes.ts";
 import type { EntityRef } from "../core/types.ts";
+import { appendTerminalOutput, formatTerminalOutput } from "./terminal-output.ts";
 
 // ---------------------------------------------------------------------------
 // Small shared helpers (module-local, not exported API)
@@ -131,7 +132,7 @@ async function runCommand(
     workspaceId: ctx.workspaceId,
   });
 
-  let stdout = "";
+  let stdout = { text: "", truncated: false };
   let stderr = "";
   let exitCode: number | undefined;
   let timedOut = false;
@@ -144,7 +145,7 @@ async function runCommand(
   try {
     for await (const event of ctx.harness.events(session.id)) {
       if (event.type === "data") {
-        stdout += event.data;
+        stdout = appendTerminalOutput(stdout, event.data);
       } else if (event.type === "exit" || event.type === "crash") {
         exitCode = event.exitCode;
         break;
@@ -158,7 +159,7 @@ async function runCommand(
     exitCode = timedOut ? 124 : 1;
   }
 
-  return { stdout, stderr, exitCode };
+  return { stdout: formatTerminalOutput(stdout), stderr, exitCode };
 }
 
 // ---------------------------------------------------------------------------
